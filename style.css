@@ -1,0 +1,87 @@
+html,
+body {
+  height: 100%;
+  max-width: 100%;
+}
+.form-control,
+.form-control:focus {
+  color: white;
+  background-color: black;
+  border: 1px solid white;
+  box-shadow: none;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  overflow: auto;
+}
+.loadingwrapper {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 300px;
+  height: 200px;
+}
+.loaderwrapper {
+  width: 150px;
+  height: 150px;
+  margin: 0 auto;
+}
+.loader {
+  width: calc(100% - 0px);
+  height: calc(100% - 0px);
+  border: 8px solid #fff;
+  border-top: 8px solid #ccc;
+  border-radius: 50%;
+  animation: rotate 5s linear infinite;
+}
+.table {
+  table-layout: fixed;
+  width: 100%;
+  word-break: break-all;
+}
+.table tr {
+  max-width: 100%;
+  vertical-align: middle;
+  max-height: 50px;
+}
+.table td {
+  vertical-align: middle;
+  word-break: break-all;
+}
+.tablewrapper {
+  max-height: 100%;
+  width: 100%;
+}
+.loadingtext {
+  color: white;
+  font-size: 18px;
+  margin-bottom: 10px;
+  text-transform: capitalize;
+}
+.filename {
+  color: white;
+  font-size: 14px;
+  top:10%;
+  position:absolute;
+}
+.peernum {
+  color: white;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+.progress {
+  margin-top: 20px;
+}
+.progress-bar {
+  background-color: white;
+}
+@keyframes rotate {
+  100% {
+    transform: rotate(360deg);
+  }
+}

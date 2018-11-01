@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+    <title>RapidBay</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootswatch/4.1.3/cyborg/bootstrap.min.css" rel="stylesheet">
+    <link href="/style.css" rel="stylesheet">
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <script src="//unpkg.com/navigo@6"></script>
+</head>
+
+<body class="text-center">
+
+    <form>
+        <div class="input-group mb-3">
+            <input type="text" class="form-control">
+            <div class="input-group-append">
+                <button class="btn btn-light" type="submit">Search</button>
+            </div>
+        </div>
+    </form>
+    <a class="filename"></a>
+    <div class="loadingwrapper">
+        <div class="loadingtext"></div>
+        <div class="peernum"></div>
+        <div class="loaderwrapper">
+            <div class="loader spinner">
+                <div class="loader">
+                    <div class="loader">
+                        <div class="loader">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="progress">
+            <div class="progress-bar" role="progressbar"></div>
+        </div>
+    </div>
+
+    <a class="btn btn-light videolink">Open video</a>
+
+    <div class="tablewrapper">
+        <table class="table table-hover">
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+    <script src="/app.js"></script>
+</body>
+
+</html>

@@ -16,18 +16,22 @@ from flask import (
 from flask_basicauth import BasicAuth
 from torrentclient import TorrentClient
 
+PIRATEBAY_HOST = "piratebay.live"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "123456"
+
 tc = TorrentClient()
 app = Flask(__name__)
 
 basic_auth = BasicAuth(app)
 
-app.config["BASIC_AUTH_USERNAME"] = os.environ.get("USERNAME", "admin")
-app.config["BASIC_AUTH_PASSWORD"] = os.environ.get("PASSWORD", "123456")
+app.config["BASIC_AUTH_USERNAME"] = os.environ.get("USERNAME", DEFAULT_USERNAME)
+app.config["BASIC_AUTH_PASSWORD"] = os.environ.get("PASSWORD", DEFAULT_PASSWORD)
 
 
 def search_piratebay(searchterm):
     magnet_links = []
-    data = requests.get(f"https://piratebay.live/search/{searchterm}/1/7/0").text
+    data = requests.get(f"https://{PIRATEBAY_HOST}/search/{searchterm}/1/7/0").text
     soup = BeautifulSoup(data, "html.parser")
     trs = soup.find(id="searchResult").find_all("tr")
     for tr in trs:

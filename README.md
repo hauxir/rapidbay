@@ -1,5 +1,5 @@
 # RapidBay
-Rapid bay is a self hosted video service/torrent client that makes casting videos from torrents as easy as:
+Rapid bay is a self hosted video service/torrent client that makes playing videos from torrents as easy as:
 1. Opening the webapp on a phone/laptop/tablet.
 2. Searching for content.
 3. Selecting desired video file.

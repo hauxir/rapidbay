@@ -27,6 +27,7 @@ SUPPORTED_EXTENSIONS = ["mp4", "mkv"]
 INCOMPLETE_POSTFIX = ".incomplete.mp4"
 LOG_POSTFIX = ".log"
 MAX_TORRENT_AGE_HOURS = 10
+MAX_OUTPUT_FILE_AGE = 10
 
 
 def threaded(fn):
@@ -244,7 +245,7 @@ class TorrentClient:
             diff = datetime.datetime.now() - modified
             days, seconds = diff.days, diff.seconds
             hours = days * 24 + seconds
-            if hours > 10:
+            if hours > MAX_OUTPUT_FILE_AGE:
                 shutil.rmtree(os.path.join(OUTPUT_DIR, subdir))
 
     def loop(self):

@@ -237,10 +237,8 @@ class TorrentClient:
             return
         for subdir in dirs:
             modified = datetime.datetime.strptime(
-                time.ctime(
-                    os.path.getmtime(os.path.join(OUTPUT_DIR, subdir)),
-                    "%a %b %d %H:%M:%S %Y",
-                )
+                time.ctime(os.path.getmtime(os.path.join(OUTPUT_DIR, subdir))),
+                "%a %b %d %H:%M:%S %Y",
             )
             diff = datetime.datetime.now() - modified
             days, seconds = diff.days, diff.seconds

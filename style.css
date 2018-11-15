@@ -53,6 +53,9 @@ body {
   vertical-align: middle;
   word-break: break-all;
 }
+.table td:hover {
+  cursor: pointer;
+}
 .tablewrapper {
   max-height: 100%;
   width: 100%;

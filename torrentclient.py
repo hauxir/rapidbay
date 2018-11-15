@@ -230,9 +230,9 @@ class TorrentClient:
             + ".mp4"
         )
 
-    def cleanup_output_dir(self):
+    def clean_dir(self, dirname):
         try:
-            dirs = os.listdir(OUTPUT_DIR)
+            dirs = os.listdir(dirname)
         except FileNotFoundError:
             return
         for subdir in dirs:
@@ -246,6 +246,12 @@ class TorrentClient:
             hours = days * 24 + seconds // 3600
             if hours > MAX_OUTPUT_FILE_AGE:
                 shutil.rmtree(os.path.join(OUTPUT_DIR, subdir))
+
+    def cleanup_output_dir(self):
+        self.clean_dir(OUTPUT_DIR)
+
+    def cleanup_filelist_dir(self):
+        self.clean_dir(FILELIST_DIR)
 
     def loop(self):
         while True:
@@ -266,6 +272,7 @@ class TorrentClient:
                             raise e
             try:
                 self.cleanup_output_dir()
+                self.cleanup_filelist_dir()
             except Exception as e:
                 print(e, flush=True)
             time.sleep(1)
@@ -313,6 +320,32 @@ class TorrentClient:
         self.write_filelist_to_disk(magnet_link)
         return h
 
+    def get_conversion_progress(self, magnet_hash, filename):
+        output_filepath = self.get_output_filepath(magnet_hash, filename)
+        log_filepath = f"{output_filepath}{LOG_POSTFIX}"
+        if os.path.isfile(log_filepath):
+            try:
+                with open(log_filepath, "r") as f:
+                    lines = f.readlines()
+                    first_line = lines[0]
+                    last_line = lines[-1]
+                    duration = int(first_line)
+                    current_duration = re.search(
+                        r"time=\s*(\d\d\:\d\d\:\d\d)\s*", last_line
+                    ).group(1)
+                    current_duration = time.strptime(
+                        current_duration.split(",")[0], "%H:%M:%S"
+                    )
+                    current_duration = datetime.timedelta(
+                        hours=current_duration.tm_hour,
+                        minutes=current_duration.tm_min,
+                        seconds=current_duration.tm_sec,
+                    ).total_seconds()
+                    return current_duration / duration
+            except Exception as e:
+                print(e, flush=True)
+        return 0.0
+
     def get_file_status(self, magnet_hash, filename):
         with self.lock(magnet_hash):
             h = self.file_downloads.get(magnet_hash)
@@ -320,29 +353,7 @@ class TorrentClient:
             if os.path.isfile(output_filepath):
                 return dict(status="ready")
             if os.path.isfile(f"{output_filepath}{INCOMPLETE_POSTFIX}"):
-                log_filepath = f"{output_filepath}{LOG_POSTFIX}"
-                progress = 0
-                if os.path.isfile(log_filepath):
-                    try:
-                        with open(log_filepath, "r") as f:
-                            lines = f.readlines()
-                            first_line = lines[0]
-                            last_line = lines[-1]
-                            duration = int(first_line)
-                            current_duration = re.search(
-                                r"time=\s*(\d\d\:\d\d\:\d\d)\s*", last_line
-                            ).group(1)
-                            current_duration = time.strptime(
-                                current_duration.split(",")[0], "%H:%M:%S"
-                            )
-                            current_duration = datetime.timedelta(
-                                hours=current_duration.tm_hour,
-                                minutes=current_duration.tm_min,
-                                seconds=current_duration.tm_sec,
-                            ).total_seconds()
-                            progress = current_duration / duration
-                    except Exception as e:
-                        print(e, flush=True)
+                progress = self.get_conversion_progress(magnet_hash, filename)
                 return dict(status="converting", progress=progress)
             if not h:
                 return dict(status="no_torrent")

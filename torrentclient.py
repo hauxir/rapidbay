@@ -243,6 +243,7 @@ class TorrentClient:
             diff = datetime.datetime.now() - modified
             days, seconds = diff.days, diff.seconds
             hours = days * 24 + seconds
+            hours = days * 24 + seconds // 3600
             if hours > MAX_OUTPUT_FILE_AGE:
                 shutil.rmtree(os.path.join(OUTPUT_DIR, subdir))
 

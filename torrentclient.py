@@ -173,6 +173,7 @@ class TorrentClient:
                     "-vcodec copy",
                     "-v quiet -stats",
                     "-movflags faststart",
+                    "-c:s mov_text",
                     f'"{output_filepath}{INCOMPLETE_POSTFIX}" 2>> "{output_filepath}{LOG_POSTFIX}"',
                     "&&",
                     f'mv "{output_filepath}.incomplete.mp4" "{output_filepath}"',

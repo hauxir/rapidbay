@@ -142,6 +142,9 @@ class TorrentClient:
             os.makedirs(os.path.join(OUTPUT_DIR, magnet_hash))
         except FileExistsError:
             pass
+        input_dir = os.path.dirname(filepath)
+        basename = os.path.basename(filepath)
+        filename_without_extension = os.path.splitext(basename)[0]
         media_info = MediaInfo.parse(filepath)
         audio_codecs = [
             t.codec.lower() for t in media_info.tracks if t.track_type == "Audio"
@@ -162,11 +165,18 @@ class TorrentClient:
             with open(f"{output_filepath}{LOG_POSTFIX}", "w+") as f:
                 f.write(f"{duration}\r")
 
+        subtitle_files = [
+            os.path.join(input_dir, fn)
+            for fn in os.listdir(os.path.dirname(filepath))
+            if fn.startswith(filename_without_extension) and fn.endswith(".srt")
+        ]
+
         subprocess.Popen(
             " ".join(
                 [
                     "ffmpeg",
                     f'-i "{filepath}"',
+                    " ".join([f'-f srt -i "{fn}"' for fn in subtitle_files]),
                     f"-acodec aac -ab {AAC_BITRATE}"
                     if needs_audio_conversion
                     else "-acodec copy",
@@ -182,20 +192,38 @@ class TorrentClient:
             shell=True,
         )
 
+    def subtitle_indexes(self, h, filename):
+        files = self.get_torrent_info(h).files()
+        filename_without_extension = os.path.splitext(filename)[0]
+        subtitle_indexes = []
+        for i, f in enumerate(files):
+            basename = os.path.basename(f.path)
+            if basename.endswith(".srt") and basename.startswith(
+                filename_without_extension
+            ):
+                subtitle_indexes.append(i)
+        return subtitle_indexes
+
     def handle_torrent(self, magnet_hash, h):
         is_finished = (
             str(h.status().state) in ["finished", "seeding"]
             or sum(h.file_priorities()) == 0
         )
         needs_conversion = False
-        for i, f in list(enumerate([f for f in self.get_torrent_info(h).files()])):
+        files = list(enumerate([f for f in self.get_torrent_info(h).files()]))
+        for i, f in files:
             if h.file_priorities()[i] == 0:
                 continue
             is_video_file = any(
                 f.path.endswith(f".{ext}") for ext in SUPPORTED_EXTENSIONS
             )
             is_finished_downloading = h.file_progress()[i] == f.size
-            if is_video_file and is_finished_downloading:
+            basename = os.path.basename(f.path)
+            all_subtitles_downloaded = all([
+                h.file_progress()[i] == files[i][1].size
+                for i in self.subtitle_indexes(h, basename)
+            ])
+            if is_video_file and is_finished_downloading and all_subtitles_downloaded:
                 filepath = os.path.join(DOWNLOAD_DIR, magnet_hash, f.path)
                 output_filepath = self.get_output_filepath(magnet_hash, filepath)
                 try:
@@ -309,6 +337,8 @@ class TorrentClient:
                     if f.path.endswith(filename):
                         file_priorities[i] = 4
                         break
+                for i in self.subtitle_indexes(h, filename):
+                    file_priorities[i] = 4
                 self.prioritize_files(h, file_priorities)
             else:
                 files = self.get_torrent_info(h).files()
@@ -317,6 +347,8 @@ class TorrentClient:
                     if f.path.endswith(filename):
                         file_priorities[i] = 4
                         break
+                for i in self.subtitle_indexes(h, filename):
+                    file_priorities[i] = 4
                 self.prioritize_files(h, file_priorities)
         self.write_filelist_to_disk(magnet_link)
         return h

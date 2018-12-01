@@ -219,10 +219,12 @@ class TorrentClient:
             )
             is_finished_downloading = h.file_progress()[i] == f.size
             basename = os.path.basename(f.path)
-            all_subtitles_downloaded = all([
-                h.file_progress()[i] == files[i][1].size
-                for i in self.subtitle_indexes(h, basename)
-            ])
+            all_subtitles_downloaded = all(
+                [
+                    h.file_progress()[i] == files[i][1].size
+                    for i in self.subtitle_indexes(h, basename)
+                ]
+            )
             if is_video_file and is_finished_downloading and all_subtitles_downloaded:
                 filepath = os.path.join(DOWNLOAD_DIR, magnet_hash, f.path)
                 output_filepath = self.get_output_filepath(magnet_hash, filepath)
@@ -380,29 +382,28 @@ class TorrentClient:
         return 0.0
 
     def get_file_status(self, magnet_hash, filename):
-        with self.lock(magnet_hash):
-            h = self.file_downloads.get(magnet_hash)
-            output_filepath = self.get_output_filepath(magnet_hash, filename)
-            if os.path.isfile(output_filepath):
-                return dict(status="ready")
-            if os.path.isfile(f"{output_filepath}{INCOMPLETE_POSTFIX}"):
-                progress = self.get_conversion_progress(magnet_hash, filename)
-                return dict(status="converting", progress=progress)
-            if not h:
-                return dict(status="no_torrent")
-            if not h.has_metadata():
-                return dict(status="waiting_for_metadata")
-            files = h.get_torrent_info().files()
-            try:
-                i, f = next(
-                    (i, f) for (i, f) in enumerate(files) if f.path.endswith(filename)
-                )
-            except StopIteration:
-                return dict(status="file_not_found")
-            percentage = h.file_progress()[i] / f.size
-            return dict(
-                status="downloading", progress=percentage, peers=h.status().num_peers
+        h = self.file_downloads.get(magnet_hash)
+        output_filepath = self.get_output_filepath(magnet_hash, filename)
+        if os.path.isfile(output_filepath):
+            return dict(status="ready")
+        if os.path.isfile(f"{output_filepath}{INCOMPLETE_POSTFIX}"):
+            progress = self.get_conversion_progress(magnet_hash, filename)
+            return dict(status="converting", progress=progress)
+        if not h:
+            return dict(status="no_torrent")
+        if not h.has_metadata():
+            return dict(status="waiting_for_metadata")
+        files = h.get_torrent_info().files()
+        try:
+            i, f = next(
+                (i, f) for (i, f) in enumerate(files) if f.path.endswith(filename)
             )
+        except StopIteration:
+            return dict(status="file_not_found")
+        percentage = h.file_progress()[i] / f.size
+        return dict(
+            status="downloading", progress=percentage, peers=h.status().num_peers
+        )
 
     def start(self):
         self.thread.start()

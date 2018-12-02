@@ -65,8 +65,11 @@ def appjs():
 
 @app.route("/error.log")
 def errorlog():
-    with open(LOGFILE, "r") as f:
-        data = f.read()
+    try:
+        with open(LOGFILE, "r") as f:
+            data = f.read()
+    except IOError:
+        data = ""
     return Response(data, mimetype="text/plain")
 
 

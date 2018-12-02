@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import threading
 import time
+import traceback
 from contextlib import contextmanager
 
 import libtorrent as lt
@@ -32,13 +33,9 @@ MAX_TORRENT_AGE_HOURS = 10
 MAX_OUTPUT_FILE_AGE = 10
 
 
-def write_log(data):
-    try:
-        with open(LOGFILE, "a+") as f:
-            f.write(str(data) + "\n")
-    except Exception as e:
-        with open(LOGFILE, "a+") as f:
-            f.write(str(e) + "\n")
+def write_log():
+    with open(LOGFILE, "a+") as f:
+        f.write(traceback.format_exc() + "\n")
 
 
 def catch_and_log_exceptions(fn):
@@ -46,7 +43,7 @@ def catch_and_log_exceptions(fn):
         try:
             return fn(*args, **kwargs)
         except Exception as e:
-            write_log(e)
+            write_log()
 
     return wrapper
 
@@ -325,7 +322,6 @@ class TorrentClient:
                         raise e
         self.cleanup_output_dir()
         self.cleanup_filelist_dir()
-        raise Exception("TESTING")
 
     def loop(self):
         while True:
@@ -401,9 +397,9 @@ class TorrentClient:
                         minutes=current_duration.tm_min,
                         seconds=current_duration.tm_sec,
                     ).total_seconds()
-                    return current_duration / duration
+                return current_duration / duration
             except Exception as e:
-                write_log(e)
+                write_log()
         return 0.0
 
     def get_file_status(self, magnet_hash, filename):

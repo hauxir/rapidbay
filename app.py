@@ -14,7 +14,7 @@ from flask import (
     send_from_directory,
 )
 from flask_basicauth import BasicAuth
-from torrentclient import TorrentClient
+from torrentclient import LOGFILE, TorrentClient
 
 PIRATEBAY_HOST = "piratebay.live"
 DEFAULT_USERNAME = "admin"
@@ -61,6 +61,13 @@ def style():
 @app.route("/app.js")
 def appjs():
     return send_from_directory("/app/", "app.js")
+
+
+@app.route("/error.log")
+def errorlog():
+    with open(LOGFILE, "r") as f:
+        data = f.read()
+    return Response(data, mimetype="text/plain")
 
 
 @app.route("/", defaults={"path": ""})

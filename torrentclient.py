@@ -325,6 +325,7 @@ class TorrentClient:
                         raise e
         self.cleanup_output_dir()
         self.cleanup_filelist_dir()
+        raise Exception("TESTING")
 
     def loop(self):
         while True:

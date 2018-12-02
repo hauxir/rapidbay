@@ -284,8 +284,8 @@ class TorrentClient:
     def cleanup_filelist_dir(self):
         self.clean_dir(FILELIST_DIR)
 
-    def loop(self):
-        while True:
+    def heartbeat(self):
+        try:
             for magnet_hash, h in list(self.file_downloads.items()):
                 with self.lock(magnet_hash):
                     try:
@@ -301,11 +301,14 @@ class TorrentClient:
                             self.remove_torrent(magnet_hash)
                         else:
                             raise e
-            try:
-                self.cleanup_output_dir()
-                self.cleanup_filelist_dir()
-            except Exception as e:
-                print(e, flush=True)
+            self.cleanup_output_dir()
+            self.cleanup_filelist_dir()
+        except Exception as e:
+            print(e, flush=True)
+
+    def loop(self):
+        while True:
+            self.heartbeat()
             time.sleep(1)
 
     def get_files(self, magnet_hash):

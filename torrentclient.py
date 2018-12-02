@@ -287,7 +287,7 @@ class TorrentClient:
             return
         for subdir in dirs:
             modified = datetime.datetime.strptime(
-                time.ctime(os.path.getmtime(os.path.join(OUTPUT_DIR, subdir))),
+                time.ctime(os.path.getmtime(os.path.join(dirname, subdir))),
                 "%a %b %d %H:%M:%S %Y",
             )
             diff = datetime.datetime.now() - modified
@@ -295,7 +295,7 @@ class TorrentClient:
             hours = days * 24 + seconds
             hours = days * 24 + seconds // 3600
             if hours > MAX_OUTPUT_FILE_AGE:
-                shutil.rmtree(os.path.join(OUTPUT_DIR, subdir))
+                shutil.rmtree(os.path.join(dirname, subdir))
 
     def cleanup_output_dir(self):
         self.clean_dir(OUTPUT_DIR)

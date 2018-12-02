@@ -14,6 +14,8 @@ from pymediainfo import MediaInfo
 DOWNLOAD_DIR = "/tmp/downloads/"
 OUTPUT_DIR = "/tmp/output/"
 FILELIST_DIR = "/tmp/filelists/"
+LOGFILE = "/tmp/rapidbay_errors.log"
+
 DHT_ROUTERS = [
     "router.utorrent.com",
     "router.bittorrent.com",
@@ -28,6 +30,25 @@ INCOMPLETE_POSTFIX = ".incomplete.mp4"
 LOG_POSTFIX = ".log"
 MAX_TORRENT_AGE_HOURS = 10
 MAX_OUTPUT_FILE_AGE = 10
+
+
+def write_log(data):
+    try:
+        with open(LOGFILE, "a+") as f:
+            f.write(str(data) + "\n")
+    except Exception as e:
+        with open(LOGFILE, "a+") as f:
+            f.write(str(e) + "\n")
+
+
+def catch_and_log_exceptions(fn):
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            write_log(e)
+
+    return wrapper
 
 
 def threaded(fn):
@@ -90,6 +111,7 @@ class TorrentClient:
         return self.locks.get(magnet_hash, thread_id) == thread_id
 
     @threaded
+    @catch_and_log_exceptions
     def write_filelist_to_disk(self, magnet_link):
         magnet_hash = self.get_hash(magnet_link)
         filename = os.path.join(FILELIST_DIR, magnet_hash)
@@ -284,27 +306,25 @@ class TorrentClient:
     def cleanup_filelist_dir(self):
         self.clean_dir(FILELIST_DIR)
 
+    @catch_and_log_exceptions
     def heartbeat(self):
-        try:
-            for magnet_hash, h in list(self.file_downloads.items()):
-                with self.lock(magnet_hash):
-                    try:
-                        torrent_is_stale = (
-                            time.time() - h.status().added_time
-                        ) > 3600 * MAX_TORRENT_AGE_HOURS
-                        if h.has_metadata():
-                            self.handle_torrent(magnet_hash, h)
-                        elif torrent_is_stale:
-                            self.remove_torrent(magnet_hash)
-                    except Exception as e:
-                        if "invalid torrent handle used" in str(e):
-                            self.remove_torrent(magnet_hash)
-                        else:
-                            raise e
-            self.cleanup_output_dir()
-            self.cleanup_filelist_dir()
-        except Exception as e:
-            print(e, flush=True)
+        for magnet_hash, h in list(self.file_downloads.items()):
+            with self.lock(magnet_hash):
+                try:
+                    torrent_is_stale = (
+                        time.time() - h.status().added_time
+                    ) > 3600 * MAX_TORRENT_AGE_HOURS
+                    if h.has_metadata():
+                        self.handle_torrent(magnet_hash, h)
+                    elif torrent_is_stale:
+                        self.remove_torrent(magnet_hash)
+                except Exception as e:
+                    if "invalid torrent handle used" in str(e):
+                        self.remove_torrent(magnet_hash)
+                    else:
+                        raise e
+        self.cleanup_output_dir()
+        self.cleanup_filelist_dir()
 
     def loop(self):
         while True:
@@ -320,6 +340,7 @@ class TorrentClient:
         return None
 
     @threaded
+    @catch_and_log_exceptions
     def download_file(self, magnet_link, filename):
         magnet_hash = self.get_hash(magnet_link)
         with self.lock(magnet_hash):
@@ -381,7 +402,7 @@ class TorrentClient:
                     ).total_seconds()
                     return current_duration / duration
             except Exception as e:
-                print(e, flush=True)
+                write_log(e)
         return 0.0
 
     def get_file_status(self, magnet_hash, filename):

@@ -1,10 +1,10 @@
-FROM hauxir/libtorrent-python3:latest
+FROM hauxir/libtorrent-python3-ubuntu:latest
 
-RUN apk update && \
-    apk upgrade && \
-    apk add ffmpeg && \
-    apk add git && \
-    apk add mediainfo
+RUN apt-get update && \
+    apt-get install -y \
+    ffmpeg \
+    git \
+    mediainfo
 
 RUN pip install flask
 RUN pip install requests

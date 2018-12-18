@@ -1,55 +1,104 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
     <title>RapidBay</title>
-    <link href="https://stackpath.bootstrapcdn.com/bootswatch/4.1.3/cyborg/bootstrap.min.css" rel="stylesheet">
-    <link href="/style.css" rel="stylesheet">
+    <script src="/lib/vue.2.5.3.min.js"></script>
+    <script src="/lib/navigo.6.0.2.min.js"></script>
+    <script src="/lib/jquery-3.3.1.min.js"></script>
+    <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
+    <link href="/style.css" rel="stylesheet" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <script src="//unpkg.com/navigo@6"></script>
-</head>
+  </head>
 
-<body class="text-center">
+  <body class="text-center">
+    <div id="app"><component :is="screen" :params="params"> </component></div>
 
-    <form>
-        <div class="input-group mb-3">
-            <input type="text" class="form-control">
-            <div class="input-group-append">
-                <button class="btn btn-light" type="submit">Search</button>
-            </div>
-        </div>
-    </form>
-    <a class="filename"></a>
-    <div class="loadingwrapper">
-        <div class="loadingtext"></div>
-        <div class="peernum"></div>
-        <div class="loaderwrapper">
-            <div class="loader spinner">
-                <div class="loader">
-                    <div class="loader">
-                        <div class="loader">
-                        </div>
-                    </div>
+    <script type="text/x-template" id="loading-spinner-template">
+      <div class="loadingwrapper">
+        <div v-if="heading" class="loading-heading">{{heading}}</div>
+        <div v-if="subheading" class="loading-subheading">{{subheading}}</div>
+        <div class="loading-circle-wrapper">
+          <div class="loading-circle">
+            <div class="loading-circle">
+              <div class="loading-circle">
+                <div class="loading-circle">
                 </div>
+              </div>
             </div>
+          </div>
         </div>
-        <div class="progress">
-            <div class="progress-bar" role="progressbar"></div>
+        <div v-if="progress == 0 || progress" class="progress">
+          <div class="progress-bar" role="progressbar" ref="progress"></div>
         </div>
-    </div>
+      </div>
+    </script>
 
-    <a class="btn btn-light videolink">Open video</a>
+    <script type="text/x-template" id="search-screen-template">
+      <form @submit="onSubmit">
+        <div class="input-group mb-3">
+          <input type="text" class="form-control" v-model="searchterm">
+          <div class="input-group-append">
+            <button class="btn btn-light" type="submit">Search</button>
+          </div>
+        </div>
+      </form>
+    </script>
 
-    <div class="tablewrapper">
+    <script type="text/x-template" id="search-results-screen-template">
+      <loading-spinner v-if="results === null" heading="Loading"/>
+      <div v-else class="tablewrapper">
         <table class="table table-hover">
-            <tbody>
-            </tbody>
+          <tbody>
+            <tr
+            v-for="result in results"
+            @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet)))"
+            >
+              <td>{{ result.title}}</td>
+            </tr>
+          </tbody>
         </table>
-    </div>
-    <script src="/app.js"></script>
-</body>
+      </div>
+    </script>
 
+    <script type="text/x-template" id="filelist-screen-template">
+      <loading-spinner v-if="results === null" heading="Loading"/>
+        <div v-else class="tablewrapper">
+          <table class="table table-hover">
+            <tbody>
+              <tr
+              v-for="result in results"
+              @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + result)">
+                <td>{{ result }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="download-screen-template">
+      <div class="wrapper">
+        <a class="filename">{{params.filename}}</a>
+        <loading-spinner
+          v-if="status !== 'ready'"
+          :heading="heading"
+          :subheading="subheading"
+          :progress="progress"
+        />
+        <a
+          v-if="status === 'ready'"
+          class="btn btn-light"
+          :href="play_link"
+        >
+          Open video
+        </a>
+      </div>
+    </script>
+
+    <script src="/app.js"></script>
+  </body>
 </html>

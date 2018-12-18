@@ -3,6 +3,19 @@ body {
   height: 100%;
   max-width: 100%;
 }
+
+#app, .wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  overflow: auto;
+  height: 100%;
+  max-width: 100%;
+}
+
+/* Search form */
+
 .form-control,
 .form-control:focus {
   color: white;
@@ -11,13 +24,44 @@ body {
   box-shadow: none;
 }
 
-body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  overflow: auto;
+/* Results table */
+
+.table {
+  table-layout: fixed;
+  width: 100%;
+  word-break: break-all;
 }
+
+.table tr {
+  max-width: 100%;
+  vertical-align: middle;
+  max-height: 50px;
+}
+
+.table td {
+  vertical-align: middle;
+  word-break: break-all;
+}
+
+.table td:hover {
+  cursor: pointer;
+}
+
+.tablewrapper {
+  max-height: 100%;
+  width: 100%;
+}
+
+/* Download */
+
+.filename {
+  color: white;
+  font-size: 14px;
+  top:10%;
+  position:absolute;
+}
+
+/* Loader */
 .loadingwrapper {
   position: absolute;
   top: 50%;
@@ -26,12 +70,35 @@ body {
   width: 300px;
   height: 200px;
 }
-.loaderwrapper {
+
+.loading-heading {
+  color: white;
+  font-size: 18px;
+  margin-bottom: 10px;
+  text-transform: capitalize;
+}
+
+.loading-subheading{
+  color: white;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.progress {
+  margin-top: 20px;
+}
+
+.progress-bar {
+  background-color: white;
+}
+
+.loading-circle-wrapper {
   width: 150px;
   height: 150px;
   margin: 0 auto;
 }
-.loader {
+
+.loading-circle {
   width: calc(100% - 0px);
   height: calc(100% - 0px);
   border: 8px solid #fff;
@@ -39,50 +106,7 @@ body {
   border-radius: 50%;
   animation: rotate 5s linear infinite;
 }
-.table {
-  table-layout: fixed;
-  width: 100%;
-  word-break: break-all;
-}
-.table tr {
-  max-width: 100%;
-  vertical-align: middle;
-  max-height: 50px;
-}
-.table td {
-  vertical-align: middle;
-  word-break: break-all;
-}
-.table td:hover {
-  cursor: pointer;
-}
-.tablewrapper {
-  max-height: 100%;
-  width: 100%;
-}
-.loadingtext {
-  color: white;
-  font-size: 18px;
-  margin-bottom: 10px;
-  text-transform: capitalize;
-}
-.filename {
-  color: white;
-  font-size: 14px;
-  top:10%;
-  position:absolute;
-}
-.peernum {
-  color: white;
-  font-size: 14px;
-  margin-bottom: 20px;
-}
-.progress {
-  margin-top: 20px;
-}
-.progress-bar {
-  background-color: white;
-}
+
 @keyframes rotate {
   100% {
     transform: rotate(360deg);

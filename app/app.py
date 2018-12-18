@@ -31,6 +31,15 @@ def _get_files(magnet_hash):
     return None
 
 
+@app.route("/robots.txt")
+def robots():
+    return Response(
+        """User-agent: *
+Disallow: /""",
+        mimetype="text/plain",
+    )
+
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 @basic_auth.required

@@ -70,6 +70,10 @@ def _remove_old_files_and_directories(dirname, max_age):
                 os.remove(path)
 
 
+def _torrent_is_stale(h):
+    return (time.time() - h.status().added_time) > 3600 * settings.MAX_TORRENT_AGE_HOURS
+
+
 class FileStatus:
     READY = "ready"
     CONVERTING = "converting"
@@ -217,13 +221,10 @@ class RapidBayDaemon:
             if not h:
                 continue
             try:
-                torrent_is_stale = (
-                    time.time() - h.status().added_time
-                ) > 3600 * settings.MAX_TORRENT_AGE_HOURS
-                if h.has_metadata():
-                    self._handle_torrent(magnet_hash)
-                elif torrent_is_stale:
+                if _torrent_is_stale(h):
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
+                elif h.has_metadata():
+                    self._handle_torrent(magnet_hash)
             except Exception as e:
                 if "invalid torrent handle used" in str(e):
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

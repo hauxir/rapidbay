@@ -14,12 +14,8 @@ app = Flask(__name__)
 
 basic_auth = BasicAuth(app)
 
-app.config["BASIC_AUTH_USERNAME"] = os.environ.get(
-    "USERNAME", settings.DEFAULT_USERNAME
-)
-app.config["BASIC_AUTH_PASSWORD"] = os.environ.get(
-    "PASSWORD", settings.DEFAULT_PASSWORD
-)
+app.config["BASIC_AUTH_USERNAME"] = settings.USERNAME
+app.config["BASIC_AUTH_PASSWORD"] = settings.PASSWORD
 
 
 def _get_files(magnet_hash):

@@ -124,6 +124,10 @@ class RapidBayDaemon:
             return
         self.torrent_client.download_file(magnet_link, filename)
 
+        h = self.torrent_client.torrents.get(magnet_hash)
+        h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
+        h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)
+
         if download_subtitles:
             for filename in _subtitle_filenames(
                 self.torrent_client.torrents.get(magnet_hash), filename

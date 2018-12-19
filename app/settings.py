@@ -21,6 +21,8 @@ DHT_ROUTERS = [
 ]
 MAX_TORRENT_AGE_HOURS = 10
 SUPPORTED_EXTENSIONS = ["mp4", "mkv"]
+TORRENT_DOWNLOAD_LIMIT = -1
+TORRENT_UPLOAD_LIMIT = -1
 
 # CONVERSION
 OUTPUT_DIR = "/tmp/output/"
@@ -36,7 +38,6 @@ for variable in [item for item in globals() if not item.startswith("__")]:
     if env_var is not NULL:
         try:
             env_var = eval(env_var)
-        except SyntaxError:
+        except Exception:
             pass
     globals()[variable] = env_var if env_var is not NULL else globals()[variable]
-    print(globals()[variable])

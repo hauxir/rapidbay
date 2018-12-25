@@ -1,0 +1,15 @@
+{
+  "name": "RapidBay",
+  "short_name": "RapidBay",
+  "theme_color": "rgb(205, 159, 63)",
+  "background_color": "rgb(9,34,39)",
+  "display": "fullscreen",
+  "start_url": "./",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

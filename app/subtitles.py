@@ -21,7 +21,7 @@ def download_all_subtitles(filepath):
     ost.login(None, None)
     f = File(filepath)
     h = f.get_hash()
-    results = ost.search_subtitles([{"sublanguageid": "all", "moviehash": h}])
+    results = ost.search_subtitles([{"sublanguageid": "all", "moviehash": h}]) or []
     for chunk in _chunks(results, 20):
         sub_ids = {
             r["IDSubtitleFile"]: f'{basename_without_ext}.{r["SubLanguageID"]}.srt'

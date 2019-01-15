@@ -236,6 +236,9 @@ class RapidBayDaemon:
         _remove_old_files_and_directories(
             settings.FILELIST_DIR, settings.MAX_OUTPUT_FILE_AGE
         )
+        _remove_old_files_and_directories(
+            settings.DOWNLOAD_DIR, settings.MAX_OUTPUT_FILE_AGE
+        )
 
     def _loop(self):
         while True:

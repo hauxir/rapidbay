@@ -95,8 +95,9 @@ def files(magnet_hash):
 
 @app.route("/play/<string:magnet_hash>/<string:filename>")
 def play(magnet_hash, filename):
-    filename = filename.replace(".mkv", ".mp4")
-    return send_from_directory(f"/tmp/output/{magnet_hash}", filename)
+    response = send_from_directory(f"/tmp/output/{magnet_hash}", filename)
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response
 
 
 @app.route("/error.log")

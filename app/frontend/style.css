@@ -112,3 +112,20 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Player */
+
+.video_wrapper {
+  width:100%;
+  height:100%;
+  max-width: 640px;
+  max-height: 360px
+}
+
+.video_wrapper video {
+  width:100%;
+  height:100%;
+}
+.chromecast-button {
+  margin-bottom:10px;
+}

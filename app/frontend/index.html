@@ -6,10 +6,17 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
     <title>RapidBay</title>
     <script src="/lib/vue.2.5.3.min.js"></script>
     <script src="/lib/navigo.6.0.2.min.js"></script>
     <script src="/lib/jquery-3.3.1.min.js"></script>
+    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+    <script src="/lib/chromecastjs.js"></script>
     <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
     <link href="/style.css" rel="stylesheet" />
     <link rel="icon" type="image/png" href="/favicon.png" />
@@ -81,7 +88,8 @@
     </script>
 
     <script type="text/x-template" id="download-screen-template">
-      <div class="wrapper">
+      <player v-if="play_link" :url="play_link" :subtitles="subtitles"/>
+      <div v-else class="wrapper">
         <a class="filename">{{params.filename}}</a>
         <loading-spinner
           v-if="status !== 'ready'"
@@ -89,14 +97,25 @@
           :subheading="subheading"
           :progress="progress"
         />
-        <a
-          v-if="status === 'ready'"
-          class="btn btn-light"
-          :href="play_link"
-        >
-          Open video
-        </a>
       </div>
+    </script>
+
+    <script type="text/x-template" id="player-template">
+        <div class="video_wrapper">
+          <chromecast-button v-if="isDesktop && isChrome"/>
+          <video v-if="url" :src="url" controls>
+              <track v-for="subtitle in subtitles"
+                  :label="subtitle.language" kind="subtitles"
+                  :srclang="subtitle.language"
+                  :src="subtitle.url"
+                  :id="subtitle.url"
+              >
+          </video>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="chromecast-button-template">
+        <button class="btn btn-dark chromecast-button" @click="cast()">Send to Chromecast...</button>
     </script>
 
     <script src="/app.js"></script>

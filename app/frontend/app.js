@@ -24,6 +24,54 @@
     }
   });
 
+  Vue.component("player", {
+    props: ["url", "subtitles"],
+    data: function() {
+      return {
+        isDesktop: !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(
+          navigator.userAgent
+        ),
+        isChrome: /Chrome/i.test(navigator.userAgent)
+      };
+    },
+    template: "#player-template"
+  });
+
+  Vue.component("chromecast-button", {
+    template: "#chromecast-button-template",
+    methods: {
+      cast: function() {
+        var root =
+          location.protocol +
+          "//" +
+          location.hostname +
+          (location.port ? ":" + location.port : "");
+        var video = document.getElementsByTagName("video")[0];
+        var subtitle_tracks = Array.from(video.textTracks);
+        var current_subtitle = subtitle_tracks.find(function(t) {
+          return t.mode !== "disabled";
+        });
+        var current_subtitle_url = current_subtitle
+          ? root + current_subtitle.id
+          : null;
+        var media = {
+          content: video.src,
+          title: "RapidBay",
+          subtitles: current_subtitle
+            ? [
+                {
+                  active: true,
+                  src: current_subtitle_url
+                }
+              ]
+            : []
+        };
+        var cc = new ChromecastJS();
+        cc.cast(media);
+      }
+    }
+  });
+
   Vue.component("search-screen", {
     template: "#search-screen-template",
     data: function() {
@@ -84,27 +132,21 @@
         peers: null,
         heading: "Loading",
         subheading: null,
-        play_link: null
+        play_link: null,
+        subtitles: []
       };
     },
     template: "#download-screen-template",
     created: function() {
-      this.play_link =
-        "/play/" +
-        get_hash(this.params.magnet_link) +
-        "/" +
-        this.params.filename;
       $.post("/api/magnet_download/", {
         magnet_link: this.params.magnet_link,
         filename: this.params.filename
       });
       var self = this;
+      var magnet_hash = get_hash(this.params.magnet_link);
       (function get_file_info() {
         $.get(
-          "/api/magnet/" +
-            get_hash(self.params.magnet_link) +
-            "/" +
-            self.params.filename,
+          "/api/magnet/" + magnet_hash + "/" + self.params.filename,
           function(data) {
             self.status = data.status;
             self.progress = data.progress;
@@ -115,6 +157,19 @@
                 : text;
             self.subheading =
               data.peers === 0 || data.peers ? data.peers + " Peers" : null;
+            self.play_link = data.filename
+              ? "/play/" + magnet_hash + "/" + data.filename
+              : null;
+            self.subtitles = data.subtitles
+              ? data.subtitles.map(function(sub) {
+                  return {
+                    language: sub
+                      .substring(sub.lastIndexOf("_") + 1)
+                      .replace(".vtt", ""),
+                    url: "/play/" + magnet_hash + "/" + sub
+                  };
+                })
+              : [];
             if (self.status !== "ready") {
               setTimeout(get_file_info, 1000);
             }

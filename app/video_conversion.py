@@ -23,6 +23,30 @@ def _recursive_filepaths(dir_name):
     return all_files
 
 
+def _extract_subtitles_as_vtt(filepath):
+    output_dir = os.path.dirname(filepath)
+    basename = os.path.basename(filepath)
+    filename_without_extension = os.path.splitext(basename)[0]
+    media_info = MediaInfo.parse(filepath)
+    sub_tracks = [
+        (int(t.streamorder), t.language or "unknown")
+        for (i, t) in enumerate(
+            [t for t in media_info.tracks if t.track_type == "Text"]
+        )
+        if t.streamorder
+    ]
+    return Popen(
+        f"ffmpeg -nostdin -i {filepath} "
+        + " ".join(
+            [
+                f"-map 0:{i} {output_dir}/{filename_without_extension}.{i}_{lang}.vtt"
+                for (i, lang) in sub_tracks
+            ]
+        ),
+        shell=True,
+    )
+
+
 def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[]):
     media_info = MediaInfo.parse(input_filepath)
     audio_codecs = [
@@ -41,7 +65,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
     return Popen(
         " ".join(
             [
-                "ffmpeg",
+                "ffmpeg -nostdin",
                 f'-i "{input_filepath}"',
                 " ".join([f'-f srt -i "{fn}"' for (lang, fn) in subtitle_filepaths]),
                 "-map 0:v",
@@ -128,6 +152,9 @@ class VideoConverter:
             _convert_file_to_mp4(
                 input_filepath, output_filepath, subtitle_filepaths=subtitle_filepaths
             ).wait()
+
+            _extract_subtitles_as_vtt(output_filepath).wait()
+
         finally:
             try:
                 del self.file_conversions[output_filepath]

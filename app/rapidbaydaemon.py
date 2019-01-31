@@ -76,6 +76,7 @@ def _torrent_is_stale(h):
 
 class FileStatus:
     READY = "ready"
+    FINISHING_UP = "finishing_up"
     CONVERTING = "converting"
     NO_TORRENT = "no_torrent"
     WAITING_FOR_METADATA = "waiting_for_metadata"
@@ -141,8 +142,19 @@ class RapidBayDaemon:
     def get_file_status(self, magnet_hash, filename):
         assert self.thread.is_alive()
         output_filepath = _get_output_filepath(magnet_hash, filename)
+
         if os.path.isfile(output_filepath):
-            return dict(status=FileStatus.READY)
+            if self.video_converter.file_conversions.get(output_filepath):
+                return dict(status=FileStatus.FINISHING_UP)
+            return dict(
+                status=FileStatus.READY,
+                filename=os.path.basename(output_filepath),
+                subtitles=[
+                    f
+                    for f in os.listdir(os.path.dirname(output_filepath))
+                    if f.endswith(".vtt")
+                ],
+            )
         if os.path.isfile(f"{output_filepath}{settings.INCOMPLETE_POSTFIX}"):
             progress = video_conversion.get_conversion_progress(output_filepath)
             return dict(status=FileStatus.CONVERTING, progress=progress)

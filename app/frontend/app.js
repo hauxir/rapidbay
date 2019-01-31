@@ -1,4 +1,39 @@
 (function() {
+  var pending_callbacks = [];
+  var pending_requests = [];
+
+  function rbsetTimeout(f, s) {
+    clear_pending_callbacks();
+    pending_callbacks.push(setTimeout(f, s));
+  }
+
+  function clear_pending_callbacks() {
+    while (pending_callbacks.length) {
+      var f = pending_callbacks.pop();
+      clearTimeout(f);
+    }
+  }
+
+  function clear_pending_requests() {
+    while (pending_requests.length) {
+      var r = pending_requests.pop();
+      r.abort();
+    }
+  }
+
+  function get(url, callback) {
+    var request;
+    function _callback(data) {
+      pending_requests = pending_requests.filter(function(req) {
+        req !== request;
+      });
+      callback(data);
+    }
+    request = $.get(url, _callback);
+    pending_requests.push(request);
+    return request;
+  }
+
   function get_hash(magnet_link) {
     var hash_start = magnet_link.indexOf("btih:") + 5;
     var hash_end = magnet_link.indexOf("&");
@@ -93,7 +128,7 @@
     template: "#search-results-screen-template",
     created: function() {
       var self = this;
-      $.get("/api/search/" + this.params.searchterm, function(data) {
+      get("/api/search/" + this.params.searchterm, function(data) {
         self.results = data.results;
       });
     }
@@ -109,16 +144,15 @@
       $.post("/api/magnet_files/", { magnet_link: this.params.magnet_link });
       var self = this;
       (function get_files() {
-        $.get(
-          "/api/magnet/" + get_hash(self.params.magnet_link) + "/",
-          function(data) {
-            if (data.files == null) {
-              setTimeout(get_files, 1000);
-              return;
-            }
-            self.results = data.files;
+        get("/api/magnet/" + get_hash(self.params.magnet_link) + "/", function(
+          data
+        ) {
+          if (data.files == null) {
+            rbsetTimeout(get_files, 1000);
+            return;
           }
-        );
+          self.results = data.files;
+        });
       })();
     }
   });
@@ -145,36 +179,35 @@
       var self = this;
       var magnet_hash = get_hash(this.params.magnet_link);
       (function get_file_info() {
-        $.get(
-          "/api/magnet/" + magnet_hash + "/" + self.params.filename,
-          function(data) {
-            self.status = data.status;
-            self.progress = data.progress;
-            var text = data.status.replace(/_/g, " ");
-            self.heading =
-              data.progress === 0 || data.progress
-                ? text + " (" + Math.round(data.progress * 100) + "%)"
-                : text;
-            self.subheading =
-              data.peers === 0 || data.peers ? data.peers + " Peers" : null;
-            self.play_link = data.filename
-              ? "/play/" + magnet_hash + "/" + data.filename
-              : null;
-            self.subtitles = data.subtitles
-              ? data.subtitles.map(function(sub) {
-                  return {
-                    language: sub
-                      .substring(sub.lastIndexOf("_") + 1)
-                      .replace(".vtt", ""),
-                    url: "/play/" + magnet_hash + "/" + sub
-                  };
-                })
-              : [];
-            if (self.status !== "ready") {
-              setTimeout(get_file_info, 1000);
-            }
+        get("/api/magnet/" + magnet_hash + "/" + self.params.filename, function(
+          data
+        ) {
+          self.status = data.status;
+          self.progress = data.progress;
+          var text = data.status.replace(/_/g, " ");
+          self.heading =
+            data.progress === 0 || data.progress
+              ? text + " (" + Math.round(data.progress * 100) + "%)"
+              : text;
+          self.subheading =
+            data.peers === 0 || data.peers ? data.peers + " Peers" : null;
+          self.play_link = data.filename
+            ? "/play/" + magnet_hash + "/" + data.filename
+            : null;
+          self.subtitles = data.subtitles
+            ? data.subtitles.map(function(sub) {
+                return {
+                  language: sub
+                    .substring(sub.lastIndexOf("_") + 1)
+                    .replace(".vtt", ""),
+                  url: "/play/" + magnet_hash + "/" + sub
+                };
+              })
+            : [];
+          if (self.status !== "ready") {
+            rbsetTimeout(get_file_info, 1000);
           }
-        );
+        });
       })();
     }
   });
@@ -186,6 +219,9 @@
 
   function display_view(view_name) {
     return function(params) {
+      clear_pending_requests();
+      clear_pending_callbacks();
+
       if (params && params.magnet_link) {
         params.magnet_link = decodeURIComponent(params.magnet_link);
         params.magnet_link = decodeURIComponent(params.magnet_link);

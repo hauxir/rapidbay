@@ -60,7 +60,7 @@
             v-for="result in results"
             @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet)))"
             >
-              <td>{{ result.title}}</td>
+              <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')">{{ result.title}}</td>
             </tr>
           </tbody>
         </table>

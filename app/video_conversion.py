@@ -36,10 +36,10 @@ def _extract_subtitles_as_vtt(filepath):
         if t.streamorder
     ]
     return Popen(
-        f"ffmpeg -nostdin -i {filepath} "
+        f'ffmpeg -nostdin -i "{filepath}" '
         + " ".join(
             [
-                f"-map 0:{i} {output_dir}/{filename_without_extension}.{i}_{lang}.vtt"
+                f'-map 0:{i} "{output_dir}/{filename_without_extension}.{i}_{lang}.vtt"'
                 for (i, lang) in sub_tracks
             ]
         ),

@@ -6,7 +6,7 @@ import settings
 import torrent
 from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_basicauth import BasicAuth
-from rapidbaydaemon import RapidBayDaemon
+from rapidbaydaemon import FileStatus, RapidBayDaemon
 from werkzeug.exceptions import NotFound
 
 daemon = RapidBayDaemon()
@@ -58,7 +58,8 @@ def search(searchterm):
 def magnet_info():
     magnet_link = request.form.get("magnet_link")
     magnet_hash = torrent.get_hash(magnet_link)
-    daemon.fetch_filelist_from_link(magnet_link)
+    if not _get_files(magnet_hash):
+        daemon.fetch_filelist_from_link(magnet_link)
     return jsonify(magnet_hash=magnet_hash)
 
 
@@ -68,7 +69,8 @@ def magnet_download():
     magnet_link = request.form.get("magnet_link")
     filename = request.form.get("filename")
     magnet_hash = torrent.get_hash(magnet_link)
-    daemon.download_file(magnet_link, filename)
+    if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:
+        daemon.download_file(magnet_link, filename)
     return jsonify(magnet_hash=magnet_hash)
 
 

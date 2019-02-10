@@ -1,4 +1,12 @@
 (function() {
+  if (!window.location.origin) {
+    window.location.origin =
+      window.location.protocol +
+      "//" +
+      window.location.hostname +
+      (window.location.port ? ":" + window.location.port : "");
+  }
+
   var pending_callbacks = [];
   var pending_requests = [];
 
@@ -76,11 +84,7 @@
     template: "#chromecast-button-template",
     methods: {
       cast: function() {
-        var root =
-          location.protocol +
-          "//" +
-          location.hostname +
-          (location.port ? ":" + location.port : "");
+        var root = window.location.origin;
         var video = document.getElementsByTagName("video")[0];
         var subtitle_tracks = Array.from(video.textTracks);
         var current_subtitle = subtitle_tracks.find(function(t) {

@@ -175,6 +175,12 @@
       };
     },
     template: "#download-screen-template",
+    methods: {
+      preventchange: function(e) {
+        e.preventDefault();
+        e.target.value = window.location.origin + this.play_link;
+      }
+    },
     created: function() {
       $.post("/api/magnet_download/", {
         magnet_link: this.params.magnet_link,

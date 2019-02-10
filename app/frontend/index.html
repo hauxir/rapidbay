@@ -88,8 +88,8 @@
         <input
             type="text"
             class="form-control form-control-sm video_url"
-            readonly
             :value="window.location.origin + play_link"
+            @input="preventchange"
         />
       </div>
       <div v-else class="wrapper">

@@ -217,6 +217,9 @@ class RapidBayDaemon:
                 continue
             filename = os.path.basename(f.path)
 
+            if not any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS):
+                continue
+
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
 
             if is_state(filename, FileStatus.DOWNLOAD_FINISHED):

@@ -4,6 +4,7 @@ import os
 import piratebay
 import settings
 import torrent
+from common import path_hierarchy
 from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_basicauth import BasicAuth
 from rapidbaydaemon import FileStatus, RapidBayDaemon
@@ -103,6 +104,7 @@ def play(magnet_hash, filename):
 
 
 @app.route("/error.log")
+@basic_auth.required
 def errorlog():
     try:
         with open(settings.LOGFILE, "r") as f:
@@ -110,6 +112,19 @@ def errorlog():
     except IOError:
         data = ""
     return Response(data, mimetype="text/plain")
+
+
+@app.route("/status")
+@basic_auth.required
+def status():
+    return jsonify(
+        output_dir=path_hierarchy(settings.OUTPUT_DIR),
+        filelist_dir=path_hierarchy(settings.FILELIST_DIR),
+        downloads_dir=path_hierarchy(settings.DOWNLOAD_DIR),
+        subtitle_downloads=daemon.subtitle_downloads,
+        torrent_downloads=daemon.downloads(),
+        session_torrents=daemon.session_torrents(),
+    )
 
 
 if __name__ == "__main__":

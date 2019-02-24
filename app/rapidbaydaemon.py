@@ -110,6 +110,24 @@ class RapidBayDaemon:
     def start(self):
         self.thread.start()
 
+    def downloads(self):
+        result = {}
+        for magnet_hash, h in self.torrent_client.torrents.items():
+            result[magnet_hash] = {}
+            files = torrent.get_torrent_info(h).files()
+            file_priorities = h.file_priorities()
+            for priority, f in zip(list(file_priorities), list(files)):
+                if priority == 0:
+                    continue
+                filename = os.path.basename(f.path)
+                result[magnet_hash][filename] = self.get_file_status(
+                    magnet_hash, filename
+                )
+        return result
+
+    def session_torrents(self):
+        return [h.name() for h in self.torrent_client.session.get_torrents()]
+
     @threaded
     @log.catch_and_log_exceptions
     def fetch_filelist_from_link(self, magnet_link):
@@ -199,7 +217,12 @@ class RapidBayDaemon:
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h:
             return
-        files = [f for f in torrent.get_torrent_info(h).files()]
+        file_priorities = h.file_priorities()
+        files = [
+            f
+            for priority, f in zip(file_priorities, torrent.get_torrent_info(h).files())
+            if priority != 0
+        ]
         filenames = [os.path.basename(f.path) for f in files]
 
         def is_state(filename, state):
@@ -212,9 +235,7 @@ class RapidBayDaemon:
                 self.subtitle_downloads.pop(filepath, None)
             return
 
-        for i, f in enumerate(files):
-            if h.file_priorities()[i] == 0:
-                continue
+        for f in files:
             filename = os.path.basename(f.path)
 
             if not any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS):

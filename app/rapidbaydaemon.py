@@ -78,6 +78,7 @@ class FileStatus:
     READY = "ready"
     FINISHING_UP = "finishing_up"
     CONVERTING = "converting"
+    CONVERSION_FAILED = "conversion_failed"
     NO_TORRENT = "no_torrent"
     WAITING_FOR_METADATA = "waiting_for_metadata"
     FILE_NOT_FOUND = "file_not_found"
@@ -175,6 +176,8 @@ class RapidBayDaemon:
             )
         if os.path.isfile(f"{output_filepath}{settings.INCOMPLETE_POSTFIX}"):
             progress = video_conversion.get_conversion_progress(output_filepath)
+            if not self.video_converter.file_conversions.get(output_filepath):
+                return dict(status=FileStatus.CONVERSION_FAILED)
             return dict(status=FileStatus.CONVERTING, progress=progress)
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h:
@@ -224,11 +227,16 @@ class RapidBayDaemon:
             if priority != 0
         ]
         filenames = [os.path.basename(f.path) for f in files]
+        video_filenames = [
+            fn
+            for fn in filenames
+            if any(fn.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS)
+        ]
 
         def is_state(filename, state):
             return self.get_file_status(magnet_hash, filename)["status"] == state
 
-        if all(is_state(filename, "ready") for filename in filenames):
+        if all(is_state(filename, FileStatus.READY) for filename in video_filenames):
             self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
             for f in files:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
@@ -242,13 +250,15 @@ class RapidBayDaemon:
                 continue
 
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+            output_filepath = _get_output_filepath(magnet_hash, filepath)
 
             if is_state(filename, FileStatus.DOWNLOAD_FINISHED):
                 self._download_external_subtitles(filepath)
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
-                output_filepath = _get_output_filepath(magnet_hash, filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
                 self.video_converter.convert_file(filepath, output_filepath)
+            elif is_state(filename, FileStatus.CONVERSION_FAILED):
+                shutil.copy(filepath, output_filepath)
 
     @log.catch_and_log_exceptions
     def _heartbeat(self):

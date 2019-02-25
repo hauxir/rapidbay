@@ -124,6 +124,7 @@ def status():
         subtitle_downloads=daemon.subtitle_downloads,
         torrent_downloads=daemon.downloads(),
         session_torrents=daemon.session_torrents(),
+        conversions=daemon.video_converter.file_conversions,
     )
 
 

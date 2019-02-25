@@ -71,7 +71,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 "-map 0:v",
                 "-map 0:a",
                 "-map 0:s" if n_sub_tracks > 0 else "",
-                f"-acodec aac -ab {settings.AAC_BITRATE}"
+                f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
                 if needs_audio_conversion
                 else "-acodec copy",
                 "-vcodec copy",

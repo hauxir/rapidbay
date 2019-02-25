@@ -36,7 +36,7 @@ def _extract_subtitles_as_vtt(filepath):
         if t.streamorder
     ]
     return Popen(
-        f'ffmpeg -nostdin -i "{filepath}" '
+        f'ffmpeg -nostdin -v quiet -i "{filepath}" '
         + " ".join(
             [
                 f'-map 0:{i} "{output_dir}/{filename_without_extension}.{i}_{lang}.vtt"'
@@ -149,9 +149,13 @@ class VideoConverter:
                 and filepath.endswith(".srt")
             ]
 
-            _convert_file_to_mp4(
+            conversion = _convert_file_to_mp4(
                 input_filepath, output_filepath, subtitle_filepaths=subtitle_filepaths
-            ).wait()
+            )
+            conversion.wait()
+
+            if conversion.returncode != 0:
+                raise Exception(f"Conversion failed for {input_filepath}")
 
             _extract_subtitles_as_vtt(output_filepath).wait()
 

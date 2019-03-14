@@ -21,3 +21,7 @@ Requires Docker + docker-compose
 ```
 docker-compose up
 ```
+
+## Running RapidBay on a VPS
+
+[Setting RapidBay up on a VPS and tunnel torrent traffic through NordVPN](https://github.com/hauxir/rapidbay/wiki/Setting-RapidBay-up-on-a-VPS-and-tunnel-torrent-traffic-through-NordVPN)

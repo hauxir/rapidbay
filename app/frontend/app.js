@@ -119,7 +119,13 @@
     methods: {
       onSubmit: function(e) {
         e.preventDefault();
-        router.navigate("/search/" + this.searchterm);
+        if (this.searchterm.startsWith("magnet:")) {
+          router.navigate(
+            "/magnet/" + encodeURIComponent(encodeURIComponent(this.searchterm))
+          );
+        } else {
+          router.navigate("/search/" + this.searchterm);
+        }
       }
     }
   });

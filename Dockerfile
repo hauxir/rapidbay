@@ -8,7 +8,7 @@ RUN apt-get update && \
 
 RUN pip install flask
 RUN pip install lxml
-RUN pip install requests
+RUN pip install aiohttp
 RUN pip install beautifulsoup4
 RUN pip install pymediainfo
 RUN pip install Flask-BasicAuth

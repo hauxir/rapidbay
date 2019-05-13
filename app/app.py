@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -52,16 +53,27 @@ def frontend(path):
 @app.route("/api/search/<string:searchterm>")
 @basic_auth.required
 def search(searchterm):
-    results = {}
-    piratebay_results = piratebay.search(searchterm)
-    kat_results = kickasstorrents.search(searchterm)
-    merged_results = sorted(piratebay_results + kat_results, key=lambda x: x["seeds"], reverse=True)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    piratebay_results, kat_results = loop.run_until_complete(
+        asyncio.gather(
+            *[piratebay.search(searchterm), kickasstorrents.search(searchterm)]
+        )
+    )
+    merged_results = sorted(
+        piratebay_results + kat_results, key=lambda x: x["seeds"], reverse=True
+    )
+
+    result_map = {}
     for result in merged_results:
         magnet_link = result["magnet"]
         magnet_hash = torrent.get_hash(magnet_link).lower()
-        if not results.get(magnet_hash):
-            results[magnet_hash] = result
-    cleaned_results = sorted(results.values(), key=lambda x: x["seeds"], reverse=True)
+        if not result_map.get(magnet_hash):
+            result_map[magnet_hash] = result
+
+    cleaned_results = sorted(
+        result_map.values(), key=lambda x: x["seeds"], reverse=True
+    )
     return jsonify(results=cleaned_results)
 
 

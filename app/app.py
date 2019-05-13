@@ -1,6 +1,7 @@
 import json
 import os
 
+import kickasstorrents
 import piratebay
 import settings
 import torrent
@@ -51,7 +52,17 @@ def frontend(path):
 @app.route("/api/search/<string:searchterm>")
 @basic_auth.required
 def search(searchterm):
-    return jsonify(results=piratebay.search(searchterm))
+    results = {}
+    piratebay_results = piratebay.search(searchterm)
+    kat_results = kickasstorrents.search(searchterm)
+    merged_results = sorted(piratebay_results + kat_results, key=lambda x: x["seeds"], reverse=True)
+    for result in merged_results:
+        magnet_link = result["magnet"]
+        magnet_hash = torrent.get_hash(magnet_link).lower()
+        if not results.get(magnet_hash):
+            results[magnet_hash] = result
+    cleaned_results = sorted(results.values(), key=lambda x: x["seeds"], reverse=True)
+    return jsonify(results=cleaned_results)
 
 
 @app.route("/api/magnet_files/", methods=["POST"])

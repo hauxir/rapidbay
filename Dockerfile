@@ -7,6 +7,7 @@ RUN apt-get update && \
     mediainfo
 
 RUN pip install flask
+RUN pip install lxml
 RUN pip install requests
 RUN pip install beautifulsoup4
 RUN pip install pymediainfo

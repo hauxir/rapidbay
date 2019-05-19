@@ -79,7 +79,7 @@ class FileStatus:
     FINISHING_UP = "finishing_up"
     CONVERTING = "converting"
     CONVERSION_FAILED = "conversion_failed"
-    NO_TORRENT = "no_torrent"
+    WAITING_FOR_TORRENT = "waiting_for_torrent"
     WAITING_FOR_METADATA = "waiting_for_metadata"
     FILE_NOT_FOUND = "file_not_found"
     DOWNLOADING_SUBTITLES_FROM_TORRENT = "downloading_subtitles_from_torrent"
@@ -181,7 +181,7 @@ class RapidBayDaemon:
             return dict(status=FileStatus.CONVERTING, progress=progress)
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h:
-            return dict(status=FileStatus.NO_TORRENT)
+            return dict(status=FileStatus.WAITING_FOR_TORRENT)
         if not h.has_metadata():
             return dict(status=FileStatus.WAITING_FOR_METADATA)
         files = list(h.get_torrent_info().files())

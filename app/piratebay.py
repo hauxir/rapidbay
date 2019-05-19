@@ -7,7 +7,7 @@ async def search(searchterm):
     magnet_links = []
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            f"https://{settings.PIRATEBAY_HOST}/search/{searchterm}/1/7/0"
+            f"https://{settings.PIRATEBAY_HOST}/search/{searchterm}/1/99/0"
         ) as resp:
             data = await resp.text()
     try:

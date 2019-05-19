@@ -41,7 +41,7 @@ def get_hash(magnet_link):
         magnet_link.find("btih:") + 5 : magnet_link.find("&")
         if "&" in magnet_link
         else len(magnet_link)
-    ]
+    ].lower()
 
 
 class TorrentClient:

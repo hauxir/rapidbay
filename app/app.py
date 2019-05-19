@@ -67,7 +67,7 @@ def search(searchterm):
     result_map = {}
     for result in merged_results:
         magnet_link = result["magnet"]
-        magnet_hash = torrent.get_hash(magnet_link).lower()
+        magnet_hash = torrent.get_hash(magnet_link)
         if not result_map.get(magnet_hash):
             result_map[magnet_hash] = result
 

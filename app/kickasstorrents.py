@@ -10,7 +10,7 @@ async def search(searchterm):
     magnet_links = []
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            f"https://kickasstorrents.bz/usearch/{searchterm}/?field=seeders&sorder=desc",
+            f"https://kickasstorrents.bz/usearch/{searchterm}/",
             headers={"User-Agent": USER_AGENT},
         ) as resp:
             data = await resp.text()

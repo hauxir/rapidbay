@@ -10,13 +10,17 @@ body {
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  overflow: auto;
   height: 100%;
   width: 100%;
   max-width: 100%;
+}
+
+#app {
   overflow-y: scroll;
   -webkit-overflow-scrolling: touch;
 }
+
+
 
 /* Search form */
 

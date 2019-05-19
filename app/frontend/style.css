@@ -4,6 +4,11 @@ body {
   max-width: 100%;
 }
 
+body {
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+}
+
 #app,
 .wrapper {
   display: flex;
@@ -14,13 +19,6 @@ body {
   width: 100%;
   max-width: 100%;
 }
-
-#app {
-  overflow-y: scroll;
-  -webkit-overflow-scrolling: touch;
-}
-
-
 
 /* Search form */
 

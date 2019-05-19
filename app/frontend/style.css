@@ -12,7 +12,10 @@ body {
   flex-direction: column;
   overflow: auto;
   height: 100%;
+  width: 100%;
   max-width: 100%;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Search form */

@@ -1,16 +1,17 @@
 import aiohttp
+import log
 import settings
 from bs4 import BeautifulSoup
 
 
 async def search(searchterm):
     magnet_links = []
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"https://{settings.PIRATEBAY_HOST}/search/{searchterm}/1/99/0"
-        ) as resp:
-            data = await resp.text()
     try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://{settings.PIRATEBAY_HOST}/search/{searchterm}/1/99/0"
+            ) as resp:
+                data = await resp.text()
         soup = BeautifulSoup(data, "html.parser")
         trs = soup.find(id="searchResult").find_all("tr")
         for tr in trs:
@@ -25,7 +26,7 @@ async def search(searchterm):
                         dict(title=title, magnet=magnet_link, seeds=seeds)
                     )
             except Exception:
-                pass
+                log.write_log()
     except Exception:
-        pass
+        log.write_log()
     return magnet_links

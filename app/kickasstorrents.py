@@ -1,6 +1,7 @@
 from urllib.parse import unquote
 
 import aiohttp
+import log
 from bs4 import BeautifulSoup
 
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.131 Safari/537.36"  # noqa
@@ -8,13 +9,13 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_0) AppleWebKit/537.36
 
 async def search(searchterm):
     magnet_links = []
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"https://kickasstorrents.bz/usearch/{searchterm}/",
-            headers={"User-Agent": USER_AGENT},
-        ) as resp:
-            data = await resp.text()
     try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://kickasstorrents.bz/usearch/{searchterm}/",
+                headers={"User-Agent": USER_AGENT},
+            ) as resp:
+                data = await resp.text()
         soup = BeautifulSoup(data, "lxml")
         trs = soup.find("table", {"class": "data"}).find_all("tr")
         for tr in trs:
@@ -31,7 +32,7 @@ async def search(searchterm):
                         dict(title=title, magnet=magnet_link, seeds=seeds)
                     )
             except Exception as e:
-                pass
+                log.write_log()
     except Exception:
-        pass
+        log.write_log()
     return magnet_links

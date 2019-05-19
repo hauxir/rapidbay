@@ -45,8 +45,8 @@
   function get_hash(magnet_link) {
     var hash_start = magnet_link.indexOf("btih:") + 5;
     var hash_end = magnet_link.indexOf("&");
-    if (hash_end == -1) return magnet_link.substr(hash_start);
-    return magnet_link.substr(hash_start, hash_end - hash_start);
+    if (hash_end == -1) return magnet_link.substr(hash_start).toLowerCase();
+    return magnet_link.substr(hash_start, hash_end - hash_start).toLowerCase();
   }
 
   var rbmixin = {

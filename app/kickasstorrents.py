@@ -9,8 +9,9 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_0) AppleWebKit/537.36
 
 async def search(searchterm):
     magnet_links = []
+    timeout = aiohttp.ClientTimeout(total=60)
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(
                 f"https://kickasstorrents.bz/usearch/{searchterm}/",
                 headers={"User-Agent": USER_AGENT},

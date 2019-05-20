@@ -6,8 +6,9 @@ from bs4 import BeautifulSoup
 
 async def search(searchterm):
     magnet_links = []
+    timeout = aiohttp.ClientTimeout(total=60)
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(
                 f"https://{settings.PIRATEBAY_HOST}/search/{searchterm}/1/99/0"
             ) as resp:

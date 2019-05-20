@@ -22,12 +22,19 @@ async def search(searchterm):
         for tr in trs:
             try:
                 tds = tr.find_all("td")
-                seeds = int(tds[3].contents[0])
-                title = tds[0].find("a", {"class": "cellMainLink"}).contents[0]
+                try:
+                    seeds = int(tds[3].contents[0])
+                except ValueError:
+                    seeds = 0
+
+                title = str(tds[0].find("a", {"class": "cellMainLink"}).contents[0])
+
                 magnet_link = tds[0].find("a", {"title": "Torrent magnet link"})["href"]
                 magnet_link = magnet_link[magnet_link.find("magnet") :]
                 magnet_link = unquote(magnet_link)
                 magnet_link = unquote(magnet_link)
+                magnet_link = str(magnet_link)
+
                 if seeds:
                     magnet_links.append(
                         dict(title=title, magnet=magnet_link, seeds=seeds)

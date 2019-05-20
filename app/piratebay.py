@@ -18,10 +18,13 @@ async def search(searchterm):
         for tr in trs:
             try:
                 td = tr.find_all("td")[1]
-                seeds = int(tr.find_all("td")[2].contents[0])
+                try:
+                    seeds = int(tr.find_all("td")[2].contents[0])
+                except ValueError:
+                    seeds = 0
                 a = td.find_all("a")
                 title = str(a[0].contents[0])
-                magnet_link = a[1]["href"]
+                magnet_link = str(a[1]["href"])
                 if seeds:
                     magnet_links.append(
                         dict(title=title, magnet=magnet_link, seeds=seeds)

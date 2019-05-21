@@ -27,7 +27,7 @@ async def search(searchterm):
                 except ValueError:
                     seeds = 0
 
-                title = str(tds[0].find("a", {"class": "cellMainLink"}).contents[0])
+                title = str(tds[0].find("a", {"class": "cellMainLink"}).contents[0].getText())
 
                 magnet_link = tds[0].find("a", {"title": "Torrent magnet link"})["href"]
                 magnet_link = magnet_link[magnet_link.find("magnet") :]

@@ -48,6 +48,7 @@ def _extract_subtitles_as_vtt(filepath):
 
 
 def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[]):
+    output_extension = os.path.splitext(output_filepath)[1]
     media_info = MediaInfo.parse(input_filepath)
     audio_codecs = [
         t.codec.lower() for t in media_info.tracks if t.track_type == "Audio"
@@ -86,9 +87,9 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 "-c:s mov_text",
                 "-movflags faststart",
                 "-v quiet -stats",
-                f'"{output_filepath}{settings.INCOMPLETE_POSTFIX}" 2>> "{output_filepath}{settings.LOG_POSTFIX}"',
+                f'"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" 2>> "{output_filepath}{settings.LOG_POSTFIX}"',
                 "&&",
-                f'mv "{output_filepath}.incomplete.mp4" "{output_filepath}"',
+                f'mv "{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" "{output_filepath}"',
             ]
         ),
         shell=True,

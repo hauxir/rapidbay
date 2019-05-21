@@ -40,7 +40,7 @@ def _subtitle_indexes(h, filename):
 
 
 def _get_output_filepath(magnet_hash, filepath):
-    output_extension = "aac" if filepath.endswith("mp3") else "mp4"
+    output_extension = "m4a" if filepath.endswith("mp3") else "mp4"
     return (
         os.path.splitext(
             os.path.join(settings.OUTPUT_DIR, magnet_hash, os.path.basename(filepath))
@@ -161,6 +161,7 @@ class RapidBayDaemon:
     def get_file_status(self, magnet_hash, filename):
         assert self.thread.is_alive()
         output_filepath = _get_output_filepath(magnet_hash, filename)
+        output_extension = os.path.splitext(output_filepath)[1]
 
         if os.path.isfile(output_filepath):
             if self.video_converter.file_conversions.get(output_filepath):
@@ -174,7 +175,7 @@ class RapidBayDaemon:
                     if f.endswith(".vtt")
                 ],
             )
-        if os.path.isfile(f"{output_filepath}{settings.INCOMPLETE_POSTFIX}"):
+        if os.path.isfile(f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"):
             progress = video_conversion.get_conversion_progress(output_filepath)
             if not self.video_converter.file_conversions.get(output_filepath):
                 return dict(status=FileStatus.CONVERSION_FAILED)

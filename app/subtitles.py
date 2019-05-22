@@ -24,7 +24,7 @@ def download_all_subtitles(filepath):
     results = ost.search_subtitles([{"sublanguageid": "all", "moviehash": h}]) or []
     for chunk in _chunks(results, 20):
         sub_ids = {
-            r["IDSubtitleFile"]: f'{basename_without_ext}.{r["SubLanguageID"]}.srt'
+            r["IDSubtitleFile"]: f'{basename_without_ext}.{r["ISO639"]}.srt'
             for r in chunk
         }
         ost.download_subtitles(
@@ -45,6 +45,8 @@ def get_subtitle_language(subtitle_filename):
     except KeyError:
         try:
             two_letter_iso = filename_without_extension[-2:]
+            if two_letter_iso == "pb":
+                two_letter_iso = "pt"
             return languages.get(part1=two_letter_iso).part2b
         except KeyError:
             return None

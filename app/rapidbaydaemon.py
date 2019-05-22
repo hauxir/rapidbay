@@ -40,7 +40,7 @@ def _subtitle_indexes(h, filename):
 
 
 def _get_output_filepath(magnet_hash, filepath):
-    output_extension = "m4a" if filepath.endswith("mp3") else "mp4"
+    output_extension = "mp4"
     return (
         os.path.splitext(
             os.path.join(settings.OUTPUT_DIR, magnet_hash, os.path.basename(filepath))

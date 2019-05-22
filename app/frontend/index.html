@@ -104,7 +104,7 @@
     <script type="text/x-template" id="player-template">
         <div class="video_wrapper">
           <chromecast-button v-if="isDesktop && isChrome"/>
-          <video v-if="url" :src="url" controls>
+          <video v-if="url" :src="url" controls autoplay>
               <track v-for="subtitle in subtitles"
                   :label="subtitle.language" kind="subtitles"
                   :srclang="subtitle.language"

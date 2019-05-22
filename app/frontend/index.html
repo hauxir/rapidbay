@@ -14,6 +14,7 @@
     <script src="/lib/chromecastjs.js"></script>
     <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
     <link href="/style.css" rel="stylesheet" />
+    <link href="/lib/fontawesome/css/all.min.css" rel="stylesheet" />
     <link rel="icon" type="image/png" href="/favicon.png" />
   </head>
 
@@ -45,14 +46,14 @@
         <div class="input-group mb-3">
           <input type="text" autofocus class="form-control" v-model="searchterm">
           <div class="input-group-append">
-            <button class="btn btn-light" type="submit">Search</button>
+            <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
           </div>
         </div>
       </form>
     </script>
 
     <script type="text/x-template" id="search-results-screen-template">
-      <loading-spinner v-if="results === null" heading="Loading"/>
+      <loading-spinner v-if="results === null"/>
       <div v-else class="tablewrapper">
         <table class="table table-hover">
           <tbody>
@@ -68,7 +69,7 @@
     </script>
 
     <script type="text/x-template" id="filelist-screen-template">
-      <loading-spinner v-if="results === null" heading="Loading"/>
+      <loading-spinner v-if="results === null"/>
         <div v-else class="tablewrapper">
           <table class="table table-hover">
             <tbody>
@@ -115,7 +116,7 @@
     </script>
 
     <script type="text/x-template" id="chromecast-button-template">
-        <button class="btn btn-dark chromecast-button" @click="cast()">Send to Chromecast...</button>
+        <button class="btn btn-dark chromecast-button" @click="cast()"><div class="icon chromecast_icon"/></button>
     </script>
 
     <script src="/app.js"></script>

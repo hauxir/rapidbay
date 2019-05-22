@@ -174,7 +174,7 @@
         progress: null,
         status: null,
         peers: null,
-        heading: "Loading",
+        heading: "",
         subheading: null,
         play_link: null,
         subtitles: []

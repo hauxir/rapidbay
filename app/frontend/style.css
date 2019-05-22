@@ -158,3 +158,19 @@ body {
   top: 0;
   color: white;
 }
+
+.icon {
+    background-repeat: no-repeat;
+    background-size:cover;
+    height: 20px;
+    width: 20px;
+    color: white;
+}
+
+.search_icon {
+    background-image: url("/lib/icons/search_icon.svg");
+}
+
+.chromecast_icon {
+    background-image: url("/lib/icons/chromecast_icon.svg");
+}

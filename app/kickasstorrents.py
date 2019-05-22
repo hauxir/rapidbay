@@ -23,6 +23,9 @@ async def search(searchterm):
             try:
                 tds = tr.find_all("td")
 
+                if not tds:
+                    continue
+
                 try:
                     seeds = int(tds[3].contents[0])
                 except ValueError:

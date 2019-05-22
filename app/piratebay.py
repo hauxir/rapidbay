@@ -17,7 +17,10 @@ async def search(searchterm):
         trs = soup.find(id="searchResult").find_all("tr")
         for tr in trs:
             try:
-                td = tr.find_all("td")[1]
+                tds = tr.find_all("td")
+                if len(tds) < 2:
+                    continue
+                td = tds[1]
                 try:
                     seeds = int(tr.find_all("td")[2].contents[0])
                 except ValueError:

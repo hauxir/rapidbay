@@ -40,11 +40,14 @@ def _subtitle_indexes(h, filename):
 
 
 def _get_output_filepath(magnet_hash, filepath):
-    output_extension = "m4a" if filepath.endswith("mp3") else "mp4"
+    extension = os.path.splitext(filepath)[1][1:]
+    is_video = extension in settings.VIDEO_EXTENSIONS
+    output_extension = "mp4" if is_video else extension
     return (
         os.path.splitext(
             os.path.join(settings.OUTPUT_DIR, magnet_hash, os.path.basename(filepath))
-        )[0] + f".{output_extension}"
+        )[0]
+        + f".{output_extension}"
     )
 
 
@@ -87,6 +90,7 @@ class FileStatus:
     WAITING_FOR_CONVERSION = "waiting_for_conversion"
     DOWNLOAD_FINISHED = "download_finished"
     DOWNLOADING = "downloading"
+    READY_TO_COPY = "ready_to_copy"
 
 
 class SubtitleDownloadStatus:
@@ -160,6 +164,7 @@ class RapidBayDaemon:
 
     def get_file_status(self, magnet_hash, filename):
         assert self.thread.is_alive()
+        filename_extension = os.path.splitext(filename)[1]
         output_filepath = _get_output_filepath(magnet_hash, filename)
         output_extension = os.path.splitext(output_filepath)[1]
 
@@ -175,7 +180,9 @@ class RapidBayDaemon:
                     if f.endswith(".vtt")
                 ],
             )
-        if os.path.isfile(f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"):
+        if os.path.isfile(
+            f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
+        ):
             progress = video_conversion.get_conversion_progress(output_filepath)
             if not self.video_converter.file_conversions.get(output_filepath):
                 return dict(status=FileStatus.CONVERSION_FAILED)
@@ -191,18 +198,21 @@ class RapidBayDaemon:
             return dict(status=FileStatus.FILE_NOT_FOUND)
         download_progress = h.file_progress()[i] / f.size
         if download_progress == 1:
-            all_torrent_subtitles_downloaded = all(
-                h.file_progress()[i] == files[i].size
-                for i in _subtitle_indexes(h, filename)
-            )
-            if not all_torrent_subtitles_downloaded:
-                return dict(status=FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT)
-            filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-            subtitle_download_status = self.subtitle_downloads.get(filepath)
-            if subtitle_download_status == SubtitleDownloadStatus.DOWNLOADING:
-                return dict(status=FileStatus.DOWNLOADING_SUBTITLES)
-            if subtitle_download_status == SubtitleDownloadStatus.FINISHED:
-                return dict(status=FileStatus.WAITING_FOR_CONVERSION)
+            if filename_extension[1:] in settings.VIDEO_EXTENSIONS:
+                all_torrent_subtitles_downloaded = all(
+                    h.file_progress()[i] == files[i].size
+                    for i in _subtitle_indexes(h, filename)
+                )
+                if not all_torrent_subtitles_downloaded:
+                    return dict(status=FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT)
+                filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+                subtitle_download_status = self.subtitle_downloads.get(filepath)
+                if subtitle_download_status == SubtitleDownloadStatus.DOWNLOADING:
+                    return dict(status=FileStatus.DOWNLOADING_SUBTITLES)
+                if subtitle_download_status == SubtitleDownloadStatus.FINISHED:
+                    return dict(status=FileStatus.WAITING_FOR_CONVERSION)
+            else:
+                return dict(status=FileStatus.READY_TO_COPY)
             return dict(status=FileStatus.DOWNLOAD_FINISHED)
         return dict(
             status=FileStatus.DOWNLOADING,
@@ -258,7 +268,11 @@ class RapidBayDaemon:
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
                 self.video_converter.convert_file(filepath, output_filepath)
-            elif is_state(filename, FileStatus.CONVERSION_FAILED):
+            elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
+                filename, FileStatus.CONVERSION_FAILED
+            ):
+                output_dir = os.path.dirname(output_filepath)
+                os.makedirs(output_dir, exist_ok=True)
                 shutil.copy(filepath, output_filepath)
 
     @log.catch_and_log_exceptions
@@ -273,10 +287,7 @@ class RapidBayDaemon:
                 elif h.has_metadata():
                     self._handle_torrent(magnet_hash)
             except Exception as e:
-                if "invalid torrent handle used" in str(e):
-                    self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
-                else:
-                    raise e
+                raise e
         _remove_old_files_and_directories(
             settings.OUTPUT_DIR, settings.MAX_OUTPUT_FILE_AGE
         )

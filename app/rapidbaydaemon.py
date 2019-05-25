@@ -285,7 +285,8 @@ class RapidBayDaemon:
                 if _torrent_is_stale(h):
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
                 elif h.has_metadata():
-                    self._handle_torrent(magnet_hash)
+                    with self.torrent_client.locks.lock(magnet_hash):
+                        self._handle_torrent(magnet_hash)
             except Exception as e:
                 raise e
         _remove_old_files_and_directories(

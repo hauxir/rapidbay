@@ -1,4 +1,7 @@
 (function() {
+  window.isSafari = navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
+  window.isChrome = /Chrome/i.test(navigator.userAgent);
+
   if (!window.location.origin) {
     window.location.origin =
       window.location.protocol +
@@ -74,7 +77,7 @@
         isDesktop: !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(
           navigator.userAgent
         ),
-        isChrome: /Chrome/i.test(navigator.userAgent)
+        isChrome: window.isChrome
       };
     },
     template: "#player-template"
@@ -210,16 +213,18 @@
           self.play_link = data.filename
             ? "/play/" + magnet_hash + "/" + data.filename
             : null;
-          self.subtitles = data.subtitles
-            ? data.subtitles.map(function(sub) {
-                return {
-                  language: sub
-                    .substring(sub.lastIndexOf("_") + 1)
-                    .replace(".vtt", ""),
-                  url: "/play/" + magnet_hash + "/" + sub
-                };
-              })
-            : [];
+          if (!window.isSafari) {
+            self.subtitles = data.subtitles
+              ? data.subtitles.map(function(sub) {
+                  return {
+                    language: sub
+                      .substring(sub.lastIndexOf("_") + 1)
+                      .replace(".vtt", ""),
+                    url: "/play/" + magnet_hash + "/" + sub
+                  };
+                })
+              : [];
+          }
           if (self.status !== "ready") {
             rbsetTimeout(get_file_info, 1000);
           }

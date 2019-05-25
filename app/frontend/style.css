@@ -154,9 +154,8 @@ body {
 .video_url:hover,
 .video_url:active,
 .video_url:focus {
-  position: absolute;
-  top: 0;
   color: white;
+  margin-bottom: 15px;
 }
 
 .icon {

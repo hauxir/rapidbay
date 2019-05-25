@@ -85,10 +85,10 @@
 
     <script type="text/x-template" id="download-screen-template">
       <div class="player_wrapper" v-if="play_link">
-        <player :url="play_link" :subtitles="subtitles"/>
         <a :href="window.location.origin + play_link" class="video_url">
         {{play_link.split("/").pop()}}
         </a>
+        <player :url="play_link" :subtitles="subtitles"/>
       </div>
       <div v-else class="wrapper">
         <a class="filename">{{params.filename}}</a>

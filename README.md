@@ -8,7 +8,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 
 ## Features:
 - Search using a combination of the top torrent search engines - easily extendable to support other backends.
-- Pick individual video files you want to play and the system takes care of the rest, making the streamable to any device.
+- Pick individual video files you want to play and the system takes care of the rest to make it streamable.
 - Automatic download of Closed Captions/Subtitles
 - Automatically converts the video file and subtitles to be playable on all browsers/chromecast/appletv
 - Automatically converts audio that is unsupported by browsers to AAC

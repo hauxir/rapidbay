@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 
 async def search(searchterm):
     magnet_links = []
-    timeout = aiohttp.ClientTimeout(total=60)
+    timeout = aiohttp.ClientTimeout(total=10)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(

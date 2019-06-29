@@ -30,6 +30,10 @@ body {
   box-shadow: none;
 }
 
+.search_icon {
+    background-image: url("/lib/icons/search_icon.svg");
+}
+
 /* Results table */
 
 .table {
@@ -141,6 +145,7 @@ body {
 .video_wrapper video {
   width: 100%;
   height: 100%;
+  outline:0;
 }
 .chromecast-button {
   position: absolute;
@@ -164,10 +169,6 @@ body {
     height: 20px;
     width: 20px;
     color: white;
-}
-
-.search_icon {
-    background-image: url("/lib/icons/search_icon.svg");
 }
 
 .chromecast_icon {

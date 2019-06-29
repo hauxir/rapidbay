@@ -130,6 +130,15 @@
           router.navigate("/search/" + this.searchterm);
         }
       }
+    },
+    created: function() {
+      if (router.lastRouteResolved().url.toLowerCase() === "/registerhandler") {
+        navigator.registerProtocolHandler(
+          "magnet",
+          router.root + "/magnet/%s",
+          "RapidBay"
+        );
+      }
     }
   });
 

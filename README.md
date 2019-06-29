@@ -12,6 +12,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 - Automatic download of Closed Captions/Subtitles
 - Automatically converts the video file and subtitles to be playable on all browsers/chromecast/appletv
 - Automatically converts audio that is unsupported by browsers to AAC
+- Allows registering as a handler for any magnet link
 - Automatically cleans up disk space so you don't need to manage it yourself
 
 ## Demo:
@@ -23,6 +24,10 @@ Requires Docker
 docker run -p 5000:5000 -p 6881:6881 -p 6881:6881/udp -e USERNAME=<some-username> -e PASSWORD=<some-password> hauxir/rapidbay
 ```
 App will be running at http://localhost:5000
+
+## Registering as a handler for any magnet link:
+- Go to https://<YOUR HOST>/registerHandler and it should prompt you to register your running RapidBay instance as a default handler for torrent links on any torrent site!
+- You can also copy/paste a magnet link directly into the search bar to open magnet links manually.
 
 ## Developing
 Requires Docker + docker-compose

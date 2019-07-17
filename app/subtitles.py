@@ -21,7 +21,25 @@ def download_all_subtitles(filepath):
     ost.login(None, None)
     f = File(filepath)
     h = f.get_hash()
-    results = ost.search_subtitles([{"sublanguageid": "all", "moviehash": h}]) or []
+    results_from_hash = (
+        ost.search_subtitles([{"sublanguageid": "all", "moviehash": h}]) or []
+    )
+    languages_in_results_from_hash = [
+        lang_id for lang_id in [r.get("SubLanguageID") for r in results_from_hash]
+    ]
+    results_from_filename = [
+        r
+        for r in ost.search_subtitles(
+            [{"sublanguageid": "all", "query": basename_without_ext}]
+        )
+    ]
+    results_from_filename_but_not_from_hash = [
+        r
+        for r in results_from_filename
+        if r.get("SubLanguageID")
+        and r.get("SubLanguageID") not in languages_in_results_from_hash
+    ]
+    results = results_from_hash + results_from_filename_but_not_from_hash
     for chunk in _chunks(results, 20):
         sub_ids = {
             r["IDSubtitleFile"]: f'{basename_without_ext}.{r["ISO639"]}.srt'

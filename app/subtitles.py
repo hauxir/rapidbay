@@ -1,4 +1,6 @@
 import os
+import time
+from xmlrpc.client import ProtocolError
 
 import log
 from iso639 import languages
@@ -40,17 +42,30 @@ def download_all_subtitles(filepath):
         and r.get("SubLanguageID") not in languages_in_results_from_hash
     ]
     results = results_from_hash + results_from_filename_but_not_from_hash
-    for chunk in _chunks(results, 20):
+    for chunk in _chunks(results, 5):
         sub_ids = {
             r["IDSubtitleFile"]: f'{basename_without_ext}.{r["ISO639"]}.srt'
             for r in chunk
         }
-        ost.download_subtitles(
-            [_id for _id in sub_ids.keys()],
-            override_filenames=sub_ids,
-            output_directory=dirname,
-            extension="srt",
-        )
+
+        def _download_subtitle_chunk(retries=5):
+            nonlocal ost
+            try:
+                ost.download_subtitles(
+                    [_id for _id in sub_ids.keys()],
+                    override_filenames=sub_ids,
+                    output_directory=dirname,
+                    extension="srt",
+                )
+            except ProtocolError as e:
+                if retries == 0:
+                    raise e
+                time.sleep(10)
+                ost = OpenSubtitles()
+                ost.login(None, None)
+                _download_subtitle_chunk(retries=retries - 1)
+
+        _download_subtitle_chunk()
 
 
 def get_subtitle_language(subtitle_filename):

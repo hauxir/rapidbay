@@ -42,7 +42,8 @@ def download_all_subtitles(filepath):
         and r.get("SubLanguageID") not in languages_in_results_from_hash
     ]
     results = results_from_hash + results_from_filename_but_not_from_hash
-    for chunk in _chunks(results, 5):
+    wait_before_next_chunk = False
+    for chunk in _chunks(results, 10):
         sub_ids = {
             r["IDSubtitleFile"]: f'{basename_without_ext}.{r["ISO639"]}.srt'
             for r in chunk
@@ -65,7 +66,10 @@ def download_all_subtitles(filepath):
                 ost.login(None, None)
                 _download_subtitle_chunk(retries=retries - 1)
 
+        if wait_before_next_chunk:
+            time.sleep(10)
         _download_subtitle_chunk()
+        wait_before_next_chunk = True
 
 
 def get_subtitle_language(subtitle_filename):

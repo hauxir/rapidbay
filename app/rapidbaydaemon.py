@@ -174,11 +174,14 @@ class RapidBayDaemon:
             return dict(
                 status=FileStatus.READY,
                 filename=os.path.basename(output_filepath),
-                subtitles=[
-                    f
-                    for f in os.listdir(os.path.dirname(output_filepath))
-                    if f.endswith(".vtt")
-                ],
+                subtitles=sorted(
+                    [
+                        f
+                        for f in os.listdir(os.path.dirname(output_filepath))
+                        if f.endswith(".vtt")
+                    ],
+                    key=lambda fn: fn.split("_")[-1],
+                ),
             )
         if os.path.isfile(
             f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"

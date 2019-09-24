@@ -69,14 +69,14 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 "ffmpeg -nostdin",
                 f'-i "{input_filepath}"',
                 " ".join([f'-f srt -i "{fn}"' for (lang, fn) in subtitle_filepaths]),
-                "-map 0:v",
-                "-map 0:a",
-                "-map 0:s" if n_sub_tracks > 0 else "",
+                "-map 0:v?",
+                "-map 0:a?",
+                "-map 0:s?" if n_sub_tracks > 0 else "",
                 f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
                 if needs_audio_conversion
                 else "-acodec copy",
                 "-vcodec copy",
-                " ".join([f"-map {i}" for i in range(1, len(subtitle_filepaths) + 1)]),
+                " ".join([f"-map {i}?" for i in range(1, len(subtitle_filepaths) + 1)]),
                 " ".join(
                     [
                         f"-metadata:s:s:{i + n_sub_tracks} language='{subtitle_filepaths[i][0]}'"

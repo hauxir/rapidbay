@@ -35,6 +35,7 @@ Requires Docker + docker-compose
 ```
 docker-compose up
 ```
+Default username and password is admin:123456
 
 ## Running RapidBay on a VPS
 

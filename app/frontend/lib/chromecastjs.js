@@ -1,5 +1,5 @@
 var ChromecastJS = function(scope, reciever) {
-    // Define global object
+    // Define global object 
     var that = this
     // Define object variables
     that.Scope = (scope) ? scope : 'tab_and_origin_scoped'
@@ -91,7 +91,7 @@ var ChromecastJS = function(scope, reciever) {
         }
     }
     ChromecastJS.prototype.disconnect = function() {
-        cast.framework.CastContext.getInstance().endCurrentSession()
+        cast.framework.CastContext.getInstance().endCurrentSession(true)
     }
     // Check if a chromecast is available, trigger 'Init' event
     var castInterval = setInterval(function() {

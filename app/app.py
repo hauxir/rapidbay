@@ -137,7 +137,7 @@ def errorlog():
     return Response(data, mimetype="text/plain")
 
 
-@app.route("/status")
+@app.route("/api/status")
 @basic_auth.required
 def status():
     return jsonify(

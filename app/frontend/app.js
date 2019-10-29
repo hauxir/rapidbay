@@ -114,6 +114,39 @@
     }
   });
 
+  Vue.component("tree-view", {
+    template: "#tree-view-template",
+    props: {
+      tree: [Object, String],
+    },
+    computed: {
+      formatted_tree: function() {
+        if (this.tree) {
+          return this.create_tree(this.tree[""])
+        }
+        else return false;
+      }
+    },
+    methods: {
+      create_tree: function (folder_array, indent_level = 0) {
+        let output_string = "";
+        for (let item of folder_array) {
+          if (typeof item == "string") {
+            output_string += `|${'\t'.repeat(indent_level)}--${item}\n`;
+          } else if (item instanceof Object) {
+            Object.keys(item).forEach((key) => {
+              output_string += `|${'\t'.repeat(indent_level)}--${key}\n`;
+              indent_level += 1;
+              output_string += this.create_tree(item[key], indent_level);
+            });
+            indent_level -= 2;
+          }
+        }
+        return output_string;
+      }
+    }
+  });
+
   Vue.component("search-screen", {
     template: "#search-screen-template",
     data: function() {
@@ -242,6 +275,52 @@
     }
   });
 
+  Vue.component("status-screen", {
+    mixins: [rbmixin],
+    template: "#status-screen-template",
+    data: function() {
+      return {
+        status: {
+        }
+      };
+    },
+    created: function() {
+      var self = this;
+      get("/api/status", function(data) {
+        self.status = data;
+      })
+    },
+    computed: {
+      output_dir_info: function () {
+        return this.status.output_dir && this.status.output_dir.length !== 0 ? this.status.output_dir : null;
+      },
+      filelist_dir_info: function () {
+        return this.status.filelist_dir && this.status.filelist_dir.length !== 0 ? this.status.filelist_dir : null;
+      },
+      downloads_dir_info: function () {
+        return this.status.downloads_dir && this.status.downloads_dir.length !== 0 ? this.status.downloads_dir : null;
+      },
+      subtitle_downloads_info: function () {
+        let subtitle_array = [];
+        if (this.status.subtitle_downloads) {
+          Object.keys(this.status.subtitle_downloads).forEach((key) => {
+            subtitle_array.push(`${key}: ${this.status.subtitle_downloads[key]}`);
+          });
+        }
+        return subtitle_array;
+      },
+      conversions_info: function () {
+        let conversion_array = [];
+        if (this.status.conversions) {
+          Object.keys(this.status.conversions).forEach((key) => {
+            conversion_array.push(key);
+          });
+        }
+        return conversion_array;
+      }
+    },
+  });
+
   var vm = new Vue({
     el: "#app",
     data: { screen: null, params: {} }
@@ -267,7 +346,8 @@
       "search/:searchterm": display_view("search-results-screen"),
       "magnet/:magnet_link/": display_view("filelist-screen"),
       "magnet/:magnet_link/:filename": display_view("download-screen"),
-      "*": display_view("search-screen")
+      "dashboard": display_view("status-screen"),
+      "*": display_view("search-screen"),
     })
     .resolve();
 })();

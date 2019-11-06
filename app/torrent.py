@@ -107,7 +107,7 @@ def prioritize_last_n_pieces(h, f, n):
 def get_prioritized_padding(h, f):
     min_file_padding = 2000000
     return max(
-        math.ceil(min_file_padding * 1.0 / get_torrent_info(h).piece_length()), 3
+        math.ceil(min_file_padding * 1.0 / get_torrent_info(h).piece_length()), 2
     )
 
 

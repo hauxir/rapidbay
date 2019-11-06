@@ -24,12 +24,9 @@ def download_all_subtitles(filepath):
     ost.login(None, None)
     f = File(filepath)
     h = f.get_hash()
-    print("FILENAME", basename_without_ext, flush=True)
-    print("SUBTITLE_HASH", h, flush=True)
     results_from_hash = (
         ost.search_subtitles([{"sublanguageid": "all", "moviehash": h}]) or []
     )
-    print(len(results_from_hash), flush=True)
     languages_in_results_from_hash = [
         lang_id for lang_id in [r.get("SubLanguageID") for r in results_from_hash]
     ]

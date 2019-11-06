@@ -58,7 +58,6 @@ def torrent_is_finished(h):
 
 
 def prioritize_files(h, priorities):
-    get_torrent_info(h)
     piece_priorities_before = list(h.piece_priorities())
     h.prioritize_files(priorities)
 
@@ -108,7 +107,6 @@ def get_file_piece_indexes(h, f):
 
 
 def prioritize_first_n_pieces(h, f, n):
-    get_torrent_info(h)
     first_piece_index, _last_piece_index = get_file_piece_indexes(h, f)
 
     piece_priorities = list(h.piece_priorities())
@@ -120,7 +118,6 @@ def prioritize_first_n_pieces(h, f, n):
 
 
 def prioritize_last_n_pieces(h, f, n):
-    get_torrent_info(h)
     _first_piece_index, last_piece_index = get_file_piece_indexes(h, f)
 
     piece_priorities = list(h.piece_priorities())

@@ -24,7 +24,7 @@ def get_torrent_info(h):
 
 
 def get_index_and_file_from_files(h, filename):
-    files = list(get_torrent_info(h).files())
+    files = get_torrent_info(h).files()
     try:
         return next((i, f) for (i, f) in enumerate(files) if f.path.endswith(filename))
     except StopIteration:
@@ -58,13 +58,13 @@ def torrent_is_finished(h):
 
 
 def prioritize_files(h, priorities):
-    piece_priorities_before = list(h.piece_priorities())
+    piece_priorities_before = h.piece_priorities()
     h.prioritize_files(priorities)
 
     while h.file_priorities() != priorities:
         time.sleep(1)
 
-    piece_priorities_after = list(h.piece_priorities())
+    piece_priorities_after = h.piece_priorities()
 
     for i, priority in enumerate(piece_priorities_before):
         if priority == HIGHEST_PRIORITY:
@@ -75,7 +75,7 @@ def prioritize_files(h, priorities):
 
 def prioritize_pieces(h, priorities):
     h.prioritize_pieces(priorities)
-    while list(h.piece_priorities()) != priorities:
+    while h.piece_priorities() != priorities:
         time.sleep(1)
 
 
@@ -91,7 +91,7 @@ def get_hash(magnet_link):
 
 def get_file_piece_indexes(h, f):
     torrent_info = get_torrent_info(h)
-    total_pieces = len(list(h.piece_priorities()))
+    total_pieces = len(h.piece_priorities())
     bytes_per_piece = torrent_info.piece_length()
     total_torrent_size = torrent_info.total_size()
 
@@ -109,7 +109,7 @@ def get_file_piece_indexes(h, f):
 def prioritize_first_n_pieces(h, f, n):
     first_piece_index, _last_piece_index = get_file_piece_indexes(h, f)
 
-    piece_priorities = list(h.piece_priorities())
+    piece_priorities = h.piece_priorities()
     n = min(n, len(piece_priorities) - first_piece_index)
 
     for i in range(first_piece_index, first_piece_index + n):
@@ -120,7 +120,7 @@ def prioritize_first_n_pieces(h, f, n):
 def prioritize_last_n_pieces(h, f, n):
     _first_piece_index, last_piece_index = get_file_piece_indexes(h, f)
 
-    piece_priorities = list(h.piece_priorities())
+    piece_priorities = h.piece_priorities()
     n = min(n, len(piece_priorities))
 
     for i in range((last_piece_index - n) + 1, last_piece_index + 1):
@@ -246,7 +246,7 @@ class TorrentClient:
         )
         files = get_torrent_info(h).files()
         prioritize_files(h, [0] * len(files))
-        prioritize_pieces(h, [0] * len(list(h.piece_priorities())))
+        prioritize_pieces(h, [0] * len(h.piece_priorities()))
         self.torrents[magnet_hash] = h
         return h
 

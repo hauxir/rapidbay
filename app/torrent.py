@@ -13,6 +13,9 @@ import libtorrent
 
 from locking import LockManager
 
+NORMAL_PRIORITY = 1
+HIGHEST_PRIORITY = 7
+
 
 def get_torrent_info(h):
     while not h.has_metadata():
@@ -55,9 +58,20 @@ def torrent_is_finished(h):
 
 
 def prioritize_files(h, priorities):
+    get_torrent_info(h)
+    piece_priorities_before = list(h.piece_priorities())
     h.prioritize_files(priorities)
+
     while h.file_priorities() != priorities:
         time.sleep(1)
+
+    piece_priorities_after = list(h.piece_priorities())
+
+    for i, priority in enumerate(piece_priorities_before):
+        if priority == HIGHEST_PRIORITY:
+            piece_priorities_after[i] = priority
+
+    prioritize_pieces(h, piece_priorities_after)
 
 
 def prioritize_pieces(h, priorities):
@@ -100,10 +114,8 @@ def prioritize_first_n_pieces(h, f, n):
     piece_priorities = list(h.piece_priorities())
     n = min(n, len(piece_priorities) - first_piece_index)
 
-    print(first_piece_index, first_piece_index+n, flush=True)
-
     for i in range(first_piece_index, first_piece_index + n):
-        piece_priorities[i] = 7
+        piece_priorities[i] = HIGHEST_PRIORITY
     prioritize_pieces(h, piece_priorities)
 
 
@@ -115,7 +127,7 @@ def prioritize_last_n_pieces(h, f, n):
     n = min(n, len(piece_priorities))
 
     for i in range((last_piece_index - n) + 1, last_piece_index + 1):
-        piece_priorities[i] = 7
+        piece_priorities[i] = HIGHEST_PRIORITY
     prioritize_pieces(h, piece_priorities)
 
 
@@ -131,7 +143,6 @@ def have_pieces(h, from_index, to_index):
 
 
 def padded_pieces_completed(h, f):
-    print(h.piece_priorities(), flush=True)
     first_piece_index, last_piece_index = get_file_piece_indexes(h, f)
     prioritized_padding = get_prioritized_padding(h, f)
 
@@ -191,7 +202,7 @@ class TorrentClient:
             file_priorities = h.file_priorities()
             for i, f in enumerate(files):
                 if f.path.endswith(filename):
-                    file_priorities[i] = 1
+                    file_priorities[i] = NORMAL_PRIORITY
                     break
             prioritize_files(h, file_priorities)
 

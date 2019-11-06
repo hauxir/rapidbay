@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import shutil
 import time
@@ -35,6 +36,12 @@ def prioritize_files(h, priorities):
         time.sleep(1)
 
 
+def prioritize_pieces(h, priorities):
+    h.prioritize_pieces(priorities)
+    while list(h.piece_priorities()) != priorities:
+        time.sleep(1)
+
+
 def get_hash(magnet_link):
     if not magnet_link.startswith("magnet:?xt=urn:btih:"):
         raise Exception("Invalid magnet link")
@@ -43,6 +50,76 @@ def get_hash(magnet_link):
         if "&" in magnet_link
         else len(magnet_link)
     ].lower()
+
+
+def get_file_piece_indexes(h, f):
+    torrent_info = get_torrent_info(h)
+    total_pieces = len(list(h.piece_priorities()))
+    bytes_per_piece = torrent_info.piece_length()
+    total_torrent_size = torrent_info.total_size()
+
+    file_size = f.size
+    file_offset = f.offset
+
+    n_pieces = math.ceil(file_size * 1.0 / bytes_per_piece)
+    piece_offset = max(math.floor(file_offset * 1.0 / bytes_per_piece), 0)
+
+    last_piece_index = min(piece_offset + n_pieces - 1, total_pieces - 1)
+
+    return piece_offset, last_piece_index
+
+
+def prioritize_first_n_pieces(h, f, n):
+    get_torrent_info(h)
+    first_piece_index, _last_piece_index = get_file_piece_indexes(h, f)
+
+    piece_priorities = list(h.piece_priorities())
+    n = min(n, len(piece_priorities) - first_piece_index)
+
+    print(first_piece_index, first_piece_index+n, flush=True)
+
+    for i in range(first_piece_index, first_piece_index + n):
+        piece_priorities[i] = 7
+    prioritize_pieces(h, piece_priorities)
+
+
+def prioritize_last_n_pieces(h, f, n):
+    get_torrent_info(h)
+    _first_piece_index, last_piece_index = get_file_piece_indexes(h, f)
+
+    piece_priorities = list(h.piece_priorities())
+    n = min(n, len(piece_priorities))
+
+    for i in range((last_piece_index - n) + 1, last_piece_index + 1):
+        piece_priorities[i] = 7
+    prioritize_pieces(h, piece_priorities)
+
+
+def get_prioritized_padding(h, f):
+    min_file_padding = 2000000
+    return max(
+        math.ceil(min_file_padding * 1.0 / get_torrent_info(h).piece_length()), 3
+    )
+
+
+def have_pieces(h, from_index, to_index):
+    return all([h.have_piece(i) for i in range(from_index, to_index)])
+
+
+def padded_pieces_completed(h, f):
+    print(h.piece_priorities(), flush=True)
+    first_piece_index, last_piece_index = get_file_piece_indexes(h, f)
+    prioritized_padding = get_prioritized_padding(h, f)
+
+    have_beginning_pieces = have_pieces(
+        h, first_piece_index, first_piece_index + prioritized_padding
+    )
+
+    have_end_pieces = have_pieces(
+        h, last_piece_index - prioritized_padding + 1, last_piece_index + 1
+    )
+
+    return have_beginning_pieces and have_end_pieces
 
 
 class TorrentClient:
@@ -90,10 +167,24 @@ class TorrentClient:
             file_priorities = h.file_priorities()
             for i, f in enumerate(files):
                 if f.path.endswith(filename):
-                    file_priorities[i] = 4
+                    file_priorities[i] = 1
                     break
             prioritize_files(h, file_priorities)
+
+            prioritized_padding = get_prioritized_padding(h, f)
+
+            prioritize_first_n_pieces(h, f, prioritized_padding)
+            prioritize_last_n_pieces(h, f, prioritized_padding)
+
             self._write_filelist_to_disk(magnet_link)
+
+    def padded_pieces_completed(self, magnet_hash, filename):
+        h = self.torrents.get(magnet_hash)
+        files = get_torrent_info(h).files()
+        for i, f in enumerate(files):
+            if f.path.endswith(filename):
+                break
+        return padded_pieces_completed(h, f)
 
     def remove_torrent(self, magnet_hash, remove_files=False):
         try:
@@ -116,10 +207,14 @@ class TorrentClient:
         h = libtorrent.add_magnet_uri(
             self.session,
             magnet_link,
-            dict(save_path=os.path.join(self.download_dir, magnet_hash)),
+            dict(
+                save_path=os.path.join(self.download_dir, magnet_hash),
+                storage_mode=libtorrent.storage_mode_t(0),
+            ),
         )
         files = get_torrent_info(h).files()
         prioritize_files(h, [0] * len(files))
+        prioritize_pieces(h, [0] * len(list(h.piece_priorities())))
         self.torrents[magnet_hash] = h
         return h
 

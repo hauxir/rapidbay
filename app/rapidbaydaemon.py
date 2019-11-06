@@ -266,9 +266,11 @@ class RapidBayDaemon:
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             output_filepath = _get_output_filepath(magnet_hash, filepath)
 
-            if is_state(filename, FileStatus.DOWNLOAD_FINISHED):
+            if self.torrent_client.padded_pieces_completed(
+                magnet_hash, filename
+            ) or is_state(filename, FileStatus.DOWNLOAD_FINISHED):
                 self._download_external_subtitles(filepath)
-            elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
+            if is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
                 self.video_converter.convert_file(filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(

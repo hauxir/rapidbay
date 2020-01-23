@@ -25,6 +25,9 @@ SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS + ["mp3", "flac"]
 TORRENT_DOWNLOAD_LIMIT = -1
 TORRENT_UPLOAD_LIMIT = -1
 
+# SUBTITLES
+SUBTITLE_LANGUAGES = "ALL" # "ALL" or a list of languages, e.g. ["en", "de", "es"]
+
 # CONVERSION
 OUTPUT_DIR = "/tmp/output/"
 AAC_BITRATE = "128k"

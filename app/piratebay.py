@@ -10,7 +10,7 @@ async def search(searchterm):
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(
-                f"https://{settings.PIRATEBAY_HOST}/search/{searchterm}/1/99/0"
+                f"https://{settings.PIRATEBAY_HOST}/s/?q={searchterm}&category=0&page=0&orderby=99"
             ) as resp:
                 data = await resp.text()
         soup = BeautifulSoup(data, "html.parser")

@@ -3,6 +3,7 @@ import json
 import os
 
 import piratebay
+import jackett
 import settings
 import torrent
 from common import path_hierarchy
@@ -54,10 +55,15 @@ def frontend(path):
 def search(searchterm):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    [piratebay_results] = loop.run_until_complete(
-        asyncio.gather(*[piratebay.search(searchterm)])
-    )
-    merged_results = sorted(piratebay_results, key=lambda x: x["seeds"], reverse=True)
+    if settings.JACKETT_HOST:
+        [results] = loop.run_until_complete(
+            asyncio.gather(*[jackett.search(searchterm)])
+        )
+    else:
+        [results] = loop.run_until_complete(
+            asyncio.gather(*[piratebay.search(searchterm)])
+        )
+    merged_results = sorted(results, key=lambda x: x["seeds"], reverse=True)
 
     result_map = {}
     for result in merged_results:

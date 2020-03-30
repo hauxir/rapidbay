@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 
-import kickasstorrents
 import piratebay
 import settings
 import torrent
@@ -55,14 +54,10 @@ def frontend(path):
 def search(searchterm):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    piratebay_results, kat_results = loop.run_until_complete(
-        asyncio.gather(
-            *[piratebay.search(searchterm), kickasstorrents.search(searchterm)]
-        )
+    [piratebay_results] = loop.run_until_complete(
+        asyncio.gather(*[piratebay.search(searchterm)])
     )
-    merged_results = sorted(
-        piratebay_results + kat_results, key=lambda x: x["seeds"], reverse=True
-    )
+    merged_results = sorted(piratebay_results, key=lambda x: x["seeds"], reverse=True)
 
     result_map = {}
     for result in merged_results:

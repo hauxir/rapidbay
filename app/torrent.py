@@ -48,11 +48,12 @@ class TorrentClient:
     torrents = {}
 
     def __init__(
-        self, listening_port=6881, dht_routers=[], filelist_dir=None, download_dir=None
+        self, listening_port=None, dht_routers=[], filelist_dir=None, download_dir=None
     ):
         self.locks = LockManager()
         self.session = libtorrent.session()
-        self.session.listen_on(listening_port, listening_port)
+        if listening_port:
+            self.session.listen_on(listening_port, listening_port)
         for router, port in dht_routers:
             self.session.add_dht_router(router, port)
         self.session.start_dht()

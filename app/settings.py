@@ -9,7 +9,7 @@ LOGFILE = "/tmp/rapidbay_errors.log"
 PIRATEBAY_HOST = "piratebay.live"
 
 # TORRENT
-TORRENT_LISTENING_PORT = 6881
+TORRENT_LISTENING_PORT = None
 DOWNLOAD_DIR = "/tmp/downloads/"
 FILELIST_DIR = "/tmp/filelists/"
 DHT_ROUTERS = [
@@ -26,7 +26,7 @@ TORRENT_DOWNLOAD_LIMIT = -1
 TORRENT_UPLOAD_LIMIT = -1
 
 # SUBTITLES
-SUBTITLE_LANGUAGES = "ALL" # "ALL" or a list of languages, e.g. ["en", "de", "es"]
+SUBTITLE_LANGUAGES = "ALL"  # "ALL" or a list of languages, e.g. ["en", "de", "es"]
 
 # CONVERSION
 OUTPUT_DIR = "/tmp/output/"

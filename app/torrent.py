@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import time
+import random
 
 import libtorrent
 from locking import LockManager
@@ -54,6 +55,9 @@ class TorrentClient:
         self.session = libtorrent.session()
         if listening_port:
             self.session.listen_on(listening_port, listening_port)
+        else:
+            rand = random.randrange(17000, 18000)
+            self.session.listen_on(rand, rand + 10000)
         for router, port in dht_routers:
             self.session.add_dht_router(router, port)
         self.session.start_dht()

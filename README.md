@@ -15,6 +15,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 - Automatically converts audio that is unsupported by browsers to AAC
 - Allows registering as a handler for any magnet link
 - Automatically cleans up disk space so you don't need to manage it yourself
+- Supports using [Jackett](https://github.com/Jackett/Jackett) as a search backend.
 
 ## Demo:
 ![](https://user-images.githubusercontent.com/2439255/48429861-44b60b00-e76e-11e8-8bdb-042f125357ce.gif)
@@ -34,6 +35,12 @@ To solve this you need to customize which languages you want.
 Add the env variable SUBTITLE_LANGUAGES to your docker params like so:
 ```
 -e SUBTITLE_LANGUAGES="['en', 'de', 'es']"
+```
+## Using Jackett as a search backend:
+Rapidbay supports using the torrent indexer [Jackett](https://github.com/Jackett/Jackett) for searching.
+Just provide the the env variables JACKETT_HOST and JACKETT_API_KEY like so:
+```
+-e JACKETT_HOST="http://your.jacket.host" -e JACKETT_API_KEY="YourAPIKey"
 ```
 
 ## Registering as a handler for any magnet link:

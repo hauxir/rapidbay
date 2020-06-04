@@ -9,13 +9,13 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 
 ## Features:
 - Search using a combination of the top torrent search engines - easily extendable to support other backends.
+- Supports using [Jackett](https://github.com/Jackett/Jackett) as a search backend(**HIGHLY RECOMMENDED**). 
 - Pick individual video files you want to play and the system takes care of the rest to make it streamable.
 - Automatic download of Closed Captions/Subtitles
 - Automatically converts the video file and subtitles to be playable on all browsers/chromecast/appletv
 - Automatically converts audio that is unsupported by browsers to AAC
 - Allows registering as a handler for any magnet link
 - Automatically cleans up disk space so you don't need to manage it yourself
-- Supports using [Jackett](https://github.com/Jackett/Jackett) as a search backend.
 
 ## Demo:
 ![](https://user-images.githubusercontent.com/2439255/48429861-44b60b00-e76e-11e8-8bdb-042f125357ce.gif)

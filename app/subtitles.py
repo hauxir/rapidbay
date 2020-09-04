@@ -32,8 +32,11 @@ def download_all_subtitles(filepath):
     ]
     results_from_filename = [
         r
-        for r in ost.search_subtitles(
-            [{"sublanguageid": "all", "query": basename_without_ext}]
+        for r in (
+            ost.search_subtitles(
+                [{"sublanguageid": "all", "query": basename_without_ext}]
+            )
+            or []
         )
     ]
     results_from_filename_but_not_from_hash = [

@@ -8,11 +8,11 @@ RUN apt-get update && \
 
 RUN pip install flask
 RUN pip install lxml
-RUN pip install aiohttp
 RUN pip install beautifulsoup4
 RUN pip install pymediainfo
 RUN pip install Flask-BasicAuth
 RUN pip install iso-639
+RUN pip install requests
 RUN pip install -e git+https://github.com/agonzalezro/python-opensubtitles#egg=python-opensubtitles
 
 # BitTorrent incoming

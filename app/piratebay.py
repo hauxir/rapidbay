@@ -1,18 +1,17 @@
-import aiohttp
+import requests
 import log
 import settings
+
 from bs4 import BeautifulSoup
 
 
-async def search(searchterm):
+def search(searchterm):
     magnet_links = []
-    timeout = aiohttp.ClientTimeout(total=10)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                f"https://{settings.PIRATEBAY_HOST}/s/?q={searchterm}&category=0&page=0&orderby=99"
-            ) as resp:
-                data = await resp.text()
+        resp = requests.get(
+            f"https://{settings.PIRATEBAY_HOST}/s/?q={searchterm}&category=0&page=0&orderby=99"
+        )
+        data = resp.text
         soup = BeautifulSoup(data, "html.parser")
         trs = soup.find(id="searchResult").find_all("tr")
         for tr in trs:

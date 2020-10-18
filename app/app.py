@@ -53,29 +53,11 @@ def frontend(path):
 @app.route("/api/search/<string:searchterm>")
 @basic_auth.required
 def search(searchterm):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     if settings.JACKETT_HOST:
-        [results] = loop.run_until_complete(
-            asyncio.gather(*[jackett.search(searchterm)])
-        )
+        results = jackett.search(searchterm)
     else:
-        [results] = loop.run_until_complete(
-            asyncio.gather(*[piratebay.search(searchterm)])
-        )
-    merged_results = sorted(results, key=lambda x: x["seeds"], reverse=True)
-
-    result_map = {}
-    for result in merged_results:
-        magnet_link = result["magnet"]
-        magnet_hash = torrent.get_hash(magnet_link)
-        if not result_map.get(magnet_hash):
-            result_map[magnet_hash] = result
-
-    cleaned_results = sorted(
-        result_map.values(), key=lambda x: x["seeds"], reverse=True
-    )
-    return jsonify(results=cleaned_results)
+        results = piratebay.search(searchterm)
+    return jsonify(results=sorted(results, key=lambda x: x["seeds"], reverse=True))
 
 
 @app.route("/api/magnet_files/", methods=["POST"])

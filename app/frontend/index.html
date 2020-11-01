@@ -118,6 +118,47 @@
         <button class="btn btn-dark chromecast-button" @click="cast()"><div class="icon chromecast_icon"/></button>
     </script>
 
+    <script type="text/x-template" id="tree-view-template">
+      <pre v-if="formatted_tree" class="text-left">{{ formatted_tree }}</pre>
+      <p v-else class="text-right">Directory empty.</p>
+    </script>
+
+    <script type="text/x-template" id="status-screen-template">
+      <div class="container">
+        <h1>Status</h1>
+        <div class="row">
+          <div class="col-sm-2"></div>
+          <div class="col-sm-8">
+            <!-- <p>{{ status }}</p> -->
+            <p class="text-white text-left">Torrent Downloads</p>
+            <p class="text-right">{{ status.torrent_downloads }}</p>
+            <p class="text-white text-left">Conversions in Progress</p>
+            <ul v-if="conversions_info.length != 0">
+              <li v-for="conversion in conversions_info">{{ conversion }}</li>
+            </ul>
+            <p v-else class="text-right">No files being converted.</p>
+            <p class="text-white text-left">Subtitle Downloads</p>
+            <ul v-if="subtitle_downloads_info.length != 0">
+              <li v-for="item in subtitle_downloads_info">{{ item }}</li>
+            </ul>
+            <p v-else class="text-right">No subtitles downloaded or downloading.</p>
+            <p class="text-white text-left">Session Torrents</p>
+            <ul v-if="status.session_torrents.length != 0">
+              <li v-for="torrent in status.session_torrents">{{ torrent }}</li>
+            </ul>
+            <p v-else class="text-right">No torrents this session.</p>
+            <p class="text-white text-left">Output Directory</p>
+            <tree-view :tree="output_dir_info"></tree-view>
+            <p class="text-white text-left">File List</p>
+            <tree-view :tree="filelist_dir_info"></tree-view>
+            <p class="text-white text-left">Download List</p>
+            <tree-view :tree="downloads_dir_info"></tree-view>
+          </div>
+          <div class="col-sm-2"></div>
+        </div>
+      </div>
+    </script>
+
     <script src="/app.js"></script>
   </body>
 </html>

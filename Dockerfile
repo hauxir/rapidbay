@@ -9,7 +9,7 @@ RUN apt-get update && \
 RUN pip install flask
 RUN pip install lxml
 RUN pip install beautifulsoup4
-RUN pip install pymediainfo
+RUN pip install pymediainfo==4.2.1
 RUN pip install Flask-BasicAuth
 RUN pip install iso-639
 RUN pip install requests

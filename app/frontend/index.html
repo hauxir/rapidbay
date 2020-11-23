@@ -51,6 +51,10 @@
       </form>
     </script>
 
+    <script type="text/x-template" id="torrent-link-screen-template">
+      <loading-spinner/>
+    </script>
+
     <script type="text/x-template" id="search-results-screen-template">
       <loading-spinner v-if="results === null"/>
       <div v-else class="tablewrapper">
@@ -58,7 +62,7 @@
           <tbody>
             <tr
             v-for="result in results"
-            @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet)))"
+            @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
             >
               <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')">{{ result.title}}</td>
             </tr>

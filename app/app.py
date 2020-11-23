@@ -1,6 +1,9 @@
 import asyncio
 import json
 import os
+import string
+import random
+import requests
 
 import piratebay
 import jackett
@@ -58,6 +61,29 @@ def search(searchterm):
     else:
         results = piratebay.search(searchterm)
     return jsonify(results=sorted(results, key=lambda x: x["seeds"], reverse=True))
+
+
+@app.route("/api/torrent_url_to_magnet/", methods=["POST"])
+@basic_auth.required
+def torrent_url_to_magnet():
+    torrent_url = request.form.get("url")
+    filepath = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
+    magnet_link = None
+    try:
+        r = requests.get(torrent_url, allow_redirects=False)
+        if r.status_code == 302:
+            location = r.headers.get("Location")
+            if location and location.startswith("magnet"):
+                return jsonify(magnet_link=location)
+        with open(filepath, 'wb') as f:
+            f.write(r.content)
+        magnet_link = torrent.make_magnet_from_torrent_file(filepath)
+    finally:
+        try:
+            os.remove(filepath)
+        except FileNotFoundError:
+            pass
+    return jsonify(magnet_link=magnet_link)
 
 
 @app.route("/api/magnet_files/", methods=["POST"])

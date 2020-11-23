@@ -51,7 +51,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
     output_extension = os.path.splitext(output_filepath)[1]
     media_info = MediaInfo.parse(input_filepath)
     audio_codecs = [
-        t.codec.lower() for t in media_info.tracks if t.track_type == "Audio"
+        t.format.lower() for t in media_info.tracks if t.track_type == "Audio"
     ]
     needs_audio_conversion = not any("aac" in c for c in audio_codecs)
     n_sub_tracks = len([t for t in media_info.tracks if t.track_type == "Text"])

@@ -156,6 +156,27 @@
     }
   });
 
+  Vue.component("torrent-link-screen", {
+    mixins: [rbmixin],
+    template: "#torrent-link-screen-template",
+    created: function () {
+      var self = this;
+      $.post(
+        "/api/torrent_url_to_magnet/",
+        {
+          url: this.params.torrent_link,
+        },
+        function (data) {
+          router.historyAPIUpdateMethod('replaceState')
+          router.navigate(
+            "/magnet/" +
+              encodeURIComponent(encodeURIComponent(data.magnet_link))
+          );
+        }
+      );
+    },
+  });
+
   Vue.component("filelist-screen", {
     mixins: [rbmixin],
     data: function() {
@@ -163,6 +184,7 @@
     },
     template: "#filelist-screen-template",
     created: function() {
+      router.historyAPIUpdateMethod('pushState')
       $.post("/api/magnet_files/", { magnet_link: this.params.magnet_link });
       var self = this;
       (function get_files() {
@@ -265,6 +287,7 @@
   router
     .on({
       "search/:searchterm": display_view("search-results-screen"),
+      "torrent/:torrent_link/": display_view("torrent-link-screen"),
       "magnet/:magnet_link/": display_view("filelist-screen"),
       "magnet/:magnet_link/:filename": display_view("download-screen"),
       "*": display_view("search-screen")

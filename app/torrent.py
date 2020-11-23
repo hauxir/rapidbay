@@ -3,8 +3,13 @@ import os
 import shutil
 import time
 import random
+import sys
+import hashlib
+import base64
 
+import bencodepy
 import libtorrent
+
 from locking import LockManager
 
 
@@ -20,6 +25,25 @@ def get_index_and_file_from_files(h, filename):
         return next((i, f) for (i, f) in enumerate(files) if f.path.endswith(filename))
     except StopIteration:
         return (None, None)
+
+
+def make_magnet_from_torrent_file(file):
+    metadata = bencodepy.decode_from_file(file)
+    subj = metadata.get(b'info', {})
+    hashcontents = bencodepy.encode(subj)
+    digest = hashlib.sha1(hashcontents).digest()
+    b32hash = base64.b32encode(digest).decode()
+    return 'magnet:?'\
+             + 'xt=urn:btih:' + b32hash\
+             + '&dn=' + metadata.get(b'info', {}).get(b'name', b'').decode()\
+             + '&tr=' + metadata.get(b'announce', b'').decode()\
+             + "".join([
+                "&tr=" + tr.decode()
+                for trlist in metadata.get(b'announce-list', [])
+                for tr in trlist
+                if tr.decode().strip()
+             ])\
+             + '&xl=' + str(metadata.get(b'info', {}).get(b'length'))
 
 
 def torrent_is_finished(h):

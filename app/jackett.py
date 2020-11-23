@@ -12,12 +12,13 @@ def search(searchterm):
         data = resp.json()
         results = data["Results"]
         for result in results:
-            if result.get("MagnetUri") and result.get("Title"):
+            if (result.get("Link") or result.get("MagnetUri")) and result.get("Title"):
                 magnet_links.append(
                     dict(
                         seeds=result.get("Seeders", 0),
                         title=result["Title"],
-                        magnet=result["MagnetUri"],
+                        magnet=result.get("MagnetUri"),
+                        torrent_link=result.get("Link")
                     )
                 )
     except Exception:

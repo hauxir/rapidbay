@@ -4,3 +4,4 @@ rapidbay:
   build: .
   volumes:
     - ./app:/app
+    - ./tmp:/tmp

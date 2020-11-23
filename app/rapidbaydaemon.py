@@ -266,9 +266,26 @@ class RapidBayDaemon:
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             output_filepath = _get_output_filepath(magnet_hash, filepath)
 
+            """
+            for piece_number in self.torrent_client.get_finished_pieces(magnet_hash, filename):
+                splitted_filepath = os.path.splitext(output_filepath)
+                output_filename_without_extension = splitted_filepath[0] + "_" + splitted_filepath[1]
+                piecedir = os.path.join(output_filename_without_extension)
+                piece_filename = os.path.join(piecedir, str(piece_number))
+                if not os.path.isfile(piece_filename):
+                    data = self.torrent_client.read_piece(magnet_hash, filename, piece_number)
+                    if data:
+                        os.makedirs(piecedir, exist_ok=True)
+                        with open(piece_filename, "wb") as f:
+                            f.write(data)
+            self.torrent_client.get_finished_pieces(magnet_hash, filename)
+            """
+
             if self.torrent_client.padded_pieces_completed(
                 magnet_hash, filename
             ) or is_state(filename, FileStatus.DOWNLOAD_FINISHED):
+                if video_conversion.eligible_for_conversion(filepath):
+                    self.video_converter.generate_hls_stream(filepath, output_filepath)
                 self._download_external_subtitles(filepath)
             if is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)

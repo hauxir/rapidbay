@@ -12,6 +12,8 @@ import bencodepy
 import libtorrent
 
 from locking import LockManager
+from common import threaded
+import log
 
 NORMAL_PRIORITY = 1
 HIGHEST_PRIORITY = 7
@@ -173,6 +175,21 @@ class TorrentClient:
         self.filelist_dir = filelist_dir
         self.download_dir = download_dir
 
+        self._piece_wait_queue = {}
+        self._read_alerts()
+
+    @threaded
+    @log.catch_and_log_exceptions
+    def _read_alerts(self):
+        while True:
+            alert = self.session.wait_for_alert(500)
+            if alert:
+                if isinstance(alert, libtorrent.read_piece_alert):
+                    self._piece_wait_queue[alert.piece] = alert.buffer
+                self.session.pop_alerts()
+                self.session.pop_alerts()
+
+
     def fetch_filelist_from_link(self, magnet_link):
         if self.filelist_dir is None:
             return
@@ -218,6 +235,27 @@ class TorrentClient:
                 break
         return padded_pieces_completed(h, f)
 
+    def get_file_piece_indexes(self, magnet_hash, filename):
+        h = self.torrents.get(magnet_hash)
+        files = get_torrent_info(h).files()
+        for i, f in enumerate(files):
+            if f.path.endswith(filename):
+                break
+        piece_ranges = list(get_file_piece_indexes(h,f))
+        piece_ranges[1] = piece_ranges[1] + 1
+        file_piece_indexes = [i for i in range(*piece_ranges)]
+        return file_piece_indexes
+
+    def get_finished_pieces(self, magnet_hash, filename):
+        h = self.torrents.get(magnet_hash)
+        return [
+            i for (i,have_piece) in
+            [
+                (i,h.have_piece(i)) for i in self.get_file_piece_indexes(magnet_hash, filename)
+            ]
+            if have_piece
+        ]
+
     def remove_torrent(self, magnet_hash, remove_files=False):
         try:
             h = self.torrents[magnet_hash]
@@ -233,6 +271,18 @@ class TorrentClient:
                 shutil.rmtree(os.path.join(self.download_dir, magnet_hash))
             except FileNotFoundError:
                 pass
+
+    def read_piece(self, magnet_hash, filename, index):
+        if index in self._piece_wait_queue:
+            return None
+        h = self.torrents.get(magnet_hash)
+        h.read_piece(index)
+        self._piece_wait_queue[index] = None
+        data = None
+        while data is None:
+            data = self._piece_wait_queue[index]
+        del self._piece_wait_queue[index]
+        return data
 
     def _add_magnet_link_to_downloads(self, magnet_link):
         magnet_hash = get_hash(magnet_link)

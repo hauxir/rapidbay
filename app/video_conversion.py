@@ -69,6 +69,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 "ffmpeg -nostdin",
                 f'-i "{input_filepath}"',
                 " ".join([f'-f srt -i "{fn}"' for (lang, fn) in subtitle_filepaths]),
+                "-err_detect ignore_err",
                 "-map 0:v?",
                 "-map 0:a?",
                 "-map 0:s?" if n_sub_tracks > 0 else "",
@@ -90,6 +91,35 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 f'"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" 2>> "{output_filepath}{settings.LOG_POSTFIX}"',
                 "&&",
                 f'mv "{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" "{output_filepath}"',
+            ]
+        ),
+        shell=True,
+    )
+
+def _convert_file_to_hls_stream(input_filepath, output_filepath):
+    media_info = MediaInfo.parse(input_filepath)
+    audio_codecs = [
+        t.codec.lower() for t in media_info.tracks if t.track_type == "Audio"
+    ]
+    needs_audio_conversion = not any("aac" in c for c in audio_codecs)
+    return Popen(
+        " ".join(
+            [
+                "ffmpeg -nostdin",
+                f'-i "{input_filepath}"',
+                "-err_detect ignore_err",
+                f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
+                if needs_audio_conversion
+                else "-acodec copy",
+                "-vcodec copy",
+                "-sn",
+                "-segment_time 00:01:00",
+                "-f segment",
+                f"-segment_list '{output_filepath}.tmp.m3u8'",
+                "-v quiet -stats",
+                f'"{output_filepath}_chunk%03d.ts"',
+                "&&",
+                f'mv "{output_filepath}.tmp.m3u8" "{output_filepath}.m3u8"',
             ]
         ),
         shell=True,
@@ -117,6 +147,19 @@ def get_conversion_progress(filepath):
                 ).total_seconds()
                 return current_duration / duration
     return 0.0
+
+
+def eligible_for_conversion(filepath):
+    media_info = MediaInfo.parse(filepath)
+    audio_tracks = [t for t in media_info.tracks if t.track_type == "Audio"]
+    video_tracks = [t for t in media_info.tracks if t.track_type == "Video"]
+    return len(audio_tracks) > 0 and len(video_tracks) > 0
+
+
+def get_time_duration(filepath):
+    media_info = MediaInfo.parse(filepath)
+    duration = next((t.duration for t in media_info.tracks if t.duration), None)
+    return duration
 
 
 class VideoConverter:
@@ -160,6 +203,38 @@ class VideoConverter:
 
             _extract_subtitles_as_vtt(output_filepath).wait()
 
+        finally:
+            try:
+                del self.file_conversions[output_filepath]
+            except KeyError:
+                pass
+
+    @threaded
+    @log.catch_and_log_exceptions
+    def generate_hls_stream(self, input_filepath, output_filepath):
+        try:
+
+            if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
+                return
+
+            if self.file_conversions.get(output_filepath):
+                return
+
+            self.file_conversions[output_filepath] = True
+
+            output_dir = os.path.dirname(output_filepath)
+            os.makedirs(output_dir, exist_ok=True)
+
+            conversion = _convert_file_to_hls_stream(
+                input_filepath,
+                output_filepath
+            )
+            conversion.wait()
+
+            if conversion.returncode != 0:
+                raise Exception(f"Conversion failed for {input_filepath}: {conversion.returncode}")
+        except Exception as e:
+            log.debug(e)
         finally:
             try:
                 del self.file_conversions[output_filepath]

@@ -1,7 +1,9 @@
+import asyncio
 import datetime
 import os
 import re
 import time
+from pathlib import Path
 from subprocess import Popen
 
 import log
@@ -9,6 +11,7 @@ import settings
 from common import threaded
 from pymediainfo import MediaInfo
 from subtitles import get_subtitle_language
+from threading import Lock
 
 
 def _recursive_filepaths(dir_name):
@@ -97,9 +100,10 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
     )
 
 def _convert_file_to_hls_stream(input_filepath, output_filepath):
+    log.debug(str([datetime.datetime.now(), "HLS", input_filepath, output_filepath]))
     media_info = MediaInfo.parse(input_filepath)
     audio_codecs = [
-        t.codec.lower() for t in media_info.tracks if t.track_type == "Audio"
+        t.format.lower() for t in media_info.tracks if t.track_type == "Audio"
     ]
     needs_audio_conversion = not any("aac" in c for c in audio_codecs)
     return Popen(
@@ -114,12 +118,11 @@ def _convert_file_to_hls_stream(input_filepath, output_filepath):
                 "-vcodec copy",
                 "-sn",
                 "-segment_time 00:01:00",
+                "-reset_timestamps 1",
                 "-f segment",
-                f"-segment_list '{output_filepath}.tmp.m3u8'",
+                #f"-segment_list '{output_filepath}.tmp.m3u8'",
                 "-v quiet -stats",
-                f'"{output_filepath}_chunk%03d.ts"',
-                "&&",
-                f'mv "{output_filepath}.tmp.m3u8" "{output_filepath}.m3u8"',
+                f'"{output_filepath}_chunk%03d.ts" 2>> "{output_filepath}_hls_{settings.LOG_POSTFIX}"',
             ]
         ),
         shell=True,
@@ -149,6 +152,29 @@ def get_conversion_progress(filepath):
     return 0.0
 
 
+def get_chunks(filepath):
+    dirname = os.path.dirname(filepath)
+    if not os.path.isdir(dirname):
+        return []
+    basename = os.path.basename(filepath)
+    chunk_files = [f for f in os.listdir(dirname) if f.startswith(basename) and f.endswith(".ts")]
+    chunk_files_with_duration = [(f, get_time_duration(os.path.join(dirname, f))) for f in chunk_files]
+    return chunk_files_with_duration
+
+def get_hls_playlist(filepath, prefix):
+    chunks = get_chunks(filepath)
+    return f"""#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:60
+#EXT-X-ALLOW-CACHE:NO
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-START:TIME-OFFSET=-3600
+""" + \
+    "".join([f"""#EXTINF:{c[1]},
+{c[0]}
+""" for c in chunks])
+
+
 def eligible_for_conversion(filepath):
     media_info = MediaInfo.parse(filepath)
     audio_tracks = [t for t in media_info.tracks if t.track_type == "Audio"]
@@ -157,26 +183,37 @@ def eligible_for_conversion(filepath):
 
 
 def get_time_duration(filepath):
+    duration_file = filepath + ".duration.txt"
+    if os.path.isfile(duration_file):
+        return float(Path(duration_file).read_text().strip())/1000
     media_info = MediaInfo.parse(filepath)
-    duration = next((t.duration for t in media_info.tracks if t.duration), None)
-    return duration
+    duration = next((t.duration for t in media_info.tracks if t.duration and t.track_type == "Video"), None)
+    with open(duration_file, "w") as f:
+        f.write(str(duration))
+    return get_time_duration(filepath)
 
 
 class VideoConverter:
     file_conversions = {}
+    lock = Lock()
+
 
     @threaded
     @log.catch_and_log_exceptions
     def convert_file(self, input_filepath, output_filepath):
-        try:
+        self.lock.acquire()
 
-            if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
-                return
-            if self.file_conversions.get(output_filepath):
-                return
+        if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
+            return
 
+        if self.file_conversions.get(output_filepath):
+            self.lock.release()
+            return
+        else:
             self.file_conversions[output_filepath] = True
+            self.lock.release()
 
+        try:
             output_dir = os.path.dirname(output_filepath)
             os.makedirs(output_dir, exist_ok=True)
 
@@ -212,31 +249,50 @@ class VideoConverter:
     @threaded
     @log.catch_and_log_exceptions
     def generate_hls_stream(self, input_filepath, output_filepath):
+        log.debug(str([datetime.datetime.now(), "generate_hls_stream", input_filepath, output_filepath]))
+        log.debug(str([datetime.datetime.now(), "lock_state", self.file_conversions]))
+        self.lock.acquire()
+
+        if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
+            return
+
+        if self.file_conversions.get(output_filepath):
+            self.lock.release()
+            return
+        else:
+            self.file_conversions[output_filepath] = True
+            self.lock.release()
+
         try:
-
-            if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
-                return
-
-            if self.file_conversions.get(output_filepath):
-                return
+            log.debug(str([datetime.datetime.now(), "got_passed_lock", input_filepath, output_filepath]))
 
             self.file_conversions[output_filepath] = True
 
             output_dir = os.path.dirname(output_filepath)
             os.makedirs(output_dir, exist_ok=True)
 
+            log.debug(str([datetime.datetime.now(), "STARTING CONVERSION", input_filepath, output_filepath]))
             conversion = _convert_file_to_hls_stream(
                 input_filepath,
                 output_filepath
             )
+            log.debug(str([datetime.datetime.now(), "WAITING FOR CONVERSION", input_filepath, output_filepath]))
             conversion.wait()
 
+            get_chunks(output_filepath)
+
+            log.debug(str([datetime.datetime.now(), "DONE WAITING FOR CONVERSION", input_filepath, output_filepath]))
+
             if conversion.returncode != 0:
+                log.debug(str([datetime.datetime.now(), "FAILED"]))
+                time.sleep(20)
                 raise Exception(f"Conversion failed for {input_filepath}: {conversion.returncode}")
+            log.debug(str([datetime.datetime.now(), "ENDED GRACEFULLY"]))
         except Exception as e:
-            log.debug(e)
+            print(e, flush=True)
         finally:
             try:
+                log.debug(str([datetime.datetime.now(), "RELEASING LOCK", input_filepath, output_filepath]))
                 del self.file_conversions[output_filepath]
             except KeyError:
                 pass

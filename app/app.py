@@ -150,6 +150,10 @@ def files(magnet_hash):
 
 @app.route("/play/<string:magnet_hash>/<string:filename>")
 def play(magnet_hash, filename):
+    if filename.endswith(".m3u8"):
+        import video_conversion
+        original_filename = filename.split(".m3u8")[0]
+        return Response(video_conversion.get_hls_playlist(f"/tmp/output/{magnet_hash}/{original_filename}", f"/play/{magnet_hash}/"), mimetype="application/vnd.apple.mpegURL")
     response = send_from_directory(f"/tmp/output/{magnet_hash}", filename)
     response.headers.add("Access-Control-Allow-Origin", "*")
     return response

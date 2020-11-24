@@ -27,11 +27,9 @@ docker run -p 5000:5000 -p 6881:6881 -p 6881:6881/udp -e USERNAME=<some-username
 App will be running at http://localhost:5000
 
 ## Configuring which subtitles to download:
-The default setting downloads all subtitle languages but it might get slow if there are many for a given file.
+The default setting downloads english subtitles.
 
-To solve this you need to customize which languages you want.
-
-Add the env variable SUBTITLE_LANGUAGES to your docker params like so:
+Add the env variable SUBTITLE_LANGUAGES to your docker params like so to get more languages:
 ```
 -e SUBTITLE_LANGUAGES="['en', 'de', 'es']"
 ```

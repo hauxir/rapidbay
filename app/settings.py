@@ -28,7 +28,7 @@ TORRENT_DOWNLOAD_LIMIT = -1
 TORRENT_UPLOAD_LIMIT = -1
 
 # SUBTITLES
-SUBTITLE_LANGUAGES = ["en"]  # "ALL" or a list of languages, e.g. ["en", "de", "es"]
+SUBTITLE_LANGUAGES = ["en"]  # list of languages, e.g. ["en", "de", "es"]
 
 # CONVERSION
 OUTPUT_DIR = "/tmp/output/"

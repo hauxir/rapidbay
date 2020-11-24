@@ -7,6 +7,8 @@ LOGFILE = "/tmp/rapidbay_errors.log"
 
 # PIRATEBAY
 PIRATEBAY_HOST = "piratebay.live"
+
+# JACKETT
 JACKETT_HOST = None
 JACKETT_API_KEY = ""
 

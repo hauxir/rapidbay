@@ -285,7 +285,8 @@ class RapidBayDaemon:
                 magnet_hash, filename
             ) or is_state(filename, FileStatus.DOWNLOAD_FINISHED):
                 if video_conversion.eligible_for_conversion(filepath):
-                    self.video_converter.generate_hls_stream(filepath, output_filepath)
+                    if is_state(filename, FileStatus.DOWNLOADING):
+                        self.video_converter.generate_hls_stream(filepath, output_filepath)
                 self._download_external_subtitles(filepath)
             if is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)

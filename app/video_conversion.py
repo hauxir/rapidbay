@@ -111,18 +111,19 @@ def _convert_file_to_hls_stream(input_filepath, output_filepath):
             [
                 "ffmpeg -nostdin",
                 f'-i "{input_filepath}"',
-                "-err_detect ignore_err",
+                "-err_detect explode",
                 f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
                 if needs_audio_conversion
                 else "-acodec copy",
                 "-vcodec copy",
                 "-sn",
-                "-segment_time 00:01:00",
+                "-f hls",
+                "-hls_time 60",
+                "-hls_playlist_type event",
                 "-reset_timestamps 1",
-                "-f segment",
                 #f"-segment_list '{output_filepath}.tmp.m3u8'",
                 "-v quiet -stats",
-                f'"{output_filepath}_chunk%03d.ts" 2>> "{output_filepath}_hls_{settings.LOG_POSTFIX}"',
+                f'"{output_filepath}_stream.m3u8" 2>> "{output_filepath}_hls_{settings.LOG_POSTFIX}"',
             ]
         ),
         shell=True,
@@ -152,23 +153,29 @@ def get_conversion_progress(filepath):
     return 0.0
 
 
-def get_chunks(filepath):
+def get_chunks(filepath, populate=True):
     dirname = os.path.dirname(filepath)
     if not os.path.isdir(dirname):
         return []
     basename = os.path.basename(filepath)
     chunk_files = [f for f in os.listdir(dirname) if f.startswith(basename) and f.endswith(".ts")]
-    chunk_files_with_duration = [(f, get_time_duration(os.path.join(dirname, f))) for f in chunk_files]
-    return chunk_files_with_duration
+    chunk_files = sorted(chunk_files, key=lambda x : int(re.findall(r"\d+", x)[-1]))
+    chunk_files_with_duration = [(f, get_time_duration(os.path.join(dirname, f), populate=populate)) for f in chunk_files]
+    chunks = []
+    for (f,duration) in chunk_files_with_duration:
+        if duration is None:
+            break
+        chunks.append( (f, duration) )
+    return chunks
 
 def get_hls_playlist(filepath, prefix):
-    chunks = get_chunks(filepath)
+    chunks = get_chunks(filepath, populate=False)
     return f"""#EXTM3U
 #EXT-X-VERSION:6
-#EXT-X-TARGETDURATION:60
+#EXT-X-TARGETDURATION:999999
 #EXT-X-ALLOW-CACHE:NO
-#EXT-X-MEDIA-SEQUENCE:0
-#EXT-X-START:TIME-OFFSET=-3600
+#EXT-X-MEDIA-SEQUENCE:{len(chunks)}
+#EXT-X-PLAYLIST-TYPE:EVENT
 """ + \
     "".join([f"""#EXTINF:{c[1]},
 {c[0]}
@@ -182,14 +189,38 @@ def eligible_for_conversion(filepath):
     return len(audio_tracks) > 0 and len(video_tracks) > 0
 
 
-def get_time_duration(filepath):
+def get_time_duration(filepath, populate=True):
     duration_file = filepath + ".duration.txt"
     if os.path.isfile(duration_file):
-        return float(Path(duration_file).read_text().strip())/1000
-    media_info = MediaInfo.parse(filepath)
-    duration = next((t.duration for t in media_info.tracks if t.duration and t.track_type == "Video"), None)
+        return float(Path(duration_file).read_text().strip())
+
+    if not populate:
+        return None
+
+    from subprocess import  check_output, CalledProcessError, STDOUT 
+    command = [
+        'ffprobe', 
+        '-v', 
+        'error', 
+        '-show_entries', 
+        'format=duration', 
+        '-of', 
+        'default=noprint_wrappers=1:nokey=1', 
+        filepath
+      ]
+
+    try:
+        duration = check_output( command, stderr=STDOUT ).decode()
+    except CalledProcessError as e:
+        duration = e.output.decode()
+
     with open(duration_file, "w") as f:
-        f.write(str(duration))
+        try:
+            f.write(str(float(str(duration))))
+        except ValueError:
+            os.remove(duration_file)
+            return None
+
     return get_time_duration(filepath)
 
 

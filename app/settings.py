@@ -28,7 +28,7 @@ TORRENT_DOWNLOAD_LIMIT = -1
 TORRENT_UPLOAD_LIMIT = -1
 
 # SUBTITLES
-SUBTITLE_LANGUAGES = "ALL"  # "ALL" or a list of languages, e.g. ["en", "de", "es"]
+SUBTITLE_LANGUAGES = ["en"]  # "ALL" or a list of languages, e.g. ["en", "de", "es"]
 
 # CONVERSION
 OUTPUT_DIR = "/tmp/output/"
@@ -38,6 +38,9 @@ INCOMPLETE_POSTFIX = ".incomplete"
 LOG_POSTFIX = ".log"
 MAX_OUTPUT_FILE_AGE = 10
 MAX_PARALLEL_CONVERSIONS = 2
+
+OPENSUBTITLES_USERNAME = None
+OPENSUBTITLES_PASSWORD = None
 
 for variable in [item for item in globals() if not item.startswith("__")]:
     NULL = "NULL"

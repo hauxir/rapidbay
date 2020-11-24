@@ -21,24 +21,29 @@ def download_all_subtitles(filepath):
     basename = os.path.basename(filepath)
     basename_without_ext = os.path.splitext(basename)[0]
     ost = OpenSubtitles()
-    ost.login(None, None)
+    ost.login(settings.OPENSUBTITLES_USERNAME, settings.OPENSUBTITLES_PASSWORD)
     f = File(filepath)
     h = f.get_hash()
+    language_ids = [
+      languages.get(part1=lang).part2b for lang in settings.SUBTITLE_LANGUAGES
+    ]
     results_from_hash = (
-        ost.search_subtitles([{"sublanguageid": "all", "moviehash": h}]) or []
+            [
+            item for sublist in
+            [ost.search_subtitles([{"sublanguageid": langid, "moviehash": h}]) or [] for langid in language_ids]
+            for item in sublist
+        ]
     )
     languages_in_results_from_hash = [
         lang_id for lang_id in [r.get("SubLanguageID") for r in results_from_hash]
     ]
-    results_from_filename = [
-        r
-        for r in (
-            ost.search_subtitles(
-                [{"sublanguageid": "all", "query": basename_without_ext}]
-            )
-            or []
-        )
-    ]
+    results_from_filename = (
+            [
+            item for sublist in
+            [ost.search_subtitles([{"sublanguageid": langid, "query": basename_without_ext}]) or [] for langid in language_ids]
+            for item in sublist
+        ]
+    )
     results_from_filename_but_not_from_hash = [
         r
         for r in results_from_filename
@@ -50,7 +55,6 @@ def download_all_subtitles(filepath):
         r
         for r in results
         if r["ISO639"] in settings.SUBTITLE_LANGUAGES
-        or settings.SUBTITLE_LANGUAGES == "ALL"
     ]
     wait_before_next_chunk = False
     for chunk in _chunks(results, 10):

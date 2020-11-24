@@ -17,10 +17,6 @@ def _chunks(l, n):
 
 @log.catch_and_log_exceptions
 def download_all_subtitles(filepath):
-    print("download_all_subtitles", filepath, flush=True)
-    f = File(filepath)
-    h = f.get_hash()
-    print("FILEHASH", h, flush=True)
     dirname = os.path.dirname(filepath)
     basename = os.path.basename(filepath)
     basename_without_ext = os.path.splitext(basename)[0]
@@ -31,7 +27,6 @@ def download_all_subtitles(filepath):
     language_ids = [
       languages.get(part1=lang).part2b for lang in settings.SUBTITLE_LANGUAGES
     ]
-    ost.login(None, None)
     results_from_hash = (
             [
             item for sublist in

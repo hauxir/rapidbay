@@ -22,7 +22,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 ## Running:
 Requires Docker
 ```
-docker run -p 5000:5000 -p 6881:6881 -p 6881:6881/udp -e USERNAME=<some-username> -e PASSWORD=<some-password> hauxir/rapidbay
+docker run -p 5000:5000 hauxir/rapidbay
 ```
 App will be running at http://localhost:5000
 

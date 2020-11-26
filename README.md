@@ -1,4 +1,3 @@
-[![Open Source Helpers](https://www.codetriage.com/hauxir/rapidbay/badges/users.svg)](https://www.codetriage.com/hauxir/rapidbay)
 # RapidBay
 Rapid bay is a self hosted video service/torrent client that makes playing videos from torrents as easy as:
 1. Opening the webapp on a phone/laptop/tablet/smartTV.

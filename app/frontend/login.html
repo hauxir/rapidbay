@@ -1,0 +1,54 @@
+<html>
+  <head>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <style>
+      body {
+        background: black;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      input,
+      button {
+        display: flex;
+        margin: auto;
+        font-size: 32px;
+        text-align: center;
+      }
+      button {
+        border: 1px solid white;
+        margin: 10px auto;
+        background-color: black;
+        border-radius: 5px;
+        color: white;
+      }
+    </style>
+  </head>
+
+  <body>
+    <form>
+      <input type="text" placeholder="Password" autocorrect="off" autocapitalize="none" />
+      <button type="submit">Continue</button>
+    </form>
+    <script>
+      var form = document.getElementsByTagName("form")[0];
+      form.onsubmit = function (e) {
+        e.preventDefault();
+        var password = document.getElementsByTagName("input")[0].value;
+        if (!password) return;
+        var formData = new FormData();
+        formData.set("password", password);
+        fetch("/api", {
+          method: "POST",
+          body: formData,
+        }).then(function () {
+          location.reload();
+        });
+      };
+    </script>
+  </body>
+</html>

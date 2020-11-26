@@ -43,7 +43,7 @@
     <script type="text/x-template" id="search-screen-template">
       <form @submit="onSubmit">
         <div class="input-group mb-3">
-          <input type="text" autofocus class="form-control" v-model="searchterm">
+          <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
           <div class="input-group-append">
             <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
           </div>

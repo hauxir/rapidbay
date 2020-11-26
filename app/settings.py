@@ -1,8 +1,7 @@
 import os
 
 # RAPIDBAY
-USERNAME = "admin"
-PASSWORD = "123456"
+PASSWORD = None
 LOGFILE = "/tmp/rapidbay_errors.log"
 
 # PIRATEBAY

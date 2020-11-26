@@ -1,27 +1,23 @@
+import datetime
 import asyncio
 import json
 import os
 import string
 import random
 import requests
+from functools import wraps
 
 import piratebay
 import jackett
 import settings
 import torrent
 from common import path_hierarchy
-from flask import Flask, Response, jsonify, request, send_from_directory
-from flask_basicauth import BasicAuth
+from flask import Flask, Response, jsonify, request, send_from_directory, abort
 from rapidbaydaemon import FileStatus, RapidBayDaemon
 from werkzeug.exceptions import NotFound
 
 daemon = RapidBayDaemon()
 app = Flask(__name__)
-
-basic_auth = BasicAuth(app)
-
-app.config["BASIC_AUTH_USERNAME"] = settings.USERNAME
-app.config["BASIC_AUTH_PASSWORD"] = settings.PASSWORD
 
 
 def _get_files(magnet_hash):
@@ -42,19 +38,43 @@ Disallow: /""",
     )
 
 
+def authorize(f):
+    @wraps(f)
+    def decorated_function(*args, **kws):
+        password = request.cookies.get('password')
+        if settings.PASSWORD and password != settings.PASSWORD:
+            abort(404)
+        return f(*args, **kws)
+    return decorated_function
+
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
-@basic_auth.required
 def frontend(path):
-    try:
-        return send_from_directory("/app/frontend/", path)
-    except NotFound:
-        pass
-    return send_from_directory("/app/frontend/", "index.html")
+    if not path.startswith("index.html"):
+        try:
+            return send_from_directory("/app/frontend/", path)
+        except NotFound:
+            pass
+    password = request.cookies.get('password')
+    if not settings.PASSWORD or password == settings.PASSWORD:
+        return send_from_directory("/app/frontend/", "index.html", last_modified=datetime.datetime.now())
+    return send_from_directory("/app/frontend/", "login.html", last_modified=datetime.datetime.now())
+
+
+@app.route("/api", methods=["POST"])
+def login():
+    password = request.form.get("password")
+    if not password:
+        abort(404)
+    response = jsonify()
+    if settings.PASSWORD and password == settings.PASSWORD:
+        response.set_cookie('password', password)
+    return response
 
 
 @app.route("/api/search/<string:searchterm>")
-@basic_auth.required
+@authorize
 def search(searchterm):
     if settings.JACKETT_HOST:
         results = jackett.search(searchterm)
@@ -64,7 +84,7 @@ def search(searchterm):
 
 
 @app.route("/api/torrent_url_to_magnet/", methods=["POST"])
-@basic_auth.required
+@authorize
 def torrent_url_to_magnet():
     torrent_url = request.form.get("url")
     filepath = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
@@ -87,7 +107,7 @@ def torrent_url_to_magnet():
 
 
 @app.route("/api/magnet_files/", methods=["POST"])
-@basic_auth.required
+@authorize
 def magnet_info():
     magnet_link = request.form.get("magnet_link")
     magnet_hash = torrent.get_hash(magnet_link)
@@ -97,7 +117,7 @@ def magnet_info():
 
 
 @app.route("/api/magnet_download/", methods=["POST"])
-@basic_auth.required
+@authorize
 def magnet_download():
     magnet_link = request.form.get("magnet_link")
     filename = request.form.get("filename")
@@ -108,13 +128,13 @@ def magnet_download():
 
 
 @app.route("/api/magnet/<string:magnet_hash>/<string:filename>")
-@basic_auth.required
+@authorize
 def file_status(magnet_hash, filename):
     return jsonify(**daemon.get_file_status(magnet_hash, filename))
 
 
 @app.route("/api/magnet/<string:magnet_hash>/")
-@basic_auth.required
+@authorize
 def files(magnet_hash):
     files = _get_files(magnet_hash)
     if files:
@@ -136,7 +156,7 @@ def play(magnet_hash, filename):
 
 
 @app.route("/error.log")
-@basic_auth.required
+@authorize
 def errorlog():
     try:
         with open(settings.LOGFILE, "r") as f:
@@ -147,7 +167,7 @@ def errorlog():
 
 
 @app.route("/status")
-@basic_auth.required
+@authorize
 def status():
     return jsonify(
         output_dir=path_hierarchy(settings.OUTPUT_DIR),

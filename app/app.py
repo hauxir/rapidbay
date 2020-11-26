@@ -7,7 +7,6 @@ import random
 import requests
 from functools import wraps
 
-import piratebay
 import jackett
 import settings
 import torrent
@@ -79,7 +78,18 @@ def search(searchterm):
     if settings.JACKETT_HOST:
         results = jackett.search(searchterm)
     else:
-        results = piratebay.search(searchterm)
+        results = [
+            dict(
+                title="NO JACKETT SERVER CONFIGURED",
+                seeds=1337,
+                magnet="N/A"
+            ),
+            dict(
+                title="Please connect Jackett using the config variables JACKETT_HOST and JACKETT_API_KEY",
+                seeds=1337,
+                magnet="N/A"
+            )
+        ]
     return jsonify(results=sorted(results, key=lambda x: x["seeds"], reverse=True))
 
 

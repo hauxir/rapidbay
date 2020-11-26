@@ -8,7 +8,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 5. Playing on the device or cast to AppleTV/Chromecast
 
 ## Features:
-- Supports using [Jackett](https://github.com/Jackett/Jackett) as a search backend(**HIGHLY RECOMMENDED**). 
+- Uses [Jackett](https://github.com/Jackett/Jackett) as a search backend. 
 - Pick individual video files you want to play and the system takes care of the rest to make it streamable.
 - Automatic download of Closed Captions/Subtitles
 - Automatically converts the video file and subtitles to be playable on all browsers/chromecast/appletv
@@ -22,7 +22,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 ## Running:
 Requires Docker
 ```
-docker run -p 5000:5000 hauxir/rapidbay
+docker run -p 5000:5000 -e JACKETT_HOST="http://your.jacket.host" -e JACKETT_API_KEY="YourAPIKey" hauxir/rapidbay
 ```
 App will be running at http://localhost:5000
 

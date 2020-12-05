@@ -18,6 +18,10 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 ## Demo:
 ![](https://user-images.githubusercontent.com/2439255/48429861-44b60b00-e76e-11e8-8bdb-042f125357ce.gif)
 
+## Setting up Jackett as a search backend:
+Rapidbay requires the torrent indexer [Jackett](https://github.com/Jackett/Jackett) for searching.
+Have a look [here](https://hub.docker.com/r/linuxserver/jackett/) on how to set it up using Docker.
+
 ## Running:
 Requires Docker
 ```
@@ -32,9 +36,6 @@ Add the env variable SUBTITLE_LANGUAGES to your docker params like so to get mor
 ```
 -e SUBTITLE_LANGUAGES="['en', 'de', 'es']"
 ```
-## Using Jackett as a search backend:
-Rapidbay requires the torrent indexer [Jackett](https://github.com/Jackett/Jackett) for searching.
-Have a look [here](https://hub.docker.com/r/linuxserver/jackett/) on how to set it up using Docker.
 
 ## Registering as a handler for any magnet link:
 - Go to https://\<RAPIDBAY_HOST\>/registerHandler and it should prompt you to register your running RapidBay instance as a default handler for torrent links on any torrent site!

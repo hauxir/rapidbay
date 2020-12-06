@@ -37,6 +37,12 @@ Add the env variable SUBTITLE_LANGUAGES to your docker params like so to get mor
 -e SUBTITLE_LANGUAGES="['en', 'de', 'es']"
 ```
 
+## Locking your instance with a password:
+Add the env variable PASSWORD to your docker params like so to prompt for a password when opening rapidbay:
+```
+-e PASSWORD=YOURPASSWORD
+```
+
 ## Registering as a handler for any magnet link:
 - Go to https://\<RAPIDBAY_HOST\>/registerHandler and it should prompt you to register your running RapidBay instance as a default handler for torrent links on any torrent site!
 - You can also copy/paste a magnet link directly into the search bar to open magnet links manually.

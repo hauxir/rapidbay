@@ -37,7 +37,7 @@ Add the env variable SUBTITLE_LANGUAGES to your docker params like so to get mor
 -e SUBTITLE_LANGUAGES="['en', 'de', 'es']"
 ```
 
-## Locking your instance with a password:
+## Require a password:
 Add the env variable PASSWORD to your docker params like so to prompt for a password when opening rapidbay:
 ```
 -e PASSWORD=YOURPASSWORD

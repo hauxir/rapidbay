@@ -1,0 +1,18 @@
+version: "3"
+
+services:
+
+  jackett:
+    image: linuxserver/jackett
+    volumes:
+      - ./.jackett:/config
+
+  rapidbay:
+    image: "hauxir/rapidbay:latest"
+    environment:
+      - JACKETT_HOST=jackett
+      - JACKETT_API_KEY=YOUR_API_KEY
+    ports:
+      - "5000:5000"
+    links:
+      - jackett

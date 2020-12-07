@@ -20,7 +20,9 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 
 ## Setting up Jackett as a search backend:
 Rapidbay requires the torrent indexer [Jackett](https://github.com/Jackett/Jackett) for searching.
-Have a look [here](https://hub.docker.com/r/linuxserver/jackett/) on how to set it up using Docker.
+Have a look [here](https://github.com/Jackett/Jackett#installation-using-docker) on how to set it up using Docker.
+
+There's also a [docker-compose example](https://github.com/hauxir/rapidbay/blob/master/docker-compose.example.with.jackett.yml) file to show how you can connect rapidbay and jackett together.
 
 ## Running:
 Requires Docker

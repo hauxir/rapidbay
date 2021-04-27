@@ -30,6 +30,7 @@ TORRENT_UPLOAD_LIMIT = -1
 SUBTITLE_LANGUAGES = ["en"]  # list of languages, e.g. ["en", "de", "es"]
 
 # CONVERSION
+CONVERT_VIDEO = False
 OUTPUT_DIR = "/tmp/output/"
 AAC_BITRATE = "128k"
 AAC_CHANNELS = 2

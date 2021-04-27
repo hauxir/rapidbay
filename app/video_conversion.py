@@ -53,7 +53,11 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
     audio_codecs = [
         t.format.lower() for t in media_info.tracks if t.track_type == "Audio"
     ]
+    video_codecs = [
+        t.format.lower() for t in media_info.tracks if t.track_type == "Video"
+    ]
     needs_audio_conversion = not any("aac" in c for c in audio_codecs)
+    needs_video_conversion = settings.CONVERT_VIDEO and not any("avc" in c for c in video_codecs)
     n_sub_tracks = len([t for t in media_info.tracks if t.track_type == "Text"])
     if media_info.tracks:
         try:
@@ -75,7 +79,9 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
                 if needs_audio_conversion
                 else "-acodec copy",
-                "-vcodec copy",
+                "-vcodec libx264 -preset ultrafast"
+                if needs_video_conversion
+                else "-vcodec copy",
                 " ".join([f"-map {i}?" for i in range(1, len(subtitle_filepaths) + 1)]),
                 " ".join(
                     [

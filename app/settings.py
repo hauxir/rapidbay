@@ -12,6 +12,7 @@ JACKETT_API_KEY = ""
 TORRENT_LISTENING_PORT = None
 DOWNLOAD_DIR = "/tmp/downloads/"
 FILELIST_DIR = "/tmp/filelists/"
+TORRENTS_DIR = "/tmp/torrents/"
 DHT_ROUTERS = [
     ("router.utorrent.com", 6881),
     ("router.bittorrent.com", 6881),
@@ -21,7 +22,7 @@ DHT_ROUTERS = [
 ]
 MAX_TORRENT_AGE_HOURS = 10
 VIDEO_EXTENSIONS = ["mp4", "mkv"]
-SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS + ["mp3", "flac"]
+SUPPORTED_EXTENSIONS = ["mp4", "mkv", "mp3", "flac"]
 TORRENT_DOWNLOAD_LIMIT = -1
 TORRENT_UPLOAD_LIMIT = -1
 

@@ -29,21 +29,29 @@ def get_index_and_file_from_files(h, filename):
 
 def make_magnet_from_torrent_file(file):
     metadata = bencodepy.decode_from_file(file)
-    subj = metadata.get(b'info', {})
+    subj = metadata.get(b"info", {})
     hashcontents = bencodepy.encode(subj)
     digest = hashlib.sha1(hashcontents).digest()
     b32hash = base64.b32encode(digest).decode()
-    return 'magnet:?'\
-             + 'xt=urn:btih:' + b32hash\
-             + '&dn=' + metadata.get(b'info', {}).get(b'name', b'').decode()\
-             + '&tr=' + metadata.get(b'announce', b'').decode()\
-             + "".join([
+    return (
+        "magnet:?"
+        + "xt=urn:btih:"
+        + b32hash
+        + "&dn="
+        + metadata.get(b"info", {}).get(b"name", b"").decode()
+        + "&tr="
+        + metadata.get(b"announce", b"").decode()
+        + "".join(
+            [
                 "&tr=" + tr.decode()
-                for trlist in metadata.get(b'announce-list', [])
+                for trlist in metadata.get(b"announce-list", [])
                 for tr in trlist
                 if tr.decode().strip()
-             ])\
-             + '&xl=' + str(metadata.get(b'info', {}).get(b'length'))
+            ]
+        )
+        + "&xl="
+        + str(metadata.get(b"info", {}).get(b"length"))
+    )
 
 
 def torrent_is_finished(h):
@@ -73,7 +81,12 @@ class TorrentClient:
     torrents = {}
 
     def __init__(
-        self, listening_port=None, dht_routers=[], filelist_dir=None, download_dir=None
+        self,
+        listening_port=None,
+        dht_routers=[],
+        filelist_dir=None,
+        download_dir=None,
+        torrents_dir=None,
     ):
         self.locks = LockManager()
         self.session = libtorrent.session()
@@ -87,6 +100,7 @@ class TorrentClient:
         self.session.start_dht()
         self.filelist_dir = filelist_dir
         self.download_dir = download_dir
+        self.torrents_dir = torrents_dir
 
     def fetch_filelist_from_link(self, magnet_link):
         if self.filelist_dir is None:
@@ -104,11 +118,22 @@ class TorrentClient:
                     os.remove(filename)
             self._write_filelist_to_disk(magnet_link)
 
+    def save_torrent_file(self, torrent_filepath):
+        magnet_link = make_magnet_from_torrent_file(torrent_filepath)
+        magnet_hash = get_hash(magnet_link)
+        os.makedirs(self.torrents_dir, exist_ok=True)
+        filepath = os.path.join(self.torrents_dir, f"{magnet_hash}.torrent")
+        shutil.copy(torrent_filepath, filepath)
+
     def download_file(self, magnet_link, filename):
         magnet_hash = get_hash(magnet_link)
         with self.locks.lock(magnet_hash):
-            h = self.torrents.get(magnet_hash) or self._add_magnet_link_to_downloads(
-                magnet_link
+            h = (
+                self.torrents.get(magnet_hash)
+                or self._add_torrent_file_to_downloads(
+                    os.path.join(self.torrents_dir, f"{magnet_hash}.torrent")
+                )
+                or self._add_magnet_link_to_downloads(magnet_link)
             )
             files = get_torrent_info(h).files()
             file_priorities = h.file_priorities()
@@ -135,6 +160,20 @@ class TorrentClient:
             except FileNotFoundError:
                 pass
 
+    def _add_torrent_file_to_downloads(self, filepath):
+        if not os.path.isfile(filepath):
+            return None
+        magnet_link = make_magnet_from_torrent_file(filepath)
+        magnet_hash = get_hash(magnet_link)
+        info = libtorrent.torrent_info(filepath)
+        h = self.torrents.get(magnet_hash) or self.session.add_torrent(
+            dict(ti=info, save_path=os.path.join(self.download_dir, magnet_hash))
+        )
+        self.torrents[magnet_hash] = h
+        files = get_torrent_info(h).files()
+        prioritize_files(h, [0] * len(files))
+        return h
+
     def _add_magnet_link_to_downloads(self, magnet_link):
         magnet_hash = get_hash(magnet_link)
         h = libtorrent.add_magnet_uri(
@@ -150,8 +189,12 @@ class TorrentClient:
     def _write_filelist_to_disk(self, magnet_link):
         magnet_hash = get_hash(magnet_link)
         filename = os.path.join(self.filelist_dir, magnet_hash)
-        h = self.torrents.get(magnet_hash) or self._add_magnet_link_to_downloads(
-            magnet_link
+        h = (
+            self.torrents.get(magnet_hash)
+            or self._add_torrent_file_to_downloads(
+                os.path.join(self.torrents_dir, f"{magnet_hash}.torrent")
+            )
+            or self._add_magnet_link_to_downloads(magnet_link)
         )
         result = sorted(
             [

@@ -107,6 +107,7 @@ def torrent_url_to_magnet():
                 return jsonify(magnet_link=location)
         with open(filepath, 'wb') as f:
             f.write(r.content)
+        daemon.save_torrent_file(filepath)
         magnet_link = torrent.make_magnet_from_torrent_file(filepath)
     finally:
         try:
@@ -182,6 +183,7 @@ def status():
     return jsonify(
         output_dir=path_hierarchy(settings.OUTPUT_DIR),
         filelist_dir=path_hierarchy(settings.FILELIST_DIR),
+        torrents_dir=path_hierarchy(settings.TORRENTS_DIR),
         downloads_dir=path_hierarchy(settings.DOWNLOAD_DIR),
         subtitle_downloads=daemon.subtitle_downloads,
         torrent_downloads=daemon.downloads(),

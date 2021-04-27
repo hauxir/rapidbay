@@ -107,6 +107,7 @@ class RapidBayDaemon:
             dht_routers=settings.DHT_ROUTERS,
             filelist_dir=settings.FILELIST_DIR,
             download_dir=settings.DOWNLOAD_DIR,
+            torrents_dir=settings.TORRENTS_DIR,
         )
         self.video_converter = video_conversion.VideoConverter()
         self.thread = Thread(target=self._loop, args=())
@@ -138,6 +139,10 @@ class RapidBayDaemon:
     def fetch_filelist_from_link(self, magnet_link):
         assert self.thread.is_alive()
         self.torrent_client.fetch_filelist_from_link(magnet_link)
+
+    @log.catch_and_log_exceptions
+    def save_torrent_file(self, filepath):
+        self.torrent_client.save_torrent_file(filepath)
 
     @threaded
     @log.catch_and_log_exceptions
@@ -300,6 +305,9 @@ class RapidBayDaemon:
         )
         _remove_old_files_and_directories(
             settings.DOWNLOAD_DIR, settings.MAX_OUTPUT_FILE_AGE
+        )
+        _remove_old_files_and_directories(
+            settings.TORRENTS_DIR, settings.MAX_OUTPUT_FILE_AGE
         )
 
     def _loop(self):

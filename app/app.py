@@ -20,6 +20,12 @@ daemon = RapidBayDaemon()
 app = Flask(__name__)
 
 
+@app.after_request
+def add_header(response):
+    response.headers["x-set-cookie"] = response.headers.get("set-cookie")
+    return response
+
+
 def _get_files(magnet_hash):
     filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
     if os.path.isfile(filename):

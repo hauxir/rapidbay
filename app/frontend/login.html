@@ -41,11 +41,15 @@
         var password = document.getElementsByTagName("input")[0].value;
         if (!password) return;
         var formData = new FormData();
-        formData.set("password", password);
+        formData.append("password", password);
         fetch("/api", {
           method: "POST",
           body: formData,
-        }).then(function () {
+        }).then(function (response) {
+          if(!document.cookie) {
+            var cookieHeader = response.headers.get('x-set-cookie');
+            document.cookie = cookieHeader;
+          }
           location.reload();
         });
       };

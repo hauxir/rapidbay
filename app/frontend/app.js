@@ -1,7 +1,9 @@
 (function () {
     window.isSafari = navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
     window.isChrome = /Chrome/i.test(navigator.userAgent);
-    navigator.serviceWorker.register("/sw.js");
+    if (navigator.serviceWorker) {
+        navigator.serviceWorker.register("/sw.js");
+    }
     var navigated = false;
 
     if (!window.location.origin) {

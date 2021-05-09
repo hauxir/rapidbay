@@ -152,6 +152,7 @@
                     }
                 });
             };
+            video.play();
         },
         created: function () {
             var timeout;

@@ -109,13 +109,18 @@
 
             var video = document.getElementsByTagName("video")[0];
 
-            new Plyr(video, {
-                settings: ["captions"],
-                fullscreen: {
-                    container: "body",
-                },
-                captions: {update: true},
-            });
+            try {
+                new Plyr(video, {
+                    settings: ["captions"],
+                    fullscreen: {
+                        container: "body",
+                    },
+                    captions: {update: true},
+                });
+            } catch (e) {
+                console.error(e);
+                video.setAttribute("controls", true);
+            }
 
             video.onplay = function () {
                 getNextFile().then(function (next_file) {

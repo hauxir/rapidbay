@@ -54,7 +54,12 @@
         return magnet_link.substr(hash_start, hash_end - hash_start).toLowerCase();
     }
 
-    function navigate(path) {
+    function navigate(path, replaceState) {
+        if (replaceState) {
+            router.historyAPIUpdateMethod("replaceState");
+        } else {
+            router.historyAPIUpdateMethod("pushState");
+        }
         navigated = true;
         router.navigate(path);
     }
@@ -133,8 +138,7 @@
                             ) +
                             "/" +
                             next_file;
-                        router.historyAPIUpdateMethod("replaceState");
-                        navigate("/");
+                        navigate("/", true);
                         rbsetTimeout(function () {
                             navigate(next_path);
                         });
@@ -240,8 +244,7 @@
                 if (navigated) {
                     window.history.back();
                 } else {
-                    router.historyAPIUpdateMethod("replaceState");
-                    navigate("/");
+                    navigate("/", true);
                 }
             },
         },
@@ -259,17 +262,16 @@
         mixins: [rbmixin],
         template: "#torrent-link-screen-template",
         created: function () {
-            var self = this;
             $.post(
                 "/api/torrent_url_to_magnet/",
                 {
                     url: this.params.torrent_link,
                 },
                 function (data) {
-                    router.historyAPIUpdateMethod("replaceState");
                     navigate(
                         "/magnet/" +
-                        encodeURIComponent(encodeURIComponent(data.magnet_link))
+                        encodeURIComponent(encodeURIComponent(data.magnet_link)),
+                        true
                     );
                 }
             );
@@ -334,12 +336,12 @@
                 if (navigated) {
                     window.history.back();
                 } else {
-                    router.historyAPIUpdateMethod("replaceState");
                     navigate(
                         window.location.pathname.substring(
                             0,
                             window.location.pathname.lastIndexOf("/")
-                        )
+                        ),
+                        true
                     );
                 }
             },

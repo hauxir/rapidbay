@@ -26,27 +26,43 @@ def _get_files(magnet_hash):
         with open(filename, "r") as f:
             data = f.read().replace("\n", "")
             files = json.loads(data)
-            def get_episode_string(fn):
+            supported_files = [
+                f
+                for f in files
+                if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
+            ]
+
+            def get_episode_info(fn):
                 parsed = PTN.parse(fn)
                 episode_num = parsed.get("episode")
                 season_num = parsed.get("season")
                 year = parsed.get("year")
-                if episode_num and season_num:
-                    return f"S{season_num:03}E{episode_num:03}"
-                if episode_num:
-                    return str(episode_num)
-                if year:
-                    return str(year)
+                return [season_num, episode_num, year]
+
+            def is_episode(fn):
+                extension = os.path.splitext(fn)[1][1:]
+                if extension in settings.VIDEO_EXTENSIONS:
+                    [season_num, episode_num, year] = get_episode_info(fn)
+                    return bool(episode_num or year)
+                return False
+
+            if not any(list(map(is_episode, files))):
+                return supported_files
+
+            def get_episode_string(fn):
+                extension = os.path.splitext(fn)[1][1:]
+                if extension in settings.VIDEO_EXTENSIONS:
+                    [season_num, episode_num, year] = get_episode_info(fn)
+                    if episode_num and season_num:
+                        return f"S{season_num:03}E{episode_num:03}"
+                    if episode_num:
+                        return str(episode_num)
+                    if year:
+                        return str(year)
                 return ""
 
             if files:
-                return sorted([
-                        f
-                        for f in files
-                        if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
-                    ],
-                    key=get_episode_string
-                )
+                return sorted(supported_files, key=get_episode_string)
         return None
 
 

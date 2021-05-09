@@ -196,12 +196,8 @@ class TorrentClient:
             )
             or self._add_magnet_link_to_downloads(magnet_link)
         )
-        result = sorted(
-            [
-                os.path.basename(os.path.normpath(f.path))
-                for f in get_torrent_info(h).files()
-            ]
-        )
+        files = sorted([f.path for f in get_torrent_info(h).files()])
+        result = [os.path.basename(f) for f in files]
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "w") as f:
             f.write(json.dumps(result))

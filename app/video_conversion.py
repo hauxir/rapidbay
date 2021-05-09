@@ -79,7 +79,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
                 if needs_audio_conversion
                 else "-acodec copy",
-                "-vcodec libx264 -preset ultrafast"
+                "-vcodec " + settings.VIDEO_CONVERSION_PARAMS
                 if needs_video_conversion
                 else "-vcodec copy",
                 " ".join([f"-map {i}?" for i in range(1, len(subtitle_filepaths) + 1)]),

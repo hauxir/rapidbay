@@ -32,6 +32,7 @@ SUBTITLE_LANGUAGES = ["en"]  # list of languages, e.g. ["en", "de", "es"]
 
 # CONVERSION
 CONVERT_VIDEO = True
+VIDEO_CONVERSION_PARAMS = "libx264 -preset ultrafast"
 OUTPUT_DIR = "/tmp/output/"
 AAC_BITRATE = "128k"
 AAC_CHANNELS = 2

@@ -59,36 +59,35 @@
     </script>
 
     <script type="text/x-template" id="search-results-screen-template">
-        <div class="root">
-      <div class="topbar">
-            <button @click="back()" class="btn btn-dark backarrow">
-               &#8678;
-            </button>
-            <div v-if="searchterm">
-                &#128270;
-
-{{ searchterm }}
-            </div>
-            <div v-else>
-            &#128293;
-            </div>
-      </div>
-      <loading-spinner v-if="results === null"/>
-      <div v-else class="tablewrapper">
-      <div>
-            <table class="table table-hover">
-                <tbody>
-                    <tr
-                    v-for="result in results"
-                    @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
-                    >
-                        <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')">{{ result.title}}</td>
-                    </tr>
-                </tbody>
-            </table>
-      </div>
-      </div>
+      <div class="root">
+        <div class="topbar">
+                <button @click="back()" class="btn btn-dark backarrow">
+                    &#8678;
+                </button>
+                <div v-if="searchterm">
+                    &#128270;
+                    {{ searchterm }}
+                </div>
+                <div v-else>
+                    &#128293;
+                </div>
         </div>
+        <loading-spinner v-if="results === null"/>
+        <div v-else class="tablewrapper">
+            <div>
+                <table class="table table-hover">
+                    <tbody>
+                        <tr
+                        v-for="result in results"
+                        @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
+                        >
+                            <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')">{{ result.title}}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      </div>
     </script>
 
     <script type="text/x-template" id="filelist-screen-template">
@@ -138,27 +137,27 @@
     </script>
 
     <script type="text/x-template" id="player-template">
-        <div class="video_wrapper">
-          <div class="topbar video_topbar" v-if="hovering">
-            <button @click="back()" class="btn btn-dark backarrow">
-               &#8678;
-            </button>
-            <div class="video_url_wrapper">
-                <a :href="window.location.origin + url" class="video_url">
-                    {{url.split("/").pop()}}
-                </a>
-            </div>
-            <chromecast-button v-if="isDesktop && isChrome"/>
-          </div>
-          <video v-if="url" :src="url" autoplay playsinline>
-              <track v-for="subtitle in subtitles"
-                  :label="subtitle.language" kind="subtitles"
-                  :srclang="subtitle.language"
-                  :src="subtitle.url"
-                  :id="subtitle.url"
-              >
-          </video>
+      <div class="video_wrapper">
+        <div class="topbar video_topbar" v-if="hovering">
+        <button @click="back()" class="btn btn-dark backarrow">
+            &#8678;
+        </button>
+        <div class="video_url_wrapper">
+            <a :href="window.location.origin + url" class="video_url">
+                {{url.split("/").pop()}}
+            </a>
         </div>
+        <chromecast-button v-if="isDesktop && isChrome"/>
+        </div>
+        <video v-if="url" :src="url" autoplay playsinline>
+            <track v-for="subtitle in subtitles"
+                :label="subtitle.language" kind="subtitles"
+                :srclang="subtitle.language"
+                :src="subtitle.url"
+                :id="subtitle.url"
+            >
+        </video>
+      </div>
     </script>
 
     <script type="text/x-template" id="chromecast-button-template">

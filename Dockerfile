@@ -13,6 +13,7 @@ RUN pip install iso-639
 RUN pip install requests
 RUN pip install -e git+https://github.com/agonzalezro/python-opensubtitles#egg=python-opensubtitles
 RUN pip install bencodepy
+RUN pip install parse-torrent-name
 
 # BitTorrent incoming
 EXPOSE 6881

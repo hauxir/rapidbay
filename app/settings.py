@@ -3,6 +3,7 @@ import os
 # RAPIDBAY
 PASSWORD = None
 LOGFILE = "/tmp/rapidbay_errors.log"
+AUTO_PLAY_NEXT_FILE = True
 
 # JACKETT
 JACKETT_HOST = None
@@ -21,8 +22,8 @@ DHT_ROUTERS = [
     ("dht.aelitis.com", 6881),
 ]
 MAX_TORRENT_AGE_HOURS = 10
-VIDEO_EXTENSIONS = ["mp4", "mkv"]
-SUPPORTED_EXTENSIONS = ["mp4", "mkv", "mp3", "flac"]
+VIDEO_EXTENSIONS = ["mp4", "mkv", "avi", "mpg", "mpeg"]
+SUPPORTED_EXTENSIONS = ["mp4", "mkv", "avi", "mpg", "mpeg", "mp3", "flac"]
 TORRENT_DOWNLOAD_LIMIT = -1
 TORRENT_UPLOAD_LIMIT = -1
 
@@ -30,7 +31,7 @@ TORRENT_UPLOAD_LIMIT = -1
 SUBTITLE_LANGUAGES = ["en"]  # list of languages, e.g. ["en", "de", "es"]
 
 # CONVERSION
-CONVERT_VIDEO = False
+CONVERT_VIDEO = True
 OUTPUT_DIR = "/tmp/output/"
 AAC_BITRATE = "128k"
 AAC_CHANNELS = 2

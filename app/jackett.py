@@ -1,6 +1,7 @@
 import requests
 import log
 import settings
+import torrent
 
 
 def search(searchterm):
@@ -11,8 +12,15 @@ def search(searchterm):
         )
         data = resp.json()
         results = data["Results"]
+        hashes = []
         for result in results:
             if (result.get("Link") or result.get("MagnetUri")) and result.get("Title"):
+                magnet_uri = result.get("MagnetUri")
+                if magnet_uri:
+                    magnet_hash = torrent.get_hash(magnet_uri)
+                    if torrent.get_hash(magnet_uri) in hashes:
+                        continue
+                    hashes.append(magnet_hash)
                 magnet_links.append(
                     dict(
                         seeds=result.get("Seeders", 0),

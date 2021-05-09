@@ -5,6 +5,7 @@ import os
 import string
 import random
 import requests
+import PTN
 from functools import wraps
 
 import jackett
@@ -24,8 +25,29 @@ def _get_files(magnet_hash):
     if os.path.isfile(filename):
         with open(filename, "r") as f:
             data = f.read().replace("\n", "")
-            return json.loads(data)
-    return None
+            files = json.loads(data)
+            def get_episode_string(fn):
+                parsed = PTN.parse(fn)
+                episode_num = parsed.get("episode")
+                season_num = parsed.get("season")
+                year = parsed.get("year")
+                if episode_num and season_num:
+                    return f"S{season_num:03}E{episode_num:03}"
+                if episode_num:
+                    return str(episode_num)
+                if year:
+                    return str(year)
+                return ""
+
+            if files:
+                return sorted([
+                        f
+                        for f in files
+                        if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
+                    ],
+                    key=get_episode_string
+                )
+        return None
 
 
 @app.route("/robots.txt")
@@ -72,6 +94,7 @@ def login():
     return response
 
 
+@app.route("/api/search/", defaults=dict(searchterm=""))
 @app.route("/api/search/<string:searchterm>")
 @authorize
 def search(searchterm):
@@ -144,17 +167,31 @@ def file_status(magnet_hash, filename):
     return jsonify(**daemon.get_file_status(magnet_hash, filename))
 
 
+@app.route("/api/next_file/<string:magnet_hash>/<string:filename>")
+@authorize
+def next_file(magnet_hash, filename):
+    next_filename = None
+    if settings.AUTO_PLAY_NEXT_FILE:
+        files = _get_files(magnet_hash)
+        if files:
+            try:
+                index = files.index(filename) + 1
+                next_filename = files[index]
+            except ValueError:
+                pass
+            except IndexError:
+                pass
+    return jsonify(next_filename=next_filename)
+
+
 @app.route("/api/magnet/<string:magnet_hash>/")
 @authorize
 def files(magnet_hash):
     files = _get_files(magnet_hash)
+
     if files:
         return jsonify(
-            files=[
-                f
-                for f in files
-                if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
-            ]
+            files=files
         )
     return jsonify(files=None)
 

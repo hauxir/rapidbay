@@ -1,4 +1,6 @@
 import requests
+from dateutil.parser import parse
+
 import log
 import settings
 import torrent
@@ -21,12 +23,16 @@ def search(searchterm):
                     if torrent.get_hash(magnet_uri) in hashes:
                         continue
                     hashes.append(magnet_hash)
+                if result.get("Seeders") == 0:
+                    continue
+                published = result.get("PublishDate")
                 magnet_links.append(
                     dict(
                         seeds=result.get("Seeders", 0),
                         title=result["Title"],
                         magnet=result.get("MagnetUri"),
-                        torrent_link=result.get("Link")
+                        torrent_link=result.get("Link"),
+                        published=parse(published) if published else None
                     )
                 )
     except Exception:

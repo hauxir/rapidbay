@@ -1,5 +1,6 @@
 <html>
   <head>
+    <script src="/lib/jquery-3.3.1.min.js"></script>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
@@ -40,12 +41,7 @@
         e.preventDefault();
         var password = document.getElementsByTagName("input")[0].value;
         if (!password) return;
-        var formData = new FormData();
-        formData.append("password", password);
-        fetch("/api", {
-          method: "POST",
-          body: formData,
-        }).then(function (response) {
+        $.post("/api", { password: password }, function(data) {
           if(!document.cookie) {
             var cookieHeader = response.headers.get('x-set-cookie');
             document.cookie = cookieHeader;

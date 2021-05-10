@@ -1,5 +1,6 @@
 (function () {
     window.isSafari = navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
+
     window.isChrome = /Chrome/i.test(navigator.userAgent);
     if (navigator.serviceWorker) {
         navigator.serviceWorker.register("/sw.js");
@@ -12,6 +13,12 @@
             "//" +
             window.location.hostname +
             (window.location.port ? ":" + window.location.port : "");
+    }
+
+    if (!String.prototype.startsWith) {
+        String.prototype.startsWith = function (search, pos) {
+            return this.slice(pos || 0, search.length) === search;
+        };
     }
 
     var pending_callbacks = [];
@@ -122,7 +129,7 @@
                 video.setAttribute("controls", true);
             }
 
-            video.onplay = function () {
+            video.addEventListener("play", function () {
                 getNextFile().then(function (next_file) {
                     if (next_file) {
                         $.post("/api/magnet_download/", {
@@ -133,9 +140,9 @@
                         });
                     }
                 });
-            };
+            });
 
-            video.onended = function () {
+            video.addEventListener("ended", function () {
                 getNextFile().then(function (next_file) {
                     if (next_file) {
                         var next_path =
@@ -151,7 +158,7 @@
                         });
                     }
                 });
-            };
+            });
             video.play();
         },
         created: function () {

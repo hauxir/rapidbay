@@ -75,7 +75,7 @@ def _get_files(magnet_hash):
 def _weighted_sort_date_seeds(results):
     getdate = lambda d: d.date() if d else datetime.datetime.now().date()
     dates = sorted([getdate(r.get("published")) for r in results])
-    return sorted(results, key=lambda x: dates.index(getdate(x.get("published"))) * x.get("seeds", 0), reverse=True)
+    return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0), reverse=True)
 
 
 @app.route("/robots.txt")
@@ -144,8 +144,6 @@ def search(searchterm):
 
     if searchterm == "":
         return jsonify(results=_weighted_sort_date_seeds(results))
-
-
     return jsonify(results=sorted(results, key=lambda x: x["seeds"], reverse=True))
 
 

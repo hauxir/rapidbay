@@ -15,8 +15,18 @@ def search(searchterm):
         data = resp.json()
         results = data["Results"]
         hashes = []
-        for result in results:
-            if (result.get("Link") or result.get("MagnetUri")) and result.get("Title"):
+        for result in sorted(
+            results, key=lambda x: x.get("Seeders"),
+            reverse=True
+        ):
+            if (
+                searchterm == ""
+                and result.get("TrackerId") in settings.EXCLUDE_TRACKERS_FROM_TRENDING
+            ):
+                continue
+            elif (result.get("Link") or result.get("MagnetUri")) and result.get(
+                "Title"
+            ):
                 magnet_uri = result.get("MagnetUri")
                 if magnet_uri:
                     magnet_hash = torrent.get_hash(magnet_uri)
@@ -32,7 +42,7 @@ def search(searchterm):
                         title=result["Title"],
                         magnet=result.get("MagnetUri"),
                         torrent_link=result.get("Link"),
-                        published=parse(published) if published else None
+                        published=parse(published) if published else None,
                     )
                 )
     except Exception:

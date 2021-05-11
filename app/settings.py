@@ -26,6 +26,7 @@ VIDEO_EXTENSIONS = ["mp4", "mkv", "avi", "mpg", "mpeg"]
 SUPPORTED_EXTENSIONS = ["mp4", "mkv", "avi", "mpg", "mpeg", "mp3", "flac"]
 TORRENT_DOWNLOAD_LIMIT = -1
 TORRENT_UPLOAD_LIMIT = -1
+EXCLUDE_TRACKERS_FROM_TRENDING=[]
 
 # SUBTITLES
 SUBTITLE_LANGUAGES = ["en"]  # list of languages, e.g. ["en", "de", "es"]

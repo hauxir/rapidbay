@@ -193,7 +193,9 @@
                 var video = document.getElementsByTagName("video")[0];
                 var current_subtitle = null;
                 if (video.plyr) {
-                    current_subtitle = video.plyr.captions.currentTrackNode;
+                    if (current_subtitle.active) {
+                        current_subtitle = video.plyr.captions.currentTrackNode;
+                    }
                 } else {
                     var subtitle_tracks = Array.from(video.textTracks);
                     current_subtitle = subtitle_tracks.find(function (t) {

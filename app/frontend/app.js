@@ -45,6 +45,9 @@
 
     function get(url, callback) {
         var request;
+        if (!document.cookie) {
+            document.cookie = localStorage.getItem("cookie");
+        }
         function _callback(data) {
             pending_requests = pending_requests.filter(function (req) {
                 req !== request;
@@ -54,6 +57,13 @@
         request = $.get(url, _callback);
         pending_requests.push(request);
         return request;
+    }
+
+    function post(url, data, callback) {
+        if (!document.cookie) {
+            document.cookie = localStorage.getItem("cookie");
+        }
+        $.post(url, data, callback);
     }
 
     function get_hash(magnet_link) {
@@ -132,7 +142,7 @@
             video.addEventListener("play", function () {
                 getNextFile().then(function (next_file) {
                     if (next_file) {
-                        $.post("/api/magnet_download/", {
+                        post("/api/magnet_download/", {
                             magnet_link: decodeURIComponent(
                                 decodeURIComponent(location.pathname.split("/")[2])
                             ),
@@ -193,7 +203,7 @@
                 var video = document.getElementsByTagName("video")[0];
                 var current_subtitle = null;
                 if (video.plyr) {
-                    if (current_subtitle.active) {
+                    if (current_subtitle && current_subtitle.active) {
                         current_subtitle = video.plyr.captions.currentTrackNode;
                     }
                 } else {
@@ -279,7 +289,7 @@
         mixins: [rbmixin],
         template: "#torrent-link-screen-template",
         created: function () {
-            $.post(
+            post(
                 "/api/torrent_url_to_magnet/",
                 {
                     url: this.params.torrent_link,
@@ -313,7 +323,7 @@
         },
         created: function () {
             router.historyAPIUpdateMethod("pushState");
-            $.post("/api/magnet_files/", {magnet_link: this.params.magnet_link});
+            post("/api/magnet_files/", {magnet_link: this.params.magnet_link});
             var self = this;
             (function get_files() {
                 get(
@@ -364,7 +374,7 @@
             },
         },
         created: function () {
-            $.post("/api/magnet_download/", {
+            post("/api/magnet_download/", {
                 magnet_link: this.params.magnet_link,
                 filename: this.params.filename,
             });

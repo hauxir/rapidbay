@@ -37,15 +37,22 @@
       <button type="submit">Continue</button>
     </form>
     <script>
+      var storedCookie = localStorage.getItem("cookie");
       var form = document.getElementsByTagName("form")[0];
+      if(storedCookie) {
+        document.cookie = storedCookie;
+        location.reload();
+      }
       form.onsubmit = function (e) {
         e.preventDefault();
         var password = document.getElementsByTagName("input")[0].value;
         if (!password) return;
-        $.post("/api", { password: password }, function(data) {
+        $.post("/api", { password: password }, function(data, status, response) {
+          var cookieHeader = response.getResponseHeader('x-set-cookie');
           if(!document.cookie) {
-            var cookieHeader = response.headers.get('x-set-cookie');
             document.cookie = cookieHeader;
+          } else {
+            localStorage.setItem("cookie", cookieHeader);
           }
           location.reload();
         });

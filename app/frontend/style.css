@@ -1,7 +1,3 @@
-:root {
-  --plyr-color-main: #BEBEBE;
-  --plyr-video-control-color-hover: #333333;
-}
 html,
 body {
   height: 100%;
@@ -204,17 +200,17 @@ body {
   overflow: hidden;
 }
 
-.topbar button {
+.topbar > button {
     position: absolute;
     left: 20px;
 }
 
 .topbar button:hover {
-    background-color: var(--plyr-color-main);
-    color: var(--plyr-video-control-color-hover);
+    background-color: #BEBEBE;
+    color: #333333;
 }
 
-.topbar button:hover .chromecast_icon {
+.topbar button:hover .icon {
     filter: brightness(10%);
 }
 
@@ -238,6 +234,10 @@ body {
   background: rgba(0,0,0,0.5);
 }
 
+.topbar button {
+  height: 50px;
+}
+
 .topbar .btn {
   transition: all 0.2s ease;
   z-index: 10;
@@ -256,9 +256,13 @@ body {
   margin : auto;
 }
 
-.video_topbar .chromecast_button {
-    left: auto;
-    right: 20px;
+.topbar > .buttons {
+    position: relative;
+    margin-left: auto;
+    margin-right: 0px;
+    height: 100%;
+    display: flex;
+    padding: 0px;
 }
 
 .icon {
@@ -277,12 +281,18 @@ body {
   width: 25px;
 }
 
-.plyr {
-  display:flex;
-  height: 100%;
-  max-height: 100%;
+.fullscreen_icon {
+  background-image: url("/lib/icons/fullscreen_icon.svg");
+  margin-top: 10px;
+  margin-bottom: 10px;
+  height: 20px;
+  width: 20px;
 }
 
-.plyr__captions .plyr__caption {
-  font-size: 32px !important
+.back_icon {
+  background-image: url("/lib/icons/back_icon.svg");
+  margin-top: 10px;
+  margin-bottom: 10px;
+  height: 30px;
+  width: 30px;
 }

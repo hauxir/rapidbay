@@ -9,14 +9,12 @@
     <title>RapidBay</title>
     <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
     <script src="/lib/jquery-3.3.1.min.js"></script>
-    <script src="/lib/plyr.js"></script>
     <script src="/lib/vue.2.5.3.min.js"></script>
     <script src="/lib/navigo.6.0.2.min.js"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
     <script src="/lib/chromecastjs.js"></script>
     <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
     <link rel="manifest" href="/manifest.json">
-    <link href="/lib/plyr.css" rel="stylesheet" />
     <link href="/style.css" rel="stylesheet" />
     <link rel="icon" type="image/png" href="/favicon.png" />
   </head>
@@ -63,7 +61,7 @@
       <div class="root">
         <div class="topbar">
                 <button @click="back()" class="btn btn-dark backarrow">
-                    &#8678;
+                  <div class="icon back_icon"/>
                 </button>
                 <div v-if="searchterm">
                     &#128270;
@@ -95,7 +93,7 @@
       <div class="root">
         <div class="topbar">
             <button @click="back()" class="btn btn-dark backarrow">
-            &#8678;
+              <div class="icon back_icon"/>
             </button>
         </div>
         <loading-spinner v-if="results === null"/>
@@ -120,7 +118,7 @@
       <div v-else class="root">
         <div class="topbar">
             <button @click="back()" class="btn btn-dark backarrow">
-            &#8678;
+              <div class="icon back_icon"/>
             </button>
             <div>
             {{params.filename}}
@@ -140,17 +138,20 @@
     <script type="text/x-template" id="player-template">
       <div class="video_wrapper">
         <div class="topbar video_topbar" v-if="hovering">
-        <button @click="back()" class="btn btn-dark backarrow">
-            &#8678;
-        </button>
-        <div class="video_url_wrapper">
-            <a :href="window.location.origin + url" class="video_url">
-                {{url.split("/").pop()}}
-            </a>
+            <button @click="back()" class="btn btn-dark backarrow">
+              <div class="icon back_icon"/>
+            </button>
+            <div class="video_url_wrapper">
+                <a :href="window.location.origin + url" class="video_url">
+                    {{url.split("/").pop()}}
+                </a>
+            </div>
+            <div class="buttons">
+                <chromecast-button v-if="isDesktop && isChrome"/>
+                <fullscreen-button/>
+            </div>
         </div>
-        <chromecast-button v-if="isDesktop && isChrome"/>
-        </div>
-        <video v-if="url" :src="url" autoplay playsinline>
+        <video v-if="url" :src="url" controls autoplay playsinline>
             <track v-for="subtitle in subtitles"
                 :label="subtitle.language" kind="subtitles"
                 :srclang="subtitle.language"
@@ -159,6 +160,10 @@
             >
         </video>
       </div>
+    </script>
+
+    <script type="text/x-template" id="fullscreen-button-template">
+        <button class="btn btn-dark fullscreen_button" @click="toggleFullscreen()"><div class="icon fullscreen_icon"/></button>
     </script>
 
     <script type="text/x-template" id="chromecast-button-template">

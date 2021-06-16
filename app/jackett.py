@@ -1,3 +1,4 @@
+import re
 import requests
 from dateutil.parser import parse
 
@@ -15,10 +16,31 @@ def search(searchterm):
         data = resp.json()
         results = data["Results"]
         hashes = []
-        for result in sorted(
-            results, key=lambda x: x.get("Seeders"),
-            reverse=True
-        ):
+
+        results = sorted(results, key=lambda x: x.get("Seeders", 0), reverse=True)
+
+        pattern = re.compile("\s(s\d\d)(e\d\d)?")
+        season = None
+        episode = None
+        try:
+            season = pattern.search(searchterm.lower())[1]
+            episode = pattern.search(searchterm.lower())[2]
+        except Exception as e:
+            pass
+
+        if season and (episode is None):
+
+            def sort_by_only_season(x):
+                pattern = re.compile("([e|E]\d\d)")
+                try:
+                    pattern.search(x.get("Title", ""))[0]
+                    return 0
+                except:
+                    return 1
+
+            results = sorted(results, key=sort_by_only_season, reverse=True)
+
+        for result in results:
             if (
                 searchterm == ""
                 and result.get("TrackerId") in settings.EXCLUDE_TRACKERS_FROM_TRENDING

@@ -144,7 +144,7 @@ def search(searchterm):
 
     if searchterm == "":
         return jsonify(results=_weighted_sort_date_seeds(results))
-    return jsonify(results=sorted(results, key=lambda x: x["seeds"], reverse=True))
+    return jsonify(results=results)
 
 
 @app.route("/api/torrent_url_to_magnet/", methods=["POST"])

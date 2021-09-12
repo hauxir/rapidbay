@@ -2,6 +2,7 @@ FROM hauxir/libtorrent-python3-ubuntu:latest
 
 RUN apt-get update && \
     apt-get install -y \
+    zip \
     ffmpeg \
     git \
     mediainfo

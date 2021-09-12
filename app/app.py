@@ -5,6 +5,7 @@ import os
 import string
 import random
 import requests
+import subprocess
 import PTN
 from functools import wraps
 
@@ -257,6 +258,47 @@ def status():
         torrent_downloads=daemon.downloads(),
         session_torrents=daemon.session_torrents(),
         conversions=daemon.video_converter.file_conversions,
+    )
+
+
+@app.route("/kodi.repo", defaults={"path": ""})
+@app.route("/kodi.repo/", defaults={"path": ""})
+@app.route("/kodi.repo/<string:path>")
+def kodi_repo(path):
+    password = request.authorization.password if request.authorization else None
+    if not settings.PASSWORD or password == settings.PASSWORD:
+        zip_filename = "rapidbay.zip"
+        if path == zip_filename:
+            creds = dict(
+                host=request.url_root,
+                password=settings.PASSWORD
+            )
+            with open("/app/kodi.addon/creds.json", "w") as f:
+                json.dump(creds, f)
+            filehash = subprocess.Popen(
+                'find /app/kodi.addon/ -type f -exec shasum {} \; | shasum | head -c 8',
+                stdout=subprocess.PIPE,
+                shell=True
+            ).stdout.read().decode()
+            filename = f"kodi_addon-{filehash}.zip"
+            if not os.path.exists(f"/tmp/{filename}"):
+                os.system(
+                  f"cd /app/; zip -r /tmp/{filename} kodi.addon"
+                )
+            return send_from_directory(
+                "/tmp/",
+                filename,
+                last_modified=datetime.datetime.now()
+            )
+        return Response(
+                f"""<!DOCTYPE html>
+        <a href="{zip_filename}">{zip_filename}</a>
+        """,
+                mimetype="text/html",
+            )
+    return Response(
+        "Wrong password", 401,
+        {"WWW-Authenticate": 'Basic realm="Login Required"'}
     )
 
 

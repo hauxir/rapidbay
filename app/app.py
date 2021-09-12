@@ -269,36 +269,32 @@ def kodi_repo(path):
     if not settings.PASSWORD or password == settings.PASSWORD:
         zip_filename = "rapidbay.zip"
         if path == zip_filename:
-            creds = dict(
-                host=request.url_root,
-                password=settings.PASSWORD
-            )
+            creds = dict(host=request.url_root, password=settings.PASSWORD)
             with open("/app/kodi.addon/creds.json", "w") as f:
                 json.dump(creds, f)
-            filehash = subprocess.Popen(
-                'find /app/kodi.addon/ -type f -exec shasum {} \; | shasum | head -c 8',
-                stdout=subprocess.PIPE,
-                shell=True
-            ).stdout.read().decode()
+            filehash = (
+                subprocess.Popen(
+                    "find /app/kodi.addon/ -type f -exec shasum {} \; | shasum | head -c 8",
+                    stdout=subprocess.PIPE,
+                    shell=True,
+                )
+                .stdout.read()
+                .decode()
+            )
             filename = f"kodi_addon-{filehash}.zip"
             if not os.path.exists(f"/tmp/{filename}"):
-                os.system(
-                  f"cd /app/; zip -r /tmp/{filename} kodi.addon"
-                )
+                os.system(f"cd /app/; zip -r /tmp/{filename} kodi.addon")
             return send_from_directory(
-                "/tmp/",
-                filename,
-                last_modified=datetime.datetime.now()
+                "/tmp/", filename, last_modified=datetime.datetime.now()
             )
         return Response(
-                f"""<!DOCTYPE html>
+            f"""<!DOCTYPE html>
         <a href="{zip_filename}">{zip_filename}</a>
         """,
-                mimetype="text/html",
-            )
+            mimetype="text/html",
+        )
     return Response(
-        "Wrong password", 401,
-        {"WWW-Authenticate": 'Basic realm="Login Required"'}
+        "Wrong password", 401, {"WWW-Authenticate": 'Basic realm="Login Required"'}
     )
 
 

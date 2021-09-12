@@ -14,6 +14,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 - Automatically converts audio that is unsupported by browsers to AAC
 - Allows registering as a handler for any magnet link
 - Automatically cleans up disk space so you don't need to manage it yourself
+- Kodi support
 
 ## Demo:
 ![](https://user-images.githubusercontent.com/2439255/48429861-44b60b00-e76e-11e8-8bdb-042f125357ce.gif)
@@ -58,3 +59,6 @@ docker-compose up
 ## Running RapidBay on a VPS
 
 [Setting RapidBay up on a VPS and tunnel torrent traffic through NordVPN](https://github.com/hauxir/rapidbay/wiki/Setting-RapidBay-up-on-a-VPS-and-tunnel-torrent-traffic-through-NordVPN)
+
+## Using Kodi as a frontend
+[Setting up Rapidbay with Kodi](https://github.com/hauxir/rapidbay/wiki/Setting-up-Rapidbay-with-Kodi)

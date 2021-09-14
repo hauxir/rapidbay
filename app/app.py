@@ -269,7 +269,7 @@ def kodi_repo(path):
     if not settings.PASSWORD or password == settings.PASSWORD:
         zip_filename = "rapidbay.zip"
         if path == zip_filename:
-            creds = dict(host=request.url_root, password=settings.PASSWORD)
+            creds = dict(host=request.url_root.rstrip("/"), password=settings.PASSWORD)
             with open("/app/kodi.addon/creds.json", "w") as f:
                 json.dump(creds, f)
             filehash = (

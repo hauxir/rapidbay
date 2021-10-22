@@ -1,3 +1,4 @@
+import urllib
 import json
 import os
 import shutil
@@ -32,11 +33,11 @@ def make_magnet_from_torrent_file(file):
     subj = metadata.get(b"info", {})
     hashcontents = bencodepy.encode(subj)
     digest = hashlib.sha1(hashcontents).digest()
-    b32hash = base64.b32encode(digest).decode()
+    b16hash = base64.b16encode(digest).decode().lower()
     return (
         "magnet:?"
         + "xt=urn:btih:"
-        + b32hash
+        + b16hash
         + "&dn="
         + metadata.get(b"info", {}).get(b"name", b"").decode()
         + "&tr="
@@ -159,6 +160,8 @@ class TorrentClient:
                 shutil.rmtree(os.path.join(self.download_dir, magnet_hash))
             except FileNotFoundError:
                 pass
+            except OSError:
+                pass
 
     def _add_torrent_file_to_downloads(self, filepath):
         if not os.path.isfile(filepath):
@@ -196,8 +199,7 @@ class TorrentClient:
             )
             or self._add_magnet_link_to_downloads(magnet_link)
         )
-        files = sorted([f.path for f in get_torrent_info(h).files()])
-        result = [os.path.basename(f) for f in files]
+        result = [f.path for f in get_torrent_info(h).files()]
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "w") as f:
             f.write(json.dumps(result))

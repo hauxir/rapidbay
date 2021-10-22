@@ -14,11 +14,12 @@ import settings
 import torrent
 from common import path_hierarchy
 from flask import Flask, Response, jsonify, request, send_from_directory, abort
-from rapidbaydaemon import FileStatus, RapidBayDaemon
+from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from werkzeug.exceptions import NotFound
 
 daemon = RapidBayDaemon()
 app = Flask(__name__)
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
 
 
 @app.after_request
@@ -28,49 +29,50 @@ def add_header(response):
 
 
 def _get_files(magnet_hash):
-    filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
-    if os.path.isfile(filename):
-        with open(filename, "r") as f:
-            data = f.read().replace("\n", "")
-            files = json.loads(data)
-            supported_files = [
-                f
-                for f in files
-                if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
-            ]
+    filepaths = get_filepaths(magnet_hash)
+    if filepaths:
+        files = [os.path.basename(f) for f in filepaths]
+        supported_files = [
+            f
+            for f in files
+            if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
+        ]
 
-            def get_episode_info(fn):
+        def get_episode_info(fn):
+            try:
                 parsed = PTN.parse(fn)
                 episode_num = parsed.get("episode")
                 season_num = parsed.get("season")
                 year = parsed.get("year")
                 return [season_num, episode_num, year]
+            except TypeError:
+                return [None,None,None]
 
-            def is_episode(fn):
-                extension = os.path.splitext(fn)[1][1:]
-                if extension in settings.VIDEO_EXTENSIONS:
-                    [season_num, episode_num, year] = get_episode_info(fn)
-                    return bool(episode_num or year)
-                return False
+        def is_episode(fn):
+            extension = os.path.splitext(fn)[1][1:]
+            if extension in settings.VIDEO_EXTENSIONS:
+                [season_num, episode_num, year] = get_episode_info(fn)
+                return bool(episode_num or year)
+            return False
 
-            if not any(list(map(is_episode, files))):
-                return supported_files
+        if not any(list(map(is_episode, files))):
+            return supported_files
 
-            def get_episode_string(fn):
-                extension = os.path.splitext(fn)[1][1:]
-                if extension in settings.VIDEO_EXTENSIONS:
-                    [season_num, episode_num, year] = get_episode_info(fn)
-                    if episode_num and season_num:
-                        return f"S{season_num:03}E{episode_num:03}"
-                    if episode_num:
-                        return str(episode_num)
-                    if year:
-                        return str(year)
-                return ""
+        def get_episode_string(fn):
+            extension = os.path.splitext(fn)[1][1:]
+            if extension in settings.VIDEO_EXTENSIONS:
+                [season_num, episode_num, year] = get_episode_info(fn)
+                if episode_num and season_num:
+                    return f"S{season_num:03}E{episode_num:03}"
+                if episode_num:
+                    return str(episode_num)
+                if year:
+                    return str(year)
+            return ""
 
-            if files:
-                return sorted(supported_files, key=get_episode_string)
-        return None
+        if files:
+            return sorted(supported_files, key=get_episode_string)
+    return None
 
 
 def _weighted_sort_date_seeds(results):
@@ -258,6 +260,7 @@ def status():
         torrent_downloads=daemon.downloads(),
         session_torrents=daemon.session_torrents(),
         conversions=daemon.video_converter.file_conversions,
+        http_downloads=daemon.http_downloader.downloads,
     )
 
 

@@ -1,15 +1,33 @@
+import json
 import datetime
 import os
 import shutil
 import time
 from threading import Thread
 
+import http_cache
 import log
 import settings
 import subtitles
 import torrent
 import video_conversion
+from http_downloader import HttpDownloader
 from common import threaded
+
+
+def get_filepaths(magnet_hash):
+    filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
+    if os.path.exists(filename):
+        with open(filename, "r") as f:
+            data = f.read().replace("\n", "")
+            return json.loads(data)
+
+
+def _get_download_path(magnet_hash, filename):
+    filepaths = get_filepaths(magnet_hash)
+    if filepaths:
+        torrent_path = next(fp for fp in filepaths if fp.endswith(filename))
+        return os.path.join(f"{settings.DOWNLOAD_DIR}{magnet_hash}", torrent_path)
 
 
 def _subtitle_filenames(h, filename):
@@ -112,6 +130,7 @@ class RapidBayDaemon:
         self.video_converter = video_conversion.VideoConverter()
         self.thread = Thread(target=self._loop, args=())
         self.thread.daemon = True
+        self.http_downloader = HttpDownloader()
 
     def start(self):
         self.thread.start()
@@ -155,6 +174,16 @@ class RapidBayDaemon:
             FileStatus.CONVERTING,
         ]:
             return
+
+        download_path = _get_download_path(magnet_hash, filename)
+
+        if download_path:
+            http_download_progress = self.http_downloader.downloads.get(download_path)
+            if http_download_progress is None:
+                cached_url = http_cache.get_cached_url(magnet_hash, filename)
+                if cached_url:
+                    self.http_downloader.download_file(cached_url, download_path)
+
         self.torrent_client.download_file(magnet_link, filename)
 
         h = self.torrent_client.torrents.get(magnet_hash)
@@ -205,6 +234,14 @@ class RapidBayDaemon:
         if f is None:
             return dict(status=FileStatus.FILE_NOT_FOUND)
         download_progress = h.file_progress()[i] / f.size
+
+        download_path = _get_download_path(magnet_hash, filename)
+
+        if download_path:
+            download_progress = max(
+                self.http_downloader.downloads.get(download_path, 0), download_progress
+            )
+
         if download_progress == 1:
             if filename_extension[1:] in settings.VIDEO_EXTENSIONS:
                 all_torrent_subtitles_downloaded = all(
@@ -274,6 +311,7 @@ class RapidBayDaemon:
             if is_state(filename, FileStatus.DOWNLOAD_FINISHED):
                 self._download_external_subtitles(filepath)
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
+                self.http_downloader.clear(filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
                 self.video_converter.convert_file(filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(

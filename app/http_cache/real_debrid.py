@@ -11,17 +11,17 @@ CLIENT_SECRET = os.environ.get("RD_CLIENT_SECRET")
 
 
 def get_cached_url(magnet_hash, filename):
- """
- Get a RealDebrid download link for the given magnet hash.
+    """
+    Get a RealDebrid download link for the given magnet hash.
 
- :param str
- magnet_hash: The hash of the magnet to get a download link for.
- :param str
- filename: The filename of the file to be downloaded from this torrent. If
- not provided, it will be assumed that there is only one file in this
- torrent and that it should be downloaded by default (i.e., without user
- interaction).
- """
+    :param str
+    magnet_hash: The hash of the magnet to get a download link for.
+    :param str
+    filename: The filename of the file to be downloaded from this torrent. If
+    not provided, it will be assumed that there is only one file in this
+    torrent and that it should be downloaded by default (i.e., without user
+    interaction).
+    """
 
     if not any([DEVICE_CODE, CLIENT_ID, CLIENT_SECRET]):
         return None

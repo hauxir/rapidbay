@@ -16,6 +16,12 @@ from common import threaded
 
 
 def get_filepaths(magnet_hash):
+    """
+    Returns a list of filepaths for the given magnet hash.
+
+    :param str
+    magnet_hash: The hash of the magnet link to get filepaths for.
+    """
     filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
     if os.path.exists(filename):
         with open(filename, "r") as f:
@@ -24,6 +30,14 @@ def get_filepaths(magnet_hash):
 
 
 def _get_download_path(magnet_hash, filename):
+    """
+    Returns the full path to a file in the download directory for a given
+    magnet hash.
+
+    :param str magnet_hash: The unique identifier of the torrent.
+    :param str filename: The name of the file to look for in that torrent's
+    directory.
+    """
     filepaths = get_filepaths(magnet_hash)
     if filepaths:
         torrent_path = next(fp for fp in filepaths if fp.endswith(filename))
@@ -31,6 +45,14 @@ def _get_download_path(magnet_hash, filename):
 
 
 def _subtitle_filenames(h, filename):
+    """
+    Finds the subtitle filenames for a given torrent file.
+
+    :param str h: The
+    hash of the torrent to find subtitles for.
+    :param str filename: The name of
+    the video file in this torrent, without its extension.
+    """
     files = torrent.get_torrent_info(h).files()
     filename_without_extension = os.path.splitext(filename)[0]
     subtitle_filenames = []
@@ -45,6 +67,20 @@ def _subtitle_filenames(h, filename):
 
 
 def _subtitle_indexes(h, filename):
+    """
+    Return a list of indexes for the files in `torrent_info` that match the
+    given subtitle filenames.
+
+    :param torrent_info: The
+    :class:`libtorrent.torrent_info` object to search through.
+    :param filename:
+    The filename (without path) of the video file to search for subtitles for,
+    e.g., ``'videofile'`` or ``'videofile-eng'`` or ``'videofile-subbed-rus1',
+    'videofile-subbed-rus2', ..., 'videofile-subbed']`` if there are multiple
+    versions with different subtitles available (e.g., English and Russian).
+    This is case sensitive!  If you want to use globbing wildcards, use
+    :func:`.glob()`.
+    """
     subtitle_filenames = _subtitle_filenames(h, filename)
     files = torrent.get_torrent_info(h).files()
     subtitle_set = []
@@ -58,6 +94,22 @@ def _subtitle_indexes(h, filename):
 
 
 def _get_output_filepath(magnet_hash, filepath):
+    """
+    _get_output_filepath(magnet_hash, filepath)
+
+    Return the output file path
+    for a given magnet hash and input file path.
+
+        :param str magnet_hash:
+    The hash of the torrent this output is associated with.
+        :param str
+    filepath: The absolute or relative path to an input video or audio stream.
+    :returns: A string containing the absolute or relative output filename for
+    this stream, without extension.
+
+            If `isVideo` is True then it will
+    be a mp4 extension; otherwise it will be in the same format as `filePath`.
+    """
     extension = os.path.splitext(filepath)[1][1:]
     is_video = extension in settings.VIDEO_EXTENSIONS
     output_extension = "mp4" if is_video else extension
@@ -70,6 +122,18 @@ def _get_output_filepath(magnet_hash, filepath):
 
 
 def _remove_old_files_and_directories(dirname, max_age):
+    """
+    Removes files and directories from the given directory if they are older
+    than the given age.
+
+    :param dirname: The name of a directory to remove
+    files and directories from.
+    :type dirname: str
+    :param max_age: The maximum
+    age in hours for a file or directory to be kept before it is removed. Must
+    be greater than 0. If 0, all files and directories will be removed
+    immediately without checking their ages (useful for testing).
+    """
     try:
         subpaths = os.listdir(dirname)
     except FileNotFoundError:
@@ -136,6 +200,20 @@ class RapidBayDaemon:
         self.thread.start()
 
     def downloads(self):
+        """
+        Get the status of all files in a torrent.
+
+        :param magnet_hash: The hash of
+        the torrent.
+        :type magnet_hash: str
+
+            :returns dict -- A dictionary
+        mapping filenames to their status as a tuple containing bytes downloaded,
+        bytes total and whether it is seeding or downloading.  If no data has been
+        downloaded for a file, then ``bytes_downloaded`` will be 0 and
+        ``bytes_total`` will be None.  If the file is seeding then ``bytes_total``
+        will be 0 and ``seeding=True`` .
+        """
         result = {}
         for magnet_hash, h in self.torrent_client.torrents.items():
             result[magnet_hash] = {}
@@ -197,6 +275,44 @@ class RapidBayDaemon:
                 self.torrent_client.download_file(magnet_link, filename)
 
     def get_file_status(self, magnet_hash, filename):
+        """
+        Get the status of a file in a torrent.
+
+        :param magnet_hash: The hash of the
+        torrent.
+        :type magnet_hash: str
+        :param filename: The name of the file to
+        get status for. This is relative to the root directory of the torrent and
+        does not include any path separators (e.g., "/"). It can be None if you
+        want to know whether there are any files in this torrent at all, but it's
+        unlikely that you want that so much that you don't care what they're called
+        or how many there are or anything like that, so I think it's more
+        appropriate as an optional parameter instead of something required by
+        default like some kind of `file` argument with no default value because
+        "there aren't any files" is not useful information when trying to decide
+        what action(s) your program should take next). If this parameter is None
+        then only general information about this torrent will be returned;
+        otherwise, detailed information about just this file will be returned
+        (including its progress towards completion and its current download speed).
+        Note also that if `filename` is specified then `magnet_hash` must also be
+        specified since we need both parameters together for unique identification
+        purposes even though only one seems necessary by itself (but again, I'm
+        guessing most people would find it easier/more intuitive/more useful for
+        them just explicitly specify both parameters anyway rather than leaving out
+        one on accident). Also note that if multiple files exist with names
+        matching those given in `filename`, which ones will actually match depends
+        on their order within each individual .torrent metafile; thus using
+        wildcards such as asterisks ("*") may help narrow down which matches apply
+        but won't always work unless exact filenames are used instead.)  # noQA
+        E501 line too long  # noQA E501 line too long  # noQA E501 line too long
+        ...and probably other ways I haven't thought through yet... :type filename:
+        str | NoneType
+
+            :returns dict -- A dictionary containing keys
+        corresponding to different statuses along with values indicating how far
+        along each respective process has progressed according to these possible
+        statuses:\n\n**status
+        """
         assert self.thread.is_alive()
         filename_extension = os.path.splitext(filename)[1]
         output_filepath = _get_output_filepath(magnet_hash, filename)
@@ -266,6 +382,12 @@ class RapidBayDaemon:
         )
 
     def _download_external_subtitles(self, filepath):
+        """
+        Downloads external subtitles for the given filepath.
+
+        :param str filepath:
+        The path to the video file.
+        """
         if self.subtitle_downloads.get(filepath):
             return
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.DOWNLOADING
@@ -273,6 +395,27 @@ class RapidBayDaemon:
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
 
     def _handle_torrent(self, magnet_hash):
+        """
+        _handle_torrent(magnet_hash)
+
+        Handle a torrent with the given hash.
+
+            *
+        If all video files are ready, remove the torrent and copy them to their
+        final destination.
+            * If any video file is waiting for conversion, clear
+        its download status and start converting it.
+            * If any video file is
+        waiting to be copied, copy it from its temporary location to its final
+        destination.
+
+          Args:
+              magnet_hash (str): The hash of the torrent that
+        needs handling.
+
+          Returns: None if no error occurred during handling;
+        otherwise an exception object containing information about what went wrong.
+        """
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h:
             return
@@ -323,6 +466,15 @@ class RapidBayDaemon:
 
     @log.catch_and_log_exceptions
     def _heartbeat(self):
+        """
+        _heartbeat(self)
+
+        For each magnet hash in the torrent client's list of
+        hashes, check if the torrent is stale. If it is, remove it from the client.
+        Otherwise, if it has metadata and hasn't been checked for a while (as
+        defined by settings), check its status and download any new files that have
+        appeared since last time we checked.
+        """
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)
             if not h:

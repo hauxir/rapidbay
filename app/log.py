@@ -14,6 +14,11 @@ def write_log():
 
 
 def catch_and_log_exceptions(fn):
+    """
+    Catch and log exceptions.
+
+    :param fn: Function to decorate.
+    """
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)

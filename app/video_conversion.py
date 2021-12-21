@@ -12,6 +12,9 @@ from subtitles import get_subtitle_language
 
 
 def _recursive_filepaths(dir_name):
+    """
+    Return a list of all files in the directory and its subdirectories.
+    """
     list_of_file = os.listdir(dir_name)
     all_files = list()
     for entry in list_of_file:
@@ -24,6 +27,10 @@ def _recursive_filepaths(dir_name):
 
 
 def _extract_subtitles_as_vtt(filepath):
+    """
+    Extracts subtitles from a video file and saves them as WebVTT files.
+    :param str filepath: Path to the video file.
+    """
     output_dir = os.path.dirname(filepath)
     basename = os.path.basename(filepath)
     filename_without_extension = os.path.splitext(basename)[0]
@@ -103,6 +110,19 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
 
 
 def get_conversion_progress(filepath):
+    """
+    Get the conversion progress for a file.
+
+    :param str filepath: The path to
+    the file that is being converted.
+    :returns float progress_percentage: The
+    percentage of completion of the conversion process, as a float between 0
+    and 1. If no log exists for this file, returns 0.0 (i.e., not started). If
+    there are no lines in the log, returns 1 (i.e., finished). Otherwise
+    calculates it based on how many seconds have elapsed since start time and
+    total duration from first line in logfile divided by each other
+    respectively.
+    """
     log_filepath = f"{filepath}{settings.LOG_POSTFIX}"
     if os.path.isfile(log_filepath):
         with open(log_filepath, "r") as f:
@@ -131,6 +151,23 @@ class VideoConverter:
     @threaded
     @log.catch_and_log_exceptions
     def convert_file(self, input_filepath, output_filepath):
+        """
+        Converts the given input file to an MP4 with subtitles in the given output
+        file.
+
+        :param input_filepath: The path of the video file to convert.
+        :type
+        input_filepath: str
+        :param output_filepath: The path of the converted video
+        file. If this already exists, it will be overwritten without warning. If it
+        does not exist, it will be created as a result of this function call (but
+        not necessarily immediately). It is recommended that you use
+        :func`os.makedirs` before calling this function if you want to ensure that
+        all necessary parent directories are created at once so that no errors
+        occur during conversion due to missing directories later on down the line
+        (e.g., when trying to extract subtitles from a newly-created MP4).  This
+        parameter must end in ".mp4".
+        """
         try:
 
             if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:

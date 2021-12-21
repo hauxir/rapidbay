@@ -17,6 +17,12 @@ def _chunks(l, n):
 
 @log.catch_and_log_exceptions
 def download_all_subtitles(filepath):
+    """
+    Downloads subtitles for the given filepath.
+
+    :param str filepath: The path
+    to the video file.
+    """
     dirname = os.path.dirname(filepath)
     basename = os.path.basename(filepath)
     basename_without_ext = os.path.splitext(basename)[0]
@@ -89,6 +95,13 @@ def download_all_subtitles(filepath):
 
 
 def get_subtitle_language(subtitle_filename):
+    """
+    Given a subtitle filename, return the language of that subtitle file.
+    :param str subtitle_filename: The name of the subtitle file to get the
+    language for. Must end with ".srt".
+    :returns: The two-letter ISO 639-2 code
+    for this language, or None if it could not be determined from its filename.
+    """
     subtitle_filename = subtitle_filename.lower()
     assert subtitle_filename.endswith(".srt")
     filename_without_extension = os.path.splitext(subtitle_filename)[0]

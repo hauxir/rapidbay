@@ -8,6 +8,13 @@ import torrent
 
 
 def search(searchterm):
+    """
+    Searches for torrents using Jackett.
+
+    :param searchterm: The search term to
+    use
+    :type searchterm: str
+    """
     magnet_links = []
     try:
         resp = requests.get(
@@ -31,6 +38,12 @@ def search(searchterm):
         if season and (episode is None):
 
             def sort_by_only_season(x):
+                """
+                Sort a list of dictionaries by the value of a key.
+
+                :param x: A dictionary.
+                :type x: dict
+                """
                 pattern = re.compile("([e|E]\d\d)")
                 try:
                     pattern.search(x.get("Title", ""))[0]

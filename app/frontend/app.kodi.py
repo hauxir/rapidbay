@@ -19,6 +19,15 @@ class RapidbayClient:
         return self._post("/api/torrent_url_to_magnet/", dict(url=url))["magnet_link"]
 
     def files(self, magnet_link):
+        """
+        Get the files in a magnet link.
+
+        :param str magnet_link: The magnet link to
+        get the files for.
+        :returns list[str]: A list of filenames in the torrent.
+        May be empty if there are no files in the torrent or if an error occurred
+        while getting them from transmission-daemon's API.
+        """
         magnet_hash = self._magnet_link_to_hash(magnet_link)
         files = None
         while files is None:
@@ -68,6 +77,13 @@ def get_url(**kwargs):
 
 
 def root():
+    """
+    Displays the root menu of the addon.
+
+    :param str action: The action to
+    perform.
+    :param str category: The category to list items for.
+    """
     xbmcplugin.addDirectoryItem(
         __handle__,
         get_url(action="listing", category="search"),
@@ -91,6 +107,12 @@ def search():
 
 
 def show_search_results(query):
+    """
+    Shows search results for the given query.
+
+    :param str query: The search
+    term to use
+    """
     for result in client.search(query).get("results", []):
         magnet = result.get("magnet") or ""
         urlargs = dict(action="listing", torrent_link=result.get("torrent_link"))
@@ -106,6 +128,13 @@ def show_search_results(query):
 
 
 def view_files(magnet_link):
+    """
+    Displays a list of files in the given magnet link.
+
+    :param str magnet_link:
+    The magnet link to display files from.
+    :returns: None
+    """
     for file in client.files(magnet_link):
         li = xbmcgui.ListItem(label=file)
         li.setProperty("IsPlayable", "true")
@@ -120,6 +149,15 @@ def view_files(magnet_link):
 
 
 def play(magnet_link, filename):
+    """
+    Downloads a magnet link and plays it.
+
+    :param str magnet_link: The URL of
+    the magnet link to download.
+    :param str filename: The name of the file to
+    play once downloaded. If not provided, defaults to the name of the torrent
+    file in your downloads folder (if any).
+    """
     magnet_hash = client.magnet_download(magnet_link, filename)["magnet_hash"]
     completed = False
     progress = xbmcgui.DialogProgress()
@@ -150,6 +188,11 @@ def play(magnet_link, filename):
 
 
 def router(paramstring):
+    """
+    Displays the root menu of the addon.
+
+    :param paramstring: The query string
+    """
     params = dict(parse_qsl(paramstring))
     if params:
         if params["action"] == "listing":

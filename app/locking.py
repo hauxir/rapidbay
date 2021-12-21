@@ -7,6 +7,10 @@ class LockManager:
     locks = {}
 
     def get(self, key):
+        """
+        This function is a decorator that allows only one thread to access the
+        decorated function at a time.
+        """
         thread_id = threading.get_ident()
         while self.locks.get(key) not in [None, thread_id, None]:
             time.sleep(1)
@@ -21,6 +25,10 @@ class LockManager:
 
     @contextmanager
     def lock(self, key):
+        """
+        This function is a context manager that locks the given key in the cache.
+        It raises an exception if the key is already locked by another thread.
+        """
         thread_id = threading.get_ident()
         if self.locks.get(key) == thread_id:
             yield

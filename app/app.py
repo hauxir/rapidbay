@@ -144,10 +144,12 @@ def search(searchterm):
                 magnet="N/A"
             )
         ]
+    filtered_results = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+    rest = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
 
     if searchterm == "":
-        return jsonify(results=_weighted_sort_date_seeds(results))
-    return jsonify(results=results)
+        return jsonify(results=_weighted_sort_date_seeds(filtered_results) + rest)
+    return jsonify(results=filtered_results + rest)
 
 
 @app.route("/api/torrent_url_to_magnet/", methods=["POST"])

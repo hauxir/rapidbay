@@ -6,6 +6,7 @@ import string
 import random
 import requests
 import subprocess
+import urllib
 import PTN
 from functools import wraps
 
@@ -16,16 +17,28 @@ from common import path_hierarchy
 from flask import Flask, Response, jsonify, request, send_from_directory, abort
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from werkzeug.exceptions import NotFound
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 daemon = RapidBayDaemon()
 app = Flask(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
-
+app.use_x_sendfile = True
+app.wsgi_app = ProxyFix(app.wsgi_app)
 
 @app.after_request
 def add_header(response):
     response.headers["x-set-cookie"] = response.headers.get("set-cookie")
     return response
+
+
+@app.after_request
+def after_request(resp):
+    x_sendfile = resp.headers.get("X-Sendfile")
+    if x_sendfile:
+        resp.headers["X-Accel-Redirect"] = urllib.parse.quote(f"/nginx/{x_sendfile}")
+        del resp.headers["X-Sendfile"]
+    resp.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
+    return resp
 
 
 def _get_files(magnet_hash):
@@ -303,6 +316,5 @@ def kodi_repo(path):
     )
 
 
-if __name__ == "__main__":
+with app.app_context():
     daemon.start()
-    app.run(host="0.0.0.0", port=5000, threaded=True)

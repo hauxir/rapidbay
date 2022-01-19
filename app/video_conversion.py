@@ -58,7 +58,23 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
     ]
     needs_audio_conversion = not any("aac" in c for c in audio_codecs)
     needs_video_conversion = settings.CONVERT_VIDEO and not any("avc" in c for c in video_codecs)
-    n_sub_tracks = len([t for t in media_info.tracks if t.track_type == "Text"])
+    has_picture_subs = (
+        len(
+            [
+                t
+                for t in media_info.tracks
+                if t.track_type == "Text"
+                and "Picture" in (t.codec_id_info or "")
+            ]
+        )
+        > 0
+    )
+    n_sub_tracks = (
+        len([t for t in media_info.tracks if t.track_type == "Text"])
+        if not has_picture_subs
+        else 0
+    )
+
     if media_info.tracks:
         try:
             duration = next(t.duration for t in media_info.tracks if t.duration)

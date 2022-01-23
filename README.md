@@ -62,3 +62,7 @@ docker-compose up
 
 ## Using Kodi as a frontend
 [Setting up Rapidbay with Kodi](https://github.com/hauxir/rapidbay/wiki/Setting-up-Rapidbay-with-Kodi)
+
+## Using Real Debrid caching
+- You can speed up downloads by using the torrent cache at real debrid
+- To do that set the env variables RD_DEVICE_CODE, RD_CLIENT_ID and RD_CLIENT_SECRET

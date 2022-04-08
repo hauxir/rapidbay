@@ -395,7 +395,7 @@
             var magnet_hash = get_hash(this.params.magnet_link);
             (function get_file_info() {
                 get(
-                    "/api/magnet/" + magnet_hash + "/" + self.params.filename,
+                    "/api/magnet/" + magnet_hash + "/" + encodeURIComponent(self.params.filename),
                     function (data) {
                         self.status = data.status;
                         self.progress = data.progress;
@@ -407,7 +407,7 @@
                         self.subheading =
                             data.peers === 0 || data.peers ? data.peers + " Peers" : null;
                         self.play_link = data.filename
-                            ? "/play/" + magnet_hash + "/" + data.filename
+                            ? "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename)
                             : null;
                         if (!window.isSafari) {
                             self.subtitles = data.subtitles

@@ -102,7 +102,7 @@
                 <tbody>
                 <tr
                 v-for="result in results"
-                @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + result)">
+                @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + encodeURIComponent(result))">
                     <td>{{ result }}</td>
                 </tr>
                 </tbody>
@@ -143,7 +143,7 @@
             </button>
             <div class="video_url_wrapper">
                 <a :href="window.location.origin + url" class="video_url">
-                    {{url.split("/").pop()}}
+                    {{decodeURIComponent(url.split("/").pop())}}
                 </a>
             </div>
             <div class="buttons">

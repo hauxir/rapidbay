@@ -65,7 +65,7 @@ def download_all_subtitles(filepath, skip=[]):
         }
         sub_filenames = list(set(sub_filenames + list(sub_ids.values())))
 
-        def _download_subtitle_chunk(retries=0):
+        def _download_subtitle_chunk(retries=5):
             nonlocal ost
             if not sub_ids:
                 return

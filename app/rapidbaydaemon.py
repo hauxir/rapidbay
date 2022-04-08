@@ -265,11 +265,11 @@ class RapidBayDaemon:
             peers=h.status().num_peers,
         )
 
-    def _download_external_subtitles(self, filepath):
+    def _download_external_subtitles(self, filepath, skip=[]):
         if self.subtitle_downloads.get(filepath):
             return
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.DOWNLOADING
-        subtitles.download_all_subtitles(filepath)
+        subtitles.download_all_subtitles(filepath, skip=skip)
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
 
     def _handle_torrent(self, magnet_hash):
@@ -309,7 +309,10 @@ class RapidBayDaemon:
             output_filepath = _get_output_filepath(magnet_hash, filepath)
 
             if is_state(filename, FileStatus.DOWNLOAD_FINISHED):
-                self._download_external_subtitles(filepath)
+                subtitle_filenames = _subtitle_filenames(h, filepath)
+                available_subtitle_languages = [lang for lang in [get_subtitle_language(fn) for fn in subtitle_filenames] if lang]
+                embedded_subtitle_languages = [lang for (i,lang) in video_conversion.get_sub_tracks(filepath)]
+                self._download_external_subtitles(filepath, skip=available_subtitle_languages + embedded_subtitle_languages)
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 self.http_downloader.clear(filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)

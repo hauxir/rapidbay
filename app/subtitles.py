@@ -16,7 +16,7 @@ def _chunks(l, n):
 
 
 @log.catch_and_log_exceptions
-def download_all_subtitles(filepath):
+def download_all_subtitles(filepath, skip=[]):
     dirname = os.path.dirname(filepath)
     basename = os.path.basename(filepath)
     basename_without_ext = os.path.splitext(basename)[0]
@@ -25,7 +25,7 @@ def download_all_subtitles(filepath):
     f = File(filepath)
     h = f.get_hash()
     language_ids = [
-      languages.get(part1=lang).part2b for lang in settings.SUBTITLE_LANGUAGES
+      languages.get(part1=lang).part2b for lang in settings.SUBTITLE_LANGUAGES if lang not in skip
     ]
     results_from_hash = (
             [
@@ -57,13 +57,15 @@ def download_all_subtitles(filepath):
         if r["ISO639"] in settings.SUBTITLE_LANGUAGES
     ]
     wait_before_next_chunk = False
+    sub_filenames = []
     for chunk in _chunks(results, 10):
         sub_ids = {
             r["IDSubtitleFile"]: f'{basename_without_ext}.{r["ISO639"]}.srt'
             for r in chunk
         }
+        sub_filenames = list(set(sub_filenames + list(sub_ids.values())))
 
-        def _download_subtitle_chunk(retries=5):
+        def _download_subtitle_chunk(retries=0):
             nonlocal ost
             if not sub_ids:
                 return
@@ -87,15 +89,26 @@ def download_all_subtitles(filepath):
         _download_subtitle_chunk()
         wait_before_next_chunk = True
 
+    for sub_filename in sub_filenames:
+        tmp_path = os.path.join(dirname, "fixed_" + sub_filename)
+        output_path = os.path.join(dirname, sub_filename)
+        os.system(f"timeout 5m alass '{filepath}' '{output_path}' '{tmp_path}'")
+        os.system(f"mv '{tmp_path}' '{output_path}'")
+
 
 def get_subtitle_language(subtitle_filename):
     subtitle_filename = subtitle_filename.lower()
     assert subtitle_filename.endswith(".srt")
     filename_without_extension = os.path.splitext(subtitle_filename)[0]
-    try:
-        three_letter_iso = filename_without_extension[-3:]
-        return languages.get(part2b=three_letter_iso).part2b
-    except KeyError:
+    last_dotted_part = filename_without_extension.split(".")[-1]
+
+    if len(last_dotted_part) == 3:
+        try:
+            three_letter_iso = filename_without_extension[-3:]
+            return languages.get(part2b=three_letter_iso).part2b
+        except KeyError:
+            return None
+    elif len(last_dotted_part) == 2:
         try:
             two_letter_iso = filename_without_extension[-2:]
             if two_letter_iso == "pb":
@@ -103,3 +116,5 @@ def get_subtitle_language(subtitle_filename):
             return languages.get(part1=two_letter_iso).part2b
         except KeyError:
             return None
+
+    return "en"

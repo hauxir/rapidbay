@@ -23,7 +23,7 @@ daemon = RapidBayDaemon()
 app = Flask(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
 app.use_x_sendfile = True
-app.wsgi_app = ProxyFix(app.wsgi_app)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
 
 @app.after_request
 def add_header(response):

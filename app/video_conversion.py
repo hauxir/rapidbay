@@ -23,18 +23,23 @@ def _recursive_filepaths(dir_name):
     return all_files
 
 
+def get_sub_tracks(filepath):
+    media_info = MediaInfo.parse(filepath)
+    return [
+        (int(t.streamorder), t.language or "en")
+        for (i, t) in enumerate(
+            [t for t in media_info.tracks if t.track_type == "Text" and "Picture" not in (t.codec_id_info or "")]
+        )
+        if t.streamorder
+    ]
+
+
 def _extract_subtitles_as_vtt(filepath):
     output_dir = os.path.dirname(filepath)
     basename = os.path.basename(filepath)
     filename_without_extension = os.path.splitext(basename)[0]
     media_info = MediaInfo.parse(filepath)
-    sub_tracks = [
-        (int(t.streamorder), t.language or "unknown")
-        for (i, t) in enumerate(
-            [t for t in media_info.tracks if t.track_type == "Text"]
-        )
-        if t.streamorder
-    ]
+    sub_tracks = get_sub_tracks(filepath)
     return Popen(
         f'ffmpeg -nostdin -v quiet -i "{filepath}" '
         + " ".join(

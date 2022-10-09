@@ -1,11 +1,47 @@
 (function () {
+
+    var keylistener = function(e) {
+      var keycode = (e.keyCode ? e.keyCode : e.which);
+      var name = e.key;
+      var lowername = name.toLowerCase();
+      if (lowername === "enter") {
+        document.activeElement.click();
+      }
+      if(lowername === "arrowdown" || lowername==="arrowright") {
+        e.preventDefault();
+        focusNextElement();
+      }
+      if(lowername === "arrowup" || lowername==="arrowleft") {
+        e.preventDefault();
+        focusPrevElement();
+      }
+      if(lowername === "backspace") {
+        e.preventDefault();
+        e.stopPropagation();
+        window.history.back();
+      }
+    };
+
+    function focusNextElement() {
+      var selectables = $(':focusable:not([tabindex="-1"])')
+      var currentIndex = selectables.index($(':focus'));
+      document.activeElement.blur();
+      selectables.eq(currentIndex + 1).focus();
+    }
+
+    function focusPrevElement() {
+      var selectables = $(':focusable:not([tabindex="-1"])')
+      var currentIndex = selectables.index($(':focus'));
+      document.activeElement.blur();
+      selectables.eq(currentIndex - 1).focus();
+    }
+
     window.isSafari = navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
 
     window.isChrome = /Chrome/i.test(navigator.userAgent);
     if (navigator.serviceWorker) {
         navigator.serviceWorker.register("/sw.js");
     }
-    var navigated = false;
 
     if (!window.location.origin) {
         window.location.origin =
@@ -79,7 +115,6 @@
         } else {
             router.historyAPIUpdateMethod("pushState");
         }
-        navigated = true;
         router.navigate(path);
     }
 
@@ -115,6 +150,7 @@
             var filename = (function (l) {
                 return decodeURIComponent(l[l.length - 1]);
             })(location.pathname.split("/"));
+            var self = this;
 
             function getNextFile() {
                 return new Promise(function (resolve) {
@@ -151,13 +187,42 @@
                             next_file;
                         navigate("/", true);
                         rbsetTimeout(function () {
-                            navigate(next_path);
+                            navigate(next_path, true);
                         });
                     }
                 });
             });
             video.play();
+
+            this.videokeylistener = function(event) {
+              const videoSelected = ["video", "body"].indexOf(document.activeElement && document.activeElement.tagName.toLowerCase()) !== -1;
+              if(event.key.toLowerCase() === "arrowright" && videoSelected) {
+                event.preventDefault();
+                event.stopPropagation();
+                video.currentTime += 60;
+              }
+              else if(event.key.toLowerCase() === "arrowleft" && videoSelected) {
+                event.preventDefault();
+                event.stopPropagation();
+                video.currentTime -= 60;
+              }
+              else if(event.key.toLowerCase() === "enter" && videoSelected) {
+                event.preventDefault();
+                event.stopPropagation();
+                if(!video.paused) {
+                  video.pause();
+                } else {
+                  video.play();
+                }
+              }
+              else {
+                self.mousemove_listener();
+              }
+            };
+
+            document.addEventListener('keydown', this.videokeylistener, true);
         },
+
         created: function () {
             var timeout;
             var duration = 2800;
@@ -178,6 +243,8 @@
             document.removeEventListener("mousemove", this.mousemove_listener);
             document.removeEventListener("touchstart", this.mousemove_listener);
             document.removeEventListener("click", this.mousemove_listener);
+            document.removeEventListener('keydown', this.videokeylistener, true);
+            document.removeEventListener('keydown', this.keylistener);
         },
         template: "#player-template",
     });
@@ -263,7 +330,7 @@
                 }
             },
         },
-        created: function () {
+        mounted: function() {
             if (router.lastRouteResolved().url.toLowerCase() === "/registerhandler") {
                 navigator.registerProtocolHandler(
                     "magnet",
@@ -271,7 +338,20 @@
                     "RapidBay"
                 );
             }
+
+            this.keylistener = function(e) {
+                var name = e.key;
+                var lowername = name.toLowerCase();
+                if (lowername.startsWith("arrow")) {
+                  $("input").focus();
+                }
+              };
+
+            document.addEventListener('keydown', this.keylistener);
         },
+        destroyed: function() {
+            document.removeEventListener('keydown', this.keylistener);
+        }
     });
 
     Vue.component("search-results-screen", {
@@ -281,11 +361,7 @@
         },
         methods: {
             back: function () {
-                if (navigated) {
-                    window.history.back();
-                } else {
-                    navigate("/", true);
-                }
+                window.history.back();
             },
         },
         template: "#search-results-screen-template",
@@ -294,8 +370,19 @@
             var self = this;
             get("/api/search/" + self.searchterm, function (data) {
                 self.results = data.results;
+                rbsetTimeout(function() {
+                  var firstTr = document.getElementsByTagName("tr")[0];
+                  if(firstTr) {
+                    firstTr.focus();
+                  }
+                });
             });
+            this.keylistener = keylistener.bind({});
+            document.addEventListener('keydown', this.keylistener);
         },
+        destroyed: function () {
+            document.removeEventListener('keydown', this.keylistener);
+        }
     });
 
     Vue.component("torrent-link-screen", {
@@ -326,16 +413,12 @@
         template: "#filelist-screen-template",
         methods: {
             back: function () {
-                if (navigated) {
-                    window.history.back();
-                } else {
-                    router.historyAPIUpdateMethod("pushState");
-                    navigate("/");
-                }
-            },
+                window.history.back();
+            }
         },
         created: function () {
-            router.historyAPIUpdateMethod("pushState");
+            this.keylistener = keylistener.bind({});
+            document.addEventListener('keydown', this.keylistener);
             post("/api/magnet_files/", {magnet_link: this.params.magnet_link});
             var self = this;
             (function get_files() {
@@ -347,10 +430,19 @@
                             return;
                         }
                         self.results = data.files;
+                        rbsetTimeout(function() {
+                          var firstTr = document.getElementsByTagName("tr")[0];
+                          if(firstTr) {
+                            firstTr.focus();
+                          }
+                        });
                     }
                 );
             })();
         },
+        destroyed: function () {
+          document.removeEventListener('keydown', this.keylistener);
+        }
     });
 
     Vue.component("download-screen", {
@@ -373,20 +465,12 @@
                 e.target.value = window.location.origin + this.play_link;
             },
             back: function () {
-                if (navigated) {
-                    window.history.back();
-                } else {
-                    navigate(
-                        window.location.pathname.substring(
-                            0,
-                            window.location.pathname.lastIndexOf("/")
-                        ),
-                        true
-                    );
-                }
+                window.history.back();
             },
         },
         created: function () {
+            this.keylistener = keylistener.bind({});
+            document.addEventListener('keydown', this.keylistener);
             post("/api/magnet_download/", {
                 magnet_link: this.params.magnet_link,
                 filename: this.params.filename,
@@ -428,6 +512,9 @@
                 );
             })();
         },
+        destroyed: function () {
+          document.removeEventListener('keydown', this.keylistener);
+        }
     });
 
     var vm = new Vue({

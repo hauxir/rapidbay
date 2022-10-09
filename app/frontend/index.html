@@ -9,6 +9,7 @@
     <title>RapidBay</title>
     <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
     <script src="/lib/jquery-3.3.1.min.js"></script>
+    <script src="/lib/jquery-ui-focusable-1.13.2.min.js"></script>
     <script src="/lib/vue.2.5.3.min.js"></script>
     <script src="/lib/navigo.6.0.2.min.js"></script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
@@ -70,6 +71,9 @@
                 <div v-else>
                     &#128293;
                 </div>
+            <div class="buttons">
+                <fullscreen-button/>
+            </div>
         </div>
         <loading-spinner v-if="results === null"/>
         <div v-else class="tablewrapper">
@@ -77,6 +81,7 @@
                 <table class="table table-hover">
                     <tbody>
                         <tr
+                        tabindex="0"
                         v-for="result in results"
                         @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
                         >
@@ -95,12 +100,16 @@
             <button @click="back()" class="btn btn-dark backarrow">
               <div class="icon back_icon"/>
             </button>
+            <div class="buttons">
+                <fullscreen-button/>
+            </div>
         </div>
         <loading-spinner v-if="results === null"/>
         <div v-else class="tablewrapper">
             <table class="table table-hover">
                 <tbody>
                 <tr
+                tabindex="0"
                 v-for="result in results"
                 @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + encodeURIComponent(result))">
                     <td>{{ result }}</td>
@@ -123,6 +132,9 @@
             <div>
             {{params.filename}}
             </div>
+            <div class="buttons">
+                <fullscreen-button/>
+            </div>
         </div>
         <div class="wrapper">
             <loading-spinner
@@ -142,7 +154,7 @@
               <div class="icon back_icon"/>
             </button>
             <div class="video_url_wrapper">
-                <a :href="window.location.origin + url" class="video_url">
+                <a tabindex="-1" :href="window.location.origin + url" class="video_url">
                     {{decodeURIComponent(url.split("/").pop())}}
                 </a>
             </div>
@@ -151,7 +163,7 @@
                 <fullscreen-button/>
             </div>
         </div>
-        <video v-if="url" :src="url" controls autoplay playsinline>
+        <video v-if="url" :src="url" controls autoplay playsinline tabindex="0">
             <track v-for="subtitle in subtitles"
                 :label="subtitle.language" kind="subtitles"
                 :srclang="subtitle.language"

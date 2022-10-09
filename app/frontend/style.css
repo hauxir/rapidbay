@@ -1,3 +1,7 @@
+*:focus {
+  outline: none;
+}
+
 html,
 body {
   height: 100%;
@@ -51,6 +55,9 @@ body {
   max-width: 100%;
   vertical-align: middle;
   max-height: 50px;
+}
+.table tr:focus {
+  background-color: rgba(255,255,255,0.075);
 }
 
 .table td {
@@ -207,12 +214,12 @@ body {
     left: 20px;
 }
 
-.topbar button:hover {
+.topbar button:hover, .topbar button:focus {
     background-color: #BEBEBE;
     color: #333333;
 }
 
-.topbar button:hover .icon {
+.topbar button:hover .icon, button:focus .icon {
     filter: brightness(10%);
 }
 
@@ -243,7 +250,7 @@ body {
   padding: 0px;
 }
 
-.topbar .btn:not(:hover) {
+.topbar .btn:not(:hover):not(:focus) {
   background-color: rgba(0,0,0,0);
   border-color: rgba(0,0,0,0);
 }

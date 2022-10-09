@@ -1,3 +1,4 @@
+import cachetools.func
 import re
 import requests
 from dateutil.parser import parse
@@ -7,6 +8,7 @@ import settings
 import torrent
 
 
+@cachetools.func.ttl_cache(ttl=2*60)
 def search(searchterm):
     magnet_links = []
     try:

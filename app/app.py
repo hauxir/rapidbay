@@ -1,3 +1,4 @@
+import cachetools.func
 import datetime
 import asyncio
 import json
@@ -38,6 +39,9 @@ def after_request(resp):
         resp.headers["X-Accel-Redirect"] = urllib.parse.quote(f"/nginx/{x_sendfile}")
         del resp.headers["X-Sendfile"]
     resp.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
+    resp.headers["Expires"] = 0
+    resp.headers["Pragma"] = "no-cache"
     return resp
 
 
@@ -134,7 +138,8 @@ def login():
         abort(404)
     response = jsonify()
     if settings.PASSWORD and password == settings.PASSWORD:
-        response.set_cookie('password', password)
+        expires = datetime.datetime.now() + datetime.timedelta(days=365)
+        response.set_cookie('password', password, expires=expires)
     return response
 
 
@@ -165,10 +170,8 @@ def search(searchterm):
     return jsonify(results=filtered_results + rest)
 
 
-@app.route("/api/torrent_url_to_magnet/", methods=["POST"])
-@authorize
-def torrent_url_to_magnet():
-    torrent_url = request.form.get("url")
+@cachetools.func.ttl_cache(ttl=60*60)
+def _torrent_url_to_magnet(torrent_url):
     filepath = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
     magnet_link = None
     try:
@@ -176,7 +179,7 @@ def torrent_url_to_magnet():
         if r.status_code == 302:
             location = r.headers.get("Location")
             if location and location.startswith("magnet"):
-                return jsonify(magnet_link=location)
+                return location
         with open(filepath, 'wb') as f:
             f.write(r.content)
         daemon.save_torrent_file(filepath)
@@ -186,7 +189,14 @@ def torrent_url_to_magnet():
             os.remove(filepath)
         except FileNotFoundError:
             pass
-    return jsonify(magnet_link=magnet_link)
+    return magnet_link
+
+
+@app.route("/api/torrent_url_to_magnet/", methods=["POST"])
+@authorize
+def torrent_url_to_magnet():
+    torrent_url = request.form.get("url")
+    return jsonify(magnet_link=_torrent_url_to_magnet(torrent_url))
 
 
 @app.route("/api/magnet_files/", methods=["POST"])

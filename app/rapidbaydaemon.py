@@ -1,3 +1,4 @@
+import cachetools.func
 import json
 import datetime
 import os
@@ -15,12 +16,17 @@ from http_downloader import HttpDownloader
 from common import threaded
 
 
+@cachetools.func.ttl_cache(ttl=60*60)
+def _open_json_file(filepath):
+    with open(filepath, "r") as f:
+        data = f.read().replace("\n", "")
+        return json.loads(data)
+
+
 def get_filepaths(magnet_hash):
     filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
     if os.path.exists(filename):
-        with open(filename, "r") as f:
-            data = f.read().replace("\n", "")
-            return json.loads(data)
+        return _open_json_file(filename)
 
 
 def _get_download_path(magnet_hash, filename):
@@ -157,7 +163,18 @@ class RapidBayDaemon:
     @log.catch_and_log_exceptions
     def fetch_filelist_from_link(self, magnet_link):
         assert self.thread.is_alive()
-        self.torrent_client.fetch_filelist_from_link(magnet_link)
+
+        magnet_hash = torrent.get_hash(magnet_link)
+        filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
+
+        if not os.path.exists(filename):
+            cached_filelist = http_cache.get_cached_filelist(magnet_hash)
+            if cached_filelist:
+                os.makedirs(os.path.dirname(filename), exist_ok=True)
+                with open(filename, "w") as f:
+                    f.write(json.dumps(cached_filelist))
+
+            self.torrent_client.fetch_filelist_from_link(magnet_link)
 
     @log.catch_and_log_exceptions
     def save_torrent_file(self, filepath):
@@ -177,18 +194,18 @@ class RapidBayDaemon:
 
         download_path = _get_download_path(magnet_hash, filename)
 
+        self.torrent_client.download_file(magnet_link, filename)
+
+        h = self.torrent_client.torrents.get(magnet_hash)
+        h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
+        h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)
+
         if download_path:
             http_download_progress = self.http_downloader.downloads.get(download_path)
             if http_download_progress is None:
                 cached_url = http_cache.get_cached_url(magnet_hash, filename)
                 if cached_url:
                     self.http_downloader.download_file(cached_url, download_path)
-
-        self.torrent_client.download_file(magnet_link, filename)
-
-        h = self.torrent_client.torrents.get(magnet_hash)
-        h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
-        h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)
 
         if download_subtitles:
             for filename in _subtitle_filenames(
@@ -205,6 +222,7 @@ class RapidBayDaemon:
         if os.path.isfile(output_filepath):
             if self.video_converter.file_conversions.get(output_filepath):
                 return dict(status=FileStatus.FINISHING_UP)
+            fn_without_extension = os.path.splitext(filename)[0]
             return dict(
                 status=FileStatus.READY,
                 filename=os.path.basename(output_filepath),
@@ -212,7 +230,7 @@ class RapidBayDaemon:
                     [
                         f
                         for f in os.listdir(os.path.dirname(output_filepath))
-                        if f.endswith(".vtt")
+                        if f.endswith(".vtt") and f.startswith(fn_without_extension)
                     ],
                     key=lambda fn: fn.split("_")[-1],
                 ),

@@ -18,6 +18,7 @@ RUN pip install bencodepy
 RUN pip install parse-torrent-name
 RUN pip install python-dateutil
 RUN pip install gunicorn
+RUN pip install cachetools
 RUN wget https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 -O /usr/bin/alass
 RUN chmod +x /usr/bin/alass
 

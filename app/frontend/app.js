@@ -36,6 +36,10 @@
       selectables.eq(currentIndex - 1).focus();
     }
 
+    document.body.onmouseover = function() {
+      document.activeElement.blur();
+    };
+
     window.isSafari = navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
 
     window.isChrome = /Chrome/i.test(navigator.userAgent);

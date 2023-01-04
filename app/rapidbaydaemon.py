@@ -11,8 +11,54 @@ import settings
 import subtitles
 import torrent
 import video_conversion
+import requests_unixsocket
 from http_downloader import HttpDownloader
 from common import threaded
+
+from flask import Flask, Response, jsonify, request, send_from_directory, abort
+
+global daemon
+daemon = None
+
+class DaemonClient:
+    def __init__(self, *args, **kwargs):
+        self.session = requests_unixsocket.Session()
+
+    def _get(self, path):
+        return self.session.get("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path).json()
+
+    def _post(self, path, data):
+        return self.session.post("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path, json=data).json()
+
+    def save_torrent_file(self, filepath):
+        return self._post(f"/save_torrent_file", dict(filepath=filepath))
+
+    def fetch_filelist_from_link(self, magnet_link):
+        return self._post(f"/fetch_filelist_from_link", dict(magnet_link=magnet_link))
+
+    def download_file(self, magnet_link, filename):
+        return self._post(f"/download_file", dict(magnet_link=magnet_link, filename=filename))
+
+    def get_file_status(self, magnet_hash, filename):
+        return self._get(f"/get_file_status/{magnet_hash}/{filename}")
+
+    def downloads(self):
+        return self._get("/downloads")
+
+    def subtitle_downloads(self):
+        return self._get("/subtitle_downloads")
+
+    def session_torrents(self):
+        return self._get("/session_torrents")
+
+    def file_conversions(self):
+        return self._get("/file_conversions")
+
+    def http_downloads(self):
+        return self._get("/http_downloads")
+
+
+app = Flask(__name__)
 
 
 def get_filepaths(magnet_hash):
@@ -157,6 +203,7 @@ class RapidBayDaemon:
     @log.catch_and_log_exceptions
     def fetch_filelist_from_link(self, magnet_link):
         assert self.thread.is_alive()
+        print(f"fetch_filelist_from_link: {magnet_link}", flush=True)
         self.torrent_client.fetch_filelist_from_link(magnet_link)
 
     @log.catch_and_log_exceptions
@@ -269,7 +316,7 @@ class RapidBayDaemon:
         if self.subtitle_downloads.get(filepath):
             return
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.DOWNLOADING
-        subtitles.download_all_subtitles(filepath, skip=skip)
+        subtitles.download_all_subtitles(filepath, skip=[])
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
 
     def _handle_torrent(self, magnet_hash):
@@ -355,3 +402,71 @@ class RapidBayDaemon:
         while True:
             self._heartbeat()
             time.sleep(1)
+
+
+def start():
+    global daemon
+    daemon = RapidBayDaemon()
+    daemon.start()
+
+
+@app.route("/save_torrent_file", methods=["POST"])
+def _save_torrent_file():
+    filepath = request.json.get("filepath")
+    daemon.save_torrent_file(filepath)
+    return jsonify({})
+
+
+@app.route("/fetch_filelist_from_link", methods=["POST"])
+def _fetch_filelist_from_link():
+    magnet_link = request.json.get("magnet_link")
+    daemon.fetch_filelist_from_link(magnet_link)
+    return jsonify({})
+
+
+@app.route("/download_file", methods=["POST"])
+def _download_file():
+    magnet_link = request.json.get("magnet_link")
+    filename = request.json.get("filename")
+    daemon.download_file(magnet_link, filename)
+    return jsonify({})
+
+
+@app.route("/get_file_status/<string:magnet_hash>/<string:filename>")
+def _get_file_status(magnet_hash, filename):
+    response = daemon.get_file_status(magnet_hash, filename)
+    return jsonify(**response)
+
+
+@app.route("/downloads")
+def _downloads():
+    response = daemon.downloads()
+    return jsonify(**response)
+
+
+@app.route("/subtitle_downloads")
+def _subtitle_downloads():
+    response = daemon.subtitle_downloads
+    return jsonify(**response)
+
+
+@app.route("/session_torrents")
+def _session_torrents():
+    response = daemon.session_torrents()
+    return jsonify(response)
+
+
+@app.route("/file_conversions")
+def _file_conversions():
+    response = daemon.video_converter.file_conversions
+    return jsonify(**response)
+
+
+@app.route("/http_downloads")
+def _http_downloads():
+    response = daemon.http_downloader.downloads
+    return jsonify(**response)
+
+
+with app.app_context():
+    start()

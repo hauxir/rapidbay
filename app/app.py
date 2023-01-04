@@ -15,15 +15,17 @@ import settings
 import torrent
 from common import path_hierarchy
 from flask import Flask, Response, jsonify, request, send_from_directory, abort
-from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
+from rapidbaydaemon import FileStatus, get_filepaths, DaemonClient
 from werkzeug.exceptions import NotFound
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-daemon = RapidBayDaemon()
 app = Flask(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
 app.use_x_sendfile = True
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
+
+daemon = DaemonClient()
+
 
 @app.after_request
 def add_header(response):
@@ -245,13 +247,6 @@ def files(magnet_hash):
     return jsonify(files=None)
 
 
-@app.route("/play/<string:magnet_hash>/<string:filename>")
-def play(magnet_hash, filename):
-    response = send_from_directory(f"/tmp/output/{magnet_hash}", filename)
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
-
-
 @app.route("/error.log")
 @authorize
 def errorlog():
@@ -263,7 +258,7 @@ def errorlog():
     return Response(data, mimetype="text/plain")
 
 
-@app.route("/status")
+@app.route("/api/status")
 @authorize
 def status():
     return jsonify(
@@ -271,11 +266,11 @@ def status():
         filelist_dir=path_hierarchy(settings.FILELIST_DIR),
         torrents_dir=path_hierarchy(settings.TORRENTS_DIR),
         downloads_dir=path_hierarchy(settings.DOWNLOAD_DIR),
-        subtitle_downloads=daemon.subtitle_downloads,
+        subtitle_downloads=daemon.subtitle_downloads(),
         torrent_downloads=daemon.downloads(),
         session_torrents=daemon.session_torrents(),
-        conversions=daemon.video_converter.file_conversions,
-        http_downloads=daemon.http_downloader.downloads,
+        conversions=daemon.file_conversions(),
+        http_downloads=daemon.http_downloads(),
     )
 
 
@@ -314,7 +309,3 @@ def kodi_repo(path):
     return Response(
         "Wrong password", 401, {"WWW-Authenticate": 'Basic realm="Login Required"'}
     )
-
-
-with app.app_context():
-    daemon.start()

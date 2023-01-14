@@ -252,14 +252,17 @@ class RapidBayDaemon:
         if os.path.isfile(output_filepath):
             if self.video_converter.file_conversions.get(output_filepath):
                 return dict(status=FileStatus.FINISHING_UP)
+            base_filename = os.path.basename(output_filepath)
+            base_filename_without_extension = os.path.splitext(base_filename)[0]
             return dict(
                 status=FileStatus.READY,
-                filename=os.path.basename(output_filepath),
+                filename=base_filename,
                 subtitles=sorted(
                     [
                         f
                         for f in os.listdir(os.path.dirname(output_filepath))
                         if f.endswith(".vtt")
+                        and f.startswith(base_filename_without_extension)
                     ],
                     key=lambda fn: fn.split("_")[-1],
                 ),

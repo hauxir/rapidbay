@@ -1,62 +1,87 @@
 <html>
-  <head>
-    <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
-    <script src="/lib/jquery-3.3.1.min.js"></script>
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
-    <style>
-      body {
-        background: black;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      input,
-      button {
-        display: flex;
-        margin: auto;
-        font-size: 32px;
-        text-align: center;
-      }
-      button {
-        border: 1px solid white;
-        margin: 10px auto;
-        background-color: black;
-        border-radius: 5px;
-        color: white;
-      }
-    </style>
-  </head>
+    <head>
+        <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
+        <script src="/lib/jquery-3.3.1.min.js"></script>
+        <link rel="manifest" href="/manifest.json" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+        />
+        <style>
+            body {
+                background: black;
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            input,
+            button {
+                display: flex;
+                margin: auto;
+                font-size: 32px;
+                text-align: center;
+            }
+            button {
+                border: 1px solid white;
+                margin: 10px auto;
+                background-color: black;
+                border-radius: 5px;
+                color: white;
+            }
+        </style>
+    </head>
 
-  <body>
-    <form>
-      <input type="text" placeholder="Password" autocorrect="off" autocapitalize="none" />
-      <button type="submit">Continue</button>
-    </form>
-    <script>
-      var storedCookie = localStorage.getItem("cookie");
-      var form = document.getElementsByTagName("form")[0];
-      if(storedCookie) {
-        document.cookie = storedCookie;
-        location.reload();
-      }
-      form.onsubmit = function (e) {
-        e.preventDefault();
-        var password = document.getElementsByTagName("input")[0].value;
-        if (!password) return;
-        $.post("/api", { password: password }, function(data, status, response) {
-          var cookieHeader = response.getResponseHeader('x-set-cookie');
-          if(!document.cookie) {
-            document.cookie = cookieHeader;
-          } else {
-            localStorage.setItem("cookie", cookieHeader);
-          }
-          location.reload();
-        });
-      };
-    </script>
-  </body>
+    <body>
+        <form>
+            <input
+                type="text"
+                placeholder="Password"
+                autocorrect="off"
+                autocapitalize="none"
+            />
+            <button type="submit">Continue</button>
+        </form>
+        <script>
+            var storedCookie = localStorage.getItem("cookie");
+            var form = document.getElementsByTagName("form")[0];
+            if (storedCookie) {
+                document.cookie = storedCookie;
+                location.reload();
+            }
+            form.onsubmit = function (e) {
+                e.preventDefault();
+                var password = document.getElementsByTagName("input")[0].value;
+                if (!password) return;
+                $.post(
+                    "/api",
+                    { password: password },
+                    function (data, status, response) {
+                        var cookieHeader =
+                            response.getResponseHeader("x-set-cookie");
+                        if (!document.cookie) {
+                            document.cookie = cookieHeader;
+                        } else {
+                            localStorage.setItem("cookie", cookieHeader);
+                        }
+                        location.reload();
+                    }
+                );
+            };
+            if (navigator.serviceWorker) {
+                navigator.serviceWorker.register("/sw.js");
+            }
+            document.addEventListener(
+                "keydown",
+                function (e) {
+                    var name = e.key;
+                    var lowername = name.toLowerCase();
+                    if (lowername === "arrowdown") {
+                        document.getElementsByTagName("input")[0].focus();
+                    }
+                },
+                true
+            );
+        </script>
+    </body>
 </html>

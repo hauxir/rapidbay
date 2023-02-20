@@ -1,46 +1,49 @@
 (function () {
-
-    var keylistener = function(e) {
-      var keycode = (e.keyCode ? e.keyCode : e.which);
-      var name = e.key;
-      var lowername = name.toLowerCase();
-      if (lowername === "enter") {
-        document.activeElement.click();
-      }
-      if(lowername === "arrowdown" || lowername==="arrowright") {
-        e.preventDefault();
-        focusNextElement();
-      }
-      if(lowername === "arrowup" || lowername==="arrowleft") {
-        e.preventDefault();
-        focusPrevElement();
-      }
-      if(lowername === "backspace") {
-        e.preventDefault();
-        e.stopPropagation();
-        window.history.back();
-      }
+    var keylistener = function (e) {
+        var keycode = e.keyCode ? e.keyCode : e.which;
+        var name = e.key;
+        var lowername = name.toLowerCase();
+        if (lowername === "enter") {
+            e.preventDefault();
+            document.activeElement.click();
+        }
+        if (lowername === "arrowdown" || lowername === "arrowright") {
+            document.body.onmouseover = null;
+            e.preventDefault();
+            focusNextElement();
+        }
+        if (lowername === "arrowup" || lowername === "arrowleft") {
+            document.body.onmouseover = null;
+            e.preventDefault();
+            focusPrevElement();
+        }
+        if (lowername === "backspace") {
+            e.preventDefault();
+            e.stopPropagation();
+            window.history.back();
+        }
     };
 
     function focusNextElement() {
-      var selectables = $(':focusable:not([tabindex="-1"])')
-      var currentIndex = selectables.index($(':focus'));
-      document.activeElement.blur();
-      selectables.eq(currentIndex + 1).focus();
+        var selectables = $(':focusable:not([tabindex="-1"])');
+        var currentIndex = selectables.index($(":focus"));
+        document.activeElement.blur();
+        selectables.eq(currentIndex + 1).focus();
     }
 
     function focusPrevElement() {
-      var selectables = $(':focusable:not([tabindex="-1"])')
-      var currentIndex = selectables.index($(':focus'));
-      document.activeElement.blur();
-      selectables.eq(currentIndex - 1).focus();
+        var selectables = $(':focusable:not([tabindex="-1"])');
+        var currentIndex = selectables.index($(":focus"));
+        document.activeElement.blur();
+        selectables.eq(currentIndex - 1).focus();
     }
 
-    document.body.onmouseover = function() {
-      document.activeElement.blur();
+    document.body.onmouseover = function () {
+        document.activeElement.blur();
     };
 
-    window.isSafari = navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
+    window.isSafari =
+        navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
 
     window.isChrome = /Chrome/i.test(navigator.userAgent);
     if (navigator.serviceWorker) {
@@ -110,7 +113,9 @@
         var hash_start = magnet_link.indexOf("btih:") + 5;
         var hash_end = magnet_link.indexOf("&");
         if (hash_end == -1) return magnet_link.substr(hash_start).toLowerCase();
-        return magnet_link.substr(hash_start, hash_end - hash_start).toLowerCase();
+        return magnet_link
+            .substr(hash_start, hash_end - hash_start)
+            .toLowerCase();
     }
 
     function navigate(path, replaceState) {
@@ -134,7 +139,8 @@
         template: "#loading-spinner-template",
         updated: function () {
             var progress_el = this.$refs.progress;
-            progress_el && (progress_el.style.width = this.progress * 100 + "%");
+            progress_el &&
+                (progress_el.style.width = this.progress * 100 + "%");
         },
     });
 
@@ -142,9 +148,10 @@
         props: ["url", "subtitles", "back"],
         data: function () {
             return {
-                isDesktop: !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(
-                    navigator.userAgent
-                ),
+                isDesktop:
+                    !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(
+                        navigator.userAgent
+                    ),
                 isChrome: window.isChrome,
                 hovering: false,
             };
@@ -158,9 +165,12 @@
 
             function getNextFile() {
                 return new Promise(function (resolve) {
-                    get("/api/next_file/" + magnet_hash + "/" + filename, function (data) {
-                        resolve(data.next_filename)
-                    });
+                    get(
+                        "/api/next_file/" + magnet_hash + "/" + filename,
+                        function (data) {
+                            resolve(data.next_filename);
+                        }
+                    );
                 });
             }
 
@@ -171,7 +181,9 @@
                     if (next_file) {
                         post("/api/magnet_download/", {
                             magnet_link: decodeURIComponent(
-                                decodeURIComponent(location.pathname.split("/")[2])
+                                decodeURIComponent(
+                                    location.pathname.split("/")[2]
+                                )
                             ),
                             filename: next_file,
                         });
@@ -198,33 +210,89 @@
             });
             video.play();
 
-            this.videokeylistener = function(event) {
-              const videoSelected = ["video", "body"].indexOf(document.activeElement && document.activeElement.tagName.toLowerCase()) !== -1;
-              if(event.key.toLowerCase() === "arrowright" && videoSelected) {
-                event.preventDefault();
-                event.stopPropagation();
-                video.currentTime += 60;
-              }
-              else if(event.key.toLowerCase() === "arrowleft" && videoSelected) {
-                event.preventDefault();
-                event.stopPropagation();
-                video.currentTime -= 60;
-              }
-              else if(event.key.toLowerCase() === "enter" && videoSelected) {
-                event.preventDefault();
-                event.stopPropagation();
-                if(!video.paused) {
-                  video.pause();
-                } else {
-                  video.play();
+            var captionLanguage = localStorage.getItem("captionLanguage");
+            var tracks = video.textTracks;
+            for (var i = 0; i < tracks.length; i++) {
+                var track = tracks[i];
+                track.mode = "disabled";
+            }
+            if (captionLanguage) {
+                var currentTrack;
+                for (var i = 0; i < tracks.length; i++) {
+                    var track = tracks[i];
+                    track.mode = "hidden";
+                    if (!currentTrack && track.language === captionLanguage) {
+                        currentTrack = track;
+                    }
                 }
-              }
-              else {
-                self.mousemove_listener();
-              }
+                if (currentTrack) {
+                    currentTrack.mode = "showing";
+                }
+            }
+            this.captionChangeListener = function (e) {
+                console.log(e);
+                var tracks = e.currentTarget;
+                var captionLanguage;
+                for (var i = 0; i < tracks.length; i++) {
+                    var track = tracks[i];
+                    if (track.mode === "showing") {
+                        captionLanguage = track.language;
+                    }
+                }
+                if (captionLanguage) {
+                    window.localStorage.setItem(
+                        "captionLanguage",
+                        captionLanguage
+                    );
+                } else {
+                    window.localStorage.removeItem("captionLanguage");
+                }
             };
 
-            document.addEventListener('keydown', this.videokeylistener, true);
+            video.textTracks.addEventListener(
+                "change",
+                this.captionChangeListener
+            );
+
+            this.videokeylistener = function (event) {
+                const videoSelected =
+                    ["video", "body"].indexOf(
+                        document.activeElement &&
+                            document.activeElement.tagName.toLowerCase()
+                    ) !== -1;
+                if (event.key.toLowerCase() === "arrowright" && videoSelected) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    video.currentTime += 60;
+                } else if (
+                    event.key.toLowerCase() === "arrowleft" &&
+                    videoSelected
+                ) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    video.currentTime -= 60;
+                } else if (
+                    event.key.toLowerCase() === "enter" &&
+                    videoSelected
+                ) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (!video.paused) {
+                        video.pause();
+                    } else {
+                        video.play();
+                    }
+                } else if (
+                    event.key.toLowerCase() === "mediarewind" &&
+                    videoSelected
+                ) {
+                    location.href = document.querySelector("video").src;
+                } else {
+                    self.mousemove_listener();
+                }
+            };
+
+            document.addEventListener("keydown", this.videokeylistener, true);
         },
 
         created: function () {
@@ -247,8 +315,19 @@
             document.removeEventListener("mousemove", this.mousemove_listener);
             document.removeEventListener("touchstart", this.mousemove_listener);
             document.removeEventListener("click", this.mousemove_listener);
-            document.removeEventListener('keydown', this.videokeylistener, true);
-            document.removeEventListener('keydown', this.keylistener);
+            document.removeEventListener(
+                "keydown",
+                this.videokeylistener,
+                true
+            );
+            document.removeEventListener("keydown", this.keylistener);
+            var video = document.getElementsByTagName("video")[0];
+            if (video) {
+                video.textTracks.removeEventListener(
+                    "change",
+                    this.captionChangeListener
+                );
+            }
         },
         template: "#player-template",
     });
@@ -257,14 +336,22 @@
         template: "#fullscreen-button-template",
         methods: {
             toggleFullscreen: function () {
-                if (!document.fullscreenElement &&    // alternative standard method
-                    !document.mozFullScreenElement && !document.webkitFullscreenElement) {  // current working methods
+                if (
+                    !document.fullscreenElement && // alternative standard method
+                    !document.mozFullScreenElement &&
+                    !document.webkitFullscreenElement
+                ) {
+                    // current working methods
                     if (document.documentElement.requestFullscreen) {
                         document.documentElement.requestFullscreen();
                     } else if (document.documentElement.mozRequestFullScreen) {
                         document.documentElement.mozRequestFullScreen();
-                    } else if (document.documentElement.webkitRequestFullscreen) {
-                        document.documentElement.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT);
+                    } else if (
+                        document.documentElement.webkitRequestFullscreen
+                    ) {
+                        document.documentElement.webkitRequestFullscreen(
+                            Element.ALLOW_KEYBOARD_INPUT
+                        );
                     }
                 } else {
                     if (document.cancelFullScreen) {
@@ -275,6 +362,73 @@
                         document.webkitCancelFullScreen();
                     }
                 }
+            },
+        },
+    });
+
+    Vue.component("caption-button", {
+        template: "#caption-button-template",
+        data: function () {
+            return { currentCaption: null, tracks: [] };
+        },
+        methods: {
+            flipCaptions: function () {
+                var video = document.getElementsByTagName("video")[0];
+                var currentIndex = null;
+                var tracks = video.textTracks;
+                for (var i = 0; i < tracks.length; i++) {
+                    var track = tracks[i];
+                    if (track.mode === "showing") {
+                        currentIndex = i;
+                    }
+                }
+                if (currentIndex !== null) {
+                    tracks[currentIndex].mode = "hidden";
+                    if (tracks[currentIndex + 1]) {
+                        tracks[currentIndex + 1].mode = "showing";
+                        this.currentCaption = tracks[currentIndex + 1].language;
+                    } else {
+                        this.currentCaption = null;
+                    }
+                } else if (tracks.length > 0) {
+                    tracks[0].mode = "showing";
+                }
+            },
+        },
+        mounted: function () {
+            var video = document.getElementsByTagName("video")[0];
+            var self = this;
+            if (video) {
+                this.tracks = video.textTracks;
+                for (var i = 0; i < this.tracks.length; i++) {
+                    var track = this.tracks[i];
+                    if (track.mode === "showing") {
+                        this.currentCaption = track.language;
+                    }
+                }
+                this.captionChangeListener = function (e) {
+                    self.tracks = video.textTracks;
+                    self.currentCaption = null;
+                    for (var i = 0; i < self.tracks.length; i++) {
+                        var track = self.tracks[i];
+                        if (track.mode === "showing") {
+                            self.currentCaption = track.language;
+                        }
+                    }
+                };
+                video.textTracks.addEventListener(
+                    "change",
+                    this.captionChangeListener
+                );
+            }
+        },
+        destroyed: function () {
+            var video = document.getElementsByTagName("video")[0];
+            if (video) {
+                video.textTracks.removeEventListener(
+                    "change",
+                    this.captionChangeListener
+                );
             }
         },
     });
@@ -304,11 +458,11 @@
                     title: "RapidBay",
                     subtitles: current_subtitle
                         ? [
-                            {
-                                active: true,
-                                src: current_subtitle_url,
-                            },
-                        ]
+                              {
+                                  active: true,
+                                  src: current_subtitle_url,
+                              },
+                          ]
                         : [],
                 };
                 var cc = new ChromecastJS();
@@ -320,22 +474,28 @@
     Vue.component("search-screen", {
         template: "#search-screen-template",
         data: function () {
-            return {searchterm: ""};
+            return { searchterm: "" };
         },
         methods: {
             onSubmit: function (e) {
                 e.preventDefault();
                 if (this.searchterm.startsWith("magnet:")) {
                     navigate(
-                        "/magnet/" + encodeURIComponent(encodeURIComponent(this.searchterm))
+                        "/magnet/" +
+                            encodeURIComponent(
+                                encodeURIComponent(this.searchterm)
+                            )
                     );
                 } else {
                     navigate("/search/" + this.searchterm);
                 }
             },
         },
-        mounted: function() {
-            if (router.lastRouteResolved().url.toLowerCase() === "/registerhandler") {
+        mounted: function () {
+            if (
+                router.lastRouteResolved().url.toLowerCase() ===
+                "/registerhandler"
+            ) {
                 navigator.registerProtocolHandler(
                     "magnet",
                     router.root + "/magnet/%s",
@@ -343,25 +503,28 @@
                 );
             }
 
-            this.keylistener = function(e) {
+            this.keylistener = function (e) {
                 var name = e.key;
                 var lowername = name.toLowerCase();
+                var onmouseover = document.body.onmouseover;
+                document.body.onmouseover = null;
                 if (lowername.startsWith("arrow")) {
-                  $("input").focus();
+                    $("input").focus();
+                    document.body.onmouseover = onmouseover;
                 }
-              };
+            };
 
-            document.addEventListener('keydown', this.keylistener);
+            document.addEventListener("keydown", this.keylistener);
         },
-        destroyed: function() {
-            document.removeEventListener('keydown', this.keylistener);
-        }
+        destroyed: function () {
+            document.removeEventListener("keydown", this.keylistener);
+        },
     });
 
     Vue.component("search-results-screen", {
         mixins: [rbmixin],
         data: function () {
-            return {results: null, searchterm: ""};
+            return { results: null, searchterm: "" };
         },
         methods: {
             back: function () {
@@ -374,19 +537,19 @@
             var self = this;
             get("/api/search/" + self.searchterm, function (data) {
                 self.results = data.results;
-                rbsetTimeout(function() {
-                  var firstTr = document.getElementsByTagName("tr")[0];
-                  if(firstTr) {
-                    firstTr.focus();
-                  }
+                rbsetTimeout(function () {
+                    var firstTr = document.getElementsByTagName("tr")[0];
+                    if (firstTr) {
+                        firstTr.focus();
+                    }
                 });
             });
             this.keylistener = keylistener.bind({});
-            document.addEventListener('keydown', this.keylistener);
+            document.addEventListener("keydown", this.keylistener);
         },
         destroyed: function () {
-            document.removeEventListener('keydown', this.keylistener);
-        }
+            document.removeEventListener("keydown", this.keylistener);
+        },
     });
 
     Vue.component("torrent-link-screen", {
@@ -401,7 +564,9 @@
                 function (data) {
                     navigate(
                         "/magnet/" +
-                        encodeURIComponent(encodeURIComponent(data.magnet_link)),
+                            encodeURIComponent(
+                                encodeURIComponent(data.magnet_link)
+                            ),
                         true
                     );
                 }
@@ -412,18 +577,20 @@
     Vue.component("filelist-screen", {
         mixins: [rbmixin],
         data: function () {
-            return {results: null};
+            return { results: null };
         },
         template: "#filelist-screen-template",
         methods: {
             back: function () {
                 window.history.back();
-            }
+            },
         },
         created: function () {
             this.keylistener = keylistener.bind({});
-            document.addEventListener('keydown', this.keylistener);
-            post("/api/magnet_files/", {magnet_link: this.params.magnet_link});
+            document.addEventListener("keydown", this.keylistener);
+            post("/api/magnet_files/", {
+                magnet_link: this.params.magnet_link,
+            });
             var self = this;
             (function get_files() {
                 get(
@@ -434,19 +601,20 @@
                             return;
                         }
                         self.results = data.files;
-                        rbsetTimeout(function() {
-                          var firstTr = document.getElementsByTagName("tr")[0];
-                          if(firstTr) {
-                            firstTr.focus();
-                          }
+                        rbsetTimeout(function () {
+                            var firstTr =
+                                document.getElementsByTagName("tr")[0];
+                            if (firstTr) {
+                                firstTr.focus();
+                            }
                         });
                     }
                 );
             })();
         },
         destroyed: function () {
-          document.removeEventListener('keydown', this.keylistener);
-        }
+            document.removeEventListener("keydown", this.keylistener);
+        },
     });
 
     Vue.component("download-screen", {
@@ -474,7 +642,7 @@
         },
         created: function () {
             this.keylistener = keylistener.bind({});
-            document.addEventListener('keydown', this.keylistener);
+            document.addEventListener("keydown", this.keylistener);
             post("/api/magnet_download/", {
                 magnet_link: this.params.magnet_link,
                 filename: this.params.filename,
@@ -483,30 +651,47 @@
             var magnet_hash = get_hash(this.params.magnet_link);
             (function get_file_info() {
                 get(
-                    "/api/magnet/" + magnet_hash + "/" + encodeURIComponent(self.params.filename),
+                    "/api/magnet/" +
+                        magnet_hash +
+                        "/" +
+                        encodeURIComponent(self.params.filename),
                     function (data) {
                         self.status = data.status;
                         self.progress = data.progress;
                         var text = data.status.replace(/_/g, " ");
                         self.heading =
                             data.progress === 0 || data.progress
-                                ? text + " (" + Math.round(data.progress * 100) + "%)"
+                                ? text +
+                                  " (" +
+                                  Math.round(data.progress * 100) +
+                                  "%)"
                                 : text;
                         self.subheading =
-                            data.peers === 0 || data.peers ? data.peers + " Peers" : null;
+                            data.peers === 0 || data.peers
+                                ? data.peers + " Peers"
+                                : null;
                         self.play_link = data.filename
-                            ? "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename)
+                            ? "/play/" +
+                              magnet_hash +
+                              "/" +
+                              encodeURIComponent(data.filename)
                             : null;
                         if (!window.isSafari) {
                             self.subtitles = data.subtitles
                                 ? data.subtitles.map(function (sub) {
-                                    return {
-                                        language: sub
-                                            .substring(sub.lastIndexOf("_") + 1)
-                                            .replace(".vtt", ""),
-                                        url: "/play/" + magnet_hash + "/" + sub,
-                                    };
-                                })
+                                      return {
+                                          language: sub
+                                              .substring(
+                                                  sub.lastIndexOf("_") + 1
+                                              )
+                                              .replace(".vtt", ""),
+                                          url:
+                                              "/play/" +
+                                              magnet_hash +
+                                              "/" +
+                                              sub,
+                                      };
+                                  })
                                 : [];
                         }
                         if (self.status !== "ready") {
@@ -517,13 +702,13 @@
             })();
         },
         destroyed: function () {
-          document.removeEventListener('keydown', this.keylistener);
-        }
+            document.removeEventListener("keydown", this.keylistener);
+        },
     });
 
     var vm = new Vue({
         el: "#app",
-        data: {screen: null, params: {}},
+        data: { screen: null, params: {} },
     });
 
     function display_view(view_name) {

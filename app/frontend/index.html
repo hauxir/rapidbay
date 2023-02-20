@@ -1,187 +1,198 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
-    <title>RapidBay</title>
-    <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
-    <script src="/lib/jquery-3.3.1.min.js"></script>
-    <script src="/lib/jquery-ui-focusable-1.13.2.min.js"></script>
-    <script src="/lib/vue.2.5.3.min.js"></script>
-    <script src="/lib/navigo.6.0.2.min.js"></script>
-    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-    <script src="/lib/chromecastjs.js"></script>
-    <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
-    <link rel="manifest" href="/manifest.json">
-    <link href="/style.css" rel="stylesheet" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-  </head>
+    <head>
+        <meta charset="utf-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+        />
+        <title>RapidBay</title>
+        <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
+        <script src="/lib/jquery-3.3.1.min.js"></script>
+        <script src="/lib/jquery-ui-focusable-1.13.2.min.js"></script>
+        <script src="/lib/vue.2.5.3.min.js"></script>
+        <script src="/lib/navigo.6.0.2.min.js"></script>
+        <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+        <script src="/lib/chromecastjs.js"></script>
+        <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
+        <link rel="manifest" href="/manifest.json" />
+        <link href="/style.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="/favicon.png" />
+    </head>
 
-  <body class="text-center">
-    <div id="app"><component :is="screen" :params="params"> </component></div>
+    <body class="text-center">
+        <div id="app">
+            <component :is="screen" :params="params"> </component>
+        </div>
 
-    <script type="text/x-template" id="loading-spinner-template">
-      <div class="loadingwrapper">
-        <div v-if="heading" class="loading-heading">{{heading}}</div>
-        <div v-if="subheading" class="loading-subheading">{{subheading}}</div>
-        <div class="loading-circle-wrapper">
-          <div class="loading-circle">
-            <div class="loading-circle">
-              <div class="loading-circle">
+        <script type="text/x-template" id="loading-spinner-template">
+            <div class="loadingwrapper">
+              <div v-if="heading" class="loading-heading">{{heading}}</div>
+              <div v-if="subheading" class="loading-subheading">{{subheading}}</div>
+              <div class="loading-circle-wrapper">
                 <div class="loading-circle">
+                  <div class="loading-circle">
+                    <div class="loading-circle">
+                      <div class="loading-circle">
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
+              <div v-if="progress == 0 || progress" class="progress">
+                <div class="progress-bar" role="progressbar" ref="progress"></div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div v-if="progress == 0 || progress" class="progress">
-          <div class="progress-bar" role="progressbar" ref="progress"></div>
-        </div>
-      </div>
-    </script>
+        </script>
 
-    <script type="text/x-template" id="search-screen-template">
-      <form @submit="onSubmit">
-        <div class="input-group mb-3">
-          <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
-          <div class="input-group-append">
-            <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
-          </div>
-        </div>
-      </form>
-    </script>
-
-    <script type="text/x-template" id="torrent-link-screen-template">
-      <loading-spinner/>
-    </script>
-
-    <script type="text/x-template" id="search-results-screen-template">
-      <div class="root">
-        <div class="topbar">
-                <button @click="back()" class="btn btn-dark backarrow">
-                  <div class="icon back_icon"/>
-                </button>
-                <div v-if="searchterm">
-                    &#128270;
-                    {{ searchterm }}
+        <script type="text/x-template" id="search-screen-template">
+            <form @submit="onSubmit">
+              <div class="input-group mb-3">
+                <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
+                <div class="input-group-append">
+                  <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
                 </div>
-                <div v-else>
-                    &#128293;
-                </div>
-            <div class="buttons">
-                <fullscreen-button/>
-            </div>
-        </div>
-        <loading-spinner v-if="results === null"/>
-        <div v-else class="tablewrapper">
-            <div>
-                <table class="table table-hover">
-                    <tbody>
-                        <tr
-                        tabindex="0"
-                        v-for="result in results"
-                        @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
-                        >
-                            <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')">{{ result.title}}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-      </div>
-    </script>
+              </div>
+            </form>
+        </script>
 
-    <script type="text/x-template" id="filelist-screen-template">
-      <div class="root">
-        <div class="topbar">
-            <button @click="back()" class="btn btn-dark backarrow">
-              <div class="icon back_icon"/>
-            </button>
-            <div class="buttons">
-                <fullscreen-button/>
-            </div>
-        </div>
-        <loading-spinner v-if="results === null"/>
-        <div v-else class="tablewrapper">
-            <table class="table table-hover">
-                <tbody>
-                <tr
-                tabindex="0"
-                v-for="result in results"
-                @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + encodeURIComponent(result))">
-                    <td>{{ result }}</td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
-      </div>
-    </script>
+        <script type="text/x-template" id="torrent-link-screen-template">
+            <loading-spinner/>
+        </script>
 
-    <script type="text/x-template" id="download-screen-template">
-      <div class="player_wrapper" v-if="play_link">
-        <player :url="play_link" :subtitles="subtitles" :back="back"/>
-      </div>
-      <div v-else class="root">
-        <div class="topbar">
-            <button @click="back()" class="btn btn-dark backarrow">
-              <div class="icon back_icon"/>
-            </button>
-            <div>
-            {{params.filename}}
+        <script type="text/x-template" id="search-results-screen-template">
+            <div class="root">
+              <div class="topbar">
+                      <button @click="back()" class="btn btn-dark backarrow">
+                        <div class="icon back_icon"/>
+                      </button>
+                      <div v-if="searchterm">
+                          &#128270;
+                          {{ searchterm }}
+                      </div>
+                      <div v-else>
+                          &#128293;
+                      </div>
+                  <div class="buttons">
+                      <fullscreen-button/>
+                  </div>
+              </div>
+              <loading-spinner v-if="results === null"/>
+              <div v-else class="tablewrapper">
+                  <div>
+                      <table class="table table-hover">
+                          <tbody>
+                              <tr
+                              tabindex="0"
+                              v-for="result in results"
+                              @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
+                              >
+                                  <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')">{{ result.title}}</td>
+                              </tr>
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
             </div>
-            <div class="buttons">
-                <fullscreen-button/>
-            </div>
-        </div>
-        <div class="wrapper">
-            <loading-spinner
-                v-if="status !== 'ready'"
-                :heading="heading"
-                :subheading="subheading"
-                :progress="progress"
-            />
-        </div>
-      </div>
-    </script>
+        </script>
 
-    <script type="text/x-template" id="player-template">
-      <div class="video_wrapper">
-        <div class="topbar" v-if="hovering">
-            <button @click="back()" class="btn btn-dark backarrow">
-              <div class="icon back_icon"/>
-            </button>
-            <div class="video_url_wrapper">
-                <a tabindex="-1" :href="window.location.origin + url" class="video_url">
-                    {{decodeURIComponent(url.split("/").pop())}}
-                </a>
+        <script type="text/x-template" id="filelist-screen-template">
+            <div class="root">
+              <div class="topbar">
+                  <button @click="back()" class="btn btn-dark backarrow">
+                    <div class="icon back_icon"/>
+                  </button>
+                  <div class="buttons">
+                      <fullscreen-button/>
+                  </div>
+              </div>
+              <loading-spinner v-if="results === null"/>
+              <div v-else class="tablewrapper">
+                  <table class="table table-hover">
+                      <tbody>
+                      <tr
+                      tabindex="0"
+                      v-for="result in results"
+                      @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + encodeURIComponent(result))">
+                          <td>{{ result }}</td>
+                      </tr>
+                      </tbody>
+                  </table>
+              </div>
             </div>
-            <div class="buttons">
-                <chromecast-button v-if="isDesktop && isChrome"/>
-                <fullscreen-button/>
+        </script>
+
+        <script type="text/x-template" id="download-screen-template">
+            <div class="player_wrapper" v-if="play_link">
+              <player :url="play_link" :subtitles="subtitles" :back="back"/>
             </div>
-        </div>
-        <video v-if="url" :src="url" controls autoplay playsinline tabindex="0">
-            <track v-for="subtitle in subtitles"
-                :label="subtitle.language" kind="subtitles"
-                :srclang="subtitle.language"
-                :src="subtitle.url"
-                :id="subtitle.url"
+            <div v-else class="root">
+              <div class="topbar">
+                  <button @click="back()" class="btn btn-dark backarrow">
+                    <div class="icon back_icon"/>
+                  </button>
+                  <div>
+                  {{params.filename}}
+                  </div>
+                  <div class="buttons">
+                      <fullscreen-button/>
+                  </div>
+              </div>
+              <div class="wrapper">
+                  <loading-spinner
+                      v-if="status !== 'ready'"
+                      :heading="heading"
+                      :subheading="subheading"
+                      :progress="progress"
+                  />
+              </div>
+            </div>
+        </script>
+
+        <script type="text/x-template" id="player-template">
+                 <div class="video_wrapper">
+                   <div class="topbar" v-if="hovering">
+                       <button @click="back()" class="btn btn-dark backarrow">
+                         <div class="icon back_icon"/>
+                       </button>
+                       <div class="video_url_wrapper">
+                           <a tabindex="-1" :href="window.location.origin + url" class="video_url">
+                               {{decodeURIComponent(url.split("/").pop())}}
+                           </a>
+                       </div>
+                       <div class="buttons">
+                           <chromecast-button v-if="url && isDesktop && isChrome"/>
+            	<caption-button v-if="url"/>
+                           <fullscreen-button/>
+                       </div>
+                   </div>
+                   <video
+                disablepictureinpicture
+                       controlslist="nodownload noplaybackrate"
+                v-if="url" :src="url" controls autoplay playsinline tabindex="0"
             >
-        </video>
-      </div>
-    </script>
+                       <track v-for="subtitle in subtitles"
+                           :label="subtitle.language" kind="subtitles"
+                           :srclang="subtitle.language"
+                           :src="subtitle.url"
+                           :id="subtitle.url"
+                       >
+                   </video>
+                 </div>
+        </script>
 
-    <script type="text/x-template" id="fullscreen-button-template">
-        <button class="btn btn-dark fullscreen_button" @click="toggleFullscreen()"><div class="icon fullscreen_icon"/></button>
-    </script>
+        <script type="text/x-template" id="fullscreen-button-template">
+            <button class="btn btn-dark fullscreen_button" @click="toggleFullscreen()"><div class="icon fullscreen_icon"/></button>
+        </script>
 
-    <script type="text/x-template" id="chromecast-button-template">
-        <button class="btn btn-dark chromecast_button" @click="cast()"><div class="icon chromecast_icon"/></button>
-    </script>
+        <script type="text/x-template" id="caption-button-template">
+            <button v-if="tracks.length > 0" class="btn btn-dark" @click="flipCaptions()">{{currentCaption || "&#128172;"}}</button>
+        </script>
 
-    <script src="/app.js"></script>
-  </body>
+        <script type="text/x-template" id="chromecast-button-template">
+            <button class="btn btn-dark chromecast_button" @click="cast()"><div class="icon chromecast_icon"/></button>
+        </script>
+
+        <script src="/app.js"></script>
+    </body>
 </html>

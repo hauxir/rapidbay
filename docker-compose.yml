@@ -1,6 +1,6 @@
 rapidbay:
-  ports:
-      - "5000:5000"
-  build: .
-  volumes:
-    - ./app:/app
+    ports:
+        - "5000:5000"
+    build: .
+    volumes:
+        - ./app:/app

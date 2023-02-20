@@ -1,20 +1,20 @@
 {
-  "name": "Rapidbay",
-  "short_name": "Rapidbay",
-  "theme_color": "rgb(0,0,0)",
-  "background_color": "rgb(0,0,0)",
-  "display": "fullscreen",
-  "start_url": "./",
-  "icons": [
-    {
-      "src": "/favicon.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/favicon.png",
-      "sizes": "180x180",
-      "type": "image/png"
-    }
-  ]
+    "name": "Rapidbay",
+    "short_name": "Rapidbay",
+    "theme_color": "rgb(0,0,0)",
+    "background_color": "rgb(0,0,0)",
+    "display": "fullscreen",
+    "start_url": "./",
+    "icons": [
+        {
+            "src": "/favicon.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/favicon.png",
+            "sizes": "180x180",
+            "type": "image/png"
+        }
+    ]
 }

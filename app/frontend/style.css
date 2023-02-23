@@ -180,8 +180,12 @@ body {
 
 video::cue {
     -webkit-text-stroke: 4px black;
-    text-shadow: 2px 2px #000;
+    text-shadow: 2px 2px 0px #000;
     background: rgba(0, 0, 0, 0);
+    font-size: 5vh;
+    text-shadow: #000 0px 0px 7px;
+    font-family: Helvetica Nueue, Helvetica, Arial, sans-serif;
+    font-weight: bolder;
 }
 
 video::-webkit-media-controls-fullscreen-button {

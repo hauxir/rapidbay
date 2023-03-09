@@ -13,13 +13,24 @@ import cachecontrol
 import cachecontrol.caches
 
 
-if not os.path.exists("/tmp/cache"):
-    os.makedirs("/tmp/cache")
+API_PATH = f"{settings.JACKETT_HOST}/api/v2.0"
+API_KEY = settings.JACKETT_API_KEY
 
 
-session = requests.Session()
-cached_session = cachecontrol.CacheControl(session)
-cached_session.cache = cachecontrol.caches.FileCache("/tmp/cache")
+def get_indexers():
+
+    if not os.path.exists("/tmp/cache"):
+        os.makedirs("/tmp/cache")
+
+    session = requests.Session()
+    cached_session = cachecontrol.CacheControl(session)
+    cached_session.cache = cachecontrol.caches.FileCache("/tmp/cache")
+
+    indexers_resp = cached_session.get(
+        f"{API_PATH}/indexers/all/results?apikey={API_KEY}"
+    )
+    indexers_json = indexers_resp.json()["Indexers"]
+    return [i.get("ID") for i in indexers_json]
 
 
 async def fetch_json(session, url):
@@ -43,13 +54,10 @@ async def fetch_all(urls):
 def search(searchterm):
     magnet_links = []
     try:
-        indexers_resp  = cached_session.get(f"{settings.JACKETT_HOST}/api/v2.0/indexers/all/results?apikey={settings.JACKETT_API_KEY}")
-        indexers_json = indexers_resp.json()["Indexers"]
-        indexers = [i.get("ID") for i in indexers_json]
         results = []
         urls = [
-           f"{settings.JACKETT_HOST}/api/v2.0/indexers/{indexer}/results?apikey={settings.JACKETT_API_KEY}&Query={searchterm}"
-           for indexer in indexers
+            f"{API_PATH}/indexers/{indexer}/results?apikey={API_KEY}&Query={searchterm}"
+            for indexer in get_indexers()
         ]
 
         loop = asyncio.new_event_loop()
@@ -57,7 +65,7 @@ def search(searchterm):
         responses = loop.run_until_complete(fetch_all(urls))
 
         for data in responses:
-          results = results + data.get("Results", [])
+            results = results + data.get("Results", [])
 
         hashes = []
 

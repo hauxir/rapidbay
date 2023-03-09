@@ -1,3 +1,4 @@
+import os
 import re
 import requests
 from dateutil.parser import parse
@@ -6,15 +7,58 @@ import log
 import settings
 import torrent
 
+import asyncio
+import aiohttp
+import cachecontrol
+import cachecontrol.caches
+
+
+if not os.path.exists("/tmp/cache"):
+    os.makedirs("/tmp/cache")
+
+
+session = requests.Session()
+cached_session = cachecontrol.CacheControl(session)
+cached_session.cache = cachecontrol.caches.FileCache("/tmp/cache")
+
+
+async def fetch_json(session, url):
+    try:
+        async with session.get(url) as response:
+            return await response.json()
+    except asyncio.TimeoutError:
+        return dict()
+
+
+async def fetch_all(urls):
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+        tasks = []
+        for url in urls:
+            tasks.append(asyncio.ensure_future(fetch_json(session, url)))
+
+        json_responses = await asyncio.gather(*tasks)
+        return json_responses
+
 
 def search(searchterm):
     magnet_links = []
     try:
-        resp = requests.get(
-            f"{settings.JACKETT_HOST}/api/v2.0/indexers/all/results?apikey={settings.JACKETT_API_KEY}&Query={searchterm}"
-        )
-        data = resp.json()
-        results = data["Results"]
+        indexers_resp  = cached_session.get(f"{settings.JACKETT_HOST}/api/v2.0/indexers/all/results?apikey={settings.JACKETT_API_KEY}")
+        indexers_json = indexers_resp.json()["Indexers"]
+        indexers = [i.get("ID") for i in indexers_json]
+        results = []
+        urls = [
+           f"{settings.JACKETT_HOST}/api/v2.0/indexers/{indexer}/results?apikey={settings.JACKETT_API_KEY}&Query={searchterm}"
+           for indexer in indexers
+        ]
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        responses = loop.run_until_complete(fetch_all(urls))
+
+        for data in responses:
+          results = results + data.get("Results", [])
+
         hashes = []
 
         results = sorted(results, key=lambda x: x.get("Seeders", 0), reverse=True)

@@ -18,13 +18,14 @@ API_KEY = settings.JACKETT_API_KEY
 
 
 def get_indexers():
+    cache_dir = "/tmp/cache/jackett"
 
-    if not os.path.exists("/tmp/cache"):
-        os.makedirs("/tmp/cache")
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
 
     session = requests.Session()
     cached_session = cachecontrol.CacheControl(session)
-    cached_session.cache = cachecontrol.caches.FileCache("/tmp/cache")
+    cached_session.cache = cachecontrol.caches.FileCache(cache_dir)
 
     indexers_resp = cached_session.get(
         f"{API_PATH}/indexers/all/results?apikey={API_KEY}"

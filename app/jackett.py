@@ -3,20 +3,20 @@ import re
 import requests
 from dateutil.parser import parse
 
+import asyncio
+import aiohttp
+
 import log
 import settings
 import torrent
-
-import asyncio
-import aiohttp
-import cachecontrol
-import cachecontrol.caches
+from common import memoize
 
 
 API_PATH = f"{settings.JACKETT_HOST}/api/v2.0"
 API_KEY = settings.JACKETT_API_KEY
 
 
+@memoize(3600)
 def get_indexers():
     cache_dir = "/tmp/cache/jackett"
 
@@ -24,10 +24,8 @@ def get_indexers():
         os.makedirs(cache_dir)
 
     session = requests.Session()
-    cached_session = cachecontrol.CacheControl(session)
-    cached_session.cache = cachecontrol.caches.FileCache(cache_dir)
 
-    indexers_resp = cached_session.get(
+    indexers_resp = session.get(
         f"{API_PATH}/indexers/all/results?apikey={API_KEY}"
     )
     indexers_json = indexers_resp.json()["Indexers"]
@@ -38,12 +36,12 @@ async def fetch_json(session, url):
     try:
         async with session.get(url) as response:
             return await response.json()
-    except asyncio.TimeoutError:
+    except:
         return dict()
 
 
 async def fetch_all(urls):
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
         tasks = []
         for url in urls:
             tasks.append(asyncio.ensure_future(fetch_json(session, url)))
@@ -52,6 +50,7 @@ async def fetch_all(urls):
         return json_responses
 
 
+@memoize()
 def search(searchterm):
     magnet_links = []
     try:

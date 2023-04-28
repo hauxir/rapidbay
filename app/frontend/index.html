@@ -124,7 +124,7 @@
 
         <script type="text/x-template" id="download-screen-template">
             <div class="player_wrapper" v-if="play_link">
-              <player :url="play_link" :subtitles="subtitles" :back="back"/>
+	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back"/>
             </div>
             <div v-else class="root">
               <div class="topbar">
@@ -160,7 +160,7 @@
                                {{decodeURIComponent(url.split("/").pop())}}
                            </a>
                        </div>
-                       <div class="buttons">
+                       <div class="buttons" v-if="supported">
                            <chromecast-button v-if="url && isDesktop && isChrome"/>
             	<caption-button v-if="url"/>
                            <fullscreen-button/>
@@ -170,7 +170,7 @@
                 poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                 disablepictureinpicture
                        controlslist="nodownload noplaybackrate"
-                v-if="url" :src="url" controls autoplay playsinline tabindex="0"
+                v-if="supported && url" :src="url" controls autoplay playsinline tabindex="0"
             >
                        <track v-for="subtitle in subtitles"
                            :label="subtitle.language" kind="subtitles"

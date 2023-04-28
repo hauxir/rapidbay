@@ -145,7 +145,7 @@
     });
 
     Vue.component("player", {
-        props: ["url", "subtitles", "back"],
+        props: ["supported", "url", "subtitles", "back"],
         data: function () {
             return {
                 isDesktop:
@@ -629,6 +629,7 @@
                 subheading: null,
                 play_link: null,
                 subtitles: [],
+		supported: null
             };
         },
         methods: {
@@ -676,6 +677,7 @@
                               "/" +
                               encodeURIComponent(data.filename)
                             : null;
+			self.supported = !!data.supported
                         if (!window.isSafari) {
                             self.subtitles = data.subtitles
                                 ? data.subtitles.map(function (sub) {

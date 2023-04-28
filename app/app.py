@@ -13,7 +13,7 @@ from functools import wraps
 import jackett
 import settings
 import torrent
-from common import path_hierarchy
+from common import path_hierarchy, memoize
 from flask import Flask, Response, jsonify, request, send_from_directory, abort
 from rapidbaydaemon import FileStatus, get_filepaths, DaemonClient
 from werkzeug.exceptions import NotFound
@@ -53,6 +53,9 @@ def _get_files(magnet_hash):
             if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
         ]
 
+        if not supported_files:
+            return files
+
         def get_episode_info(fn):
             try:
                 parsed = PTN.parse(fn)
@@ -86,6 +89,8 @@ def _get_files(magnet_hash):
             return ""
 
         if files:
+            if not supported_files:
+                return sorted(files)
             return sorted(supported_files, key=get_episode_string)
     return None
 
@@ -93,7 +98,7 @@ def _get_files(magnet_hash):
 def _weighted_sort_date_seeds(results):
     getdate = lambda d: d.date() if d else datetime.datetime.now().date()
     dates = sorted([getdate(r.get("published")) for r in results])
-    return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0), reverse=True)
+    return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
 
 @app.route("/robots.txt")
@@ -139,7 +144,6 @@ def login():
         response.set_cookie('password', password)
     return response
 
-
 @app.route("/api/search/", defaults=dict(searchterm=""))
 @app.route("/api/search/<string:searchterm>")
 @authorize
@@ -167,14 +171,11 @@ def search(searchterm):
     return jsonify(results=filtered_results + rest)
 
 
-@app.route("/api/torrent_url_to_magnet/", methods=["POST"])
-@authorize
-def torrent_url_to_magnet():
-    torrent_url = request.form.get("url")
+def _torrent_url_to_magnet(torrent_url):
     filepath = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
     magnet_link = None
     try:
-        r = requests.get(torrent_url, allow_redirects=False)
+        r = requests.get(torrent_url, allow_redirects=False, timeout=30)
         if r.status_code == 302:
             location = r.headers.get("Location")
             if location and location.startswith("magnet"):
@@ -188,6 +189,14 @@ def torrent_url_to_magnet():
             os.remove(filepath)
         except FileNotFoundError:
             pass
+    return magnet_link
+
+
+@app.route("/api/torrent_url_to_magnet/", methods=["POST"])
+@authorize
+def torrent_url_to_magnet():
+    torrent_url = request.form.get("url")
+    magnet_link = _torrent_url_to_magnet(torrent_url)
     return jsonify(magnet_link=magnet_link)
 
 

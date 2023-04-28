@@ -21,7 +21,7 @@ RUN pip install gunicorn
 RUN pip install requests_unixsocket
 RUN pip install aiohttp
 RUN pip install lockfile
-RUN pip install cachecontrol
+RUN pip install diskcache
 
 RUN wget https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 -O /usr/bin/alass
 RUN chmod +x /usr/bin/alass

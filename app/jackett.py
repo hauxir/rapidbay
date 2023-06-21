@@ -50,7 +50,7 @@ async def fetch_all(urls):
         return json_responses
 
 
-@memoize()
+@memoize(300)
 def search(searchterm):
     magnet_links = []
     try:

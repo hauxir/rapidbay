@@ -92,7 +92,6 @@ class TorrentClient:
         self.locks = LockManager()
         self.session = libtorrent.session()
         if listening_port:
-            print(listening_port, flush=True)
             self.session.listen_on(listening_port, listening_port)
         else:
             rand = random.randrange(17000, 18000)

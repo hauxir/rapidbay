@@ -1,5 +1,6 @@
 import os
 import threading
+import diskcache
 
 
 def threaded(fn):
@@ -25,3 +26,20 @@ def path_hierarchy(path):
     if hierarchy == "":
         return []
     return hierarchy
+
+
+def memoize(expire=300):
+    def decorator(func):
+        cache = diskcache.Cache("/tmp/cache/")
+
+        def wrapper(*args, **kwargs):
+            key = (args, frozenset(kwargs.items()))
+            if key in cache:
+                return cache[key]
+            result = func(*args, **kwargs)
+            if result:
+                cache.set(key, result, expire=expire)
+            return result
+
+        return wrapper
+    return decorator

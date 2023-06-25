@@ -188,10 +188,6 @@ video::cue {
     font-weight: bolder;
 }
 
-video::-webkit-media-controls-fullscreen-button {
-    display: none;
-}
-
 .backarrow {
     color: #fff;
     font-size: 30px;

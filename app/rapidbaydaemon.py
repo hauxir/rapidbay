@@ -214,7 +214,6 @@ class RapidBayDaemon:
     @log.catch_and_log_exceptions
     def download_file(self, magnet_link, filename, download_subtitles=True):
         assert self.thread.is_alive()
-        assert any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS)
         magnet_hash = torrent.get_hash(magnet_link)
         if self.get_file_status(magnet_hash, filename)["status"] in [
             FileStatus.READY,
@@ -266,6 +265,7 @@ class RapidBayDaemon:
                     ],
                     key=lambda fn: fn.split("_")[-1],
                 ),
+                supported=any([filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS])
             )
         if os.path.isfile(
             f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
@@ -342,7 +342,9 @@ class RapidBayDaemon:
         def is_state(filename, state):
             return self.get_file_status(magnet_hash, filename)["status"] == state
 
-        if all(is_state(filename, FileStatus.READY) for filename in video_filenames):
+        active_filenames = video_filenames if video_filenames else filenames
+
+        if all(is_state(filename, FileStatus.READY) for filename in active_filenames):
             self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
             for f in files:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
@@ -351,9 +353,6 @@ class RapidBayDaemon:
 
         for f in files:
             filename = os.path.basename(f.path)
-
-            if not any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS):
-                continue
 
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             output_filepath = _get_output_filepath(magnet_hash, filepath)

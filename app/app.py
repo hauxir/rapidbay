@@ -171,6 +171,15 @@ def search(searchterm):
     return jsonify(results=filtered_results + rest)
 
 
+@app.route("/api/suggestions/", defaults=dict(searchterm=""))
+@app.route("/api/suggestions/<string:searchterm>")
+@authorize
+def suggestions(searchterm):
+    import tmdb
+    results = tmdb.search(searchterm)
+    return jsonify(results=results)
+
+
 def _torrent_url_to_magnet(torrent_url):
     filepath = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
     magnet_link = None

@@ -48,7 +48,11 @@
         <script type="text/x-template" id="search-screen-template">
             <form @submit="onSubmit">
               <div class="input-group mb-3">
-                <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
+		<input id="searchinput" type="search" list="searchterm" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none" autocomplete="on">
+		<datalist id="searchterm">
+  <option v-for="suggestion in suggestions" :value="suggestion">{{suggestion}}</option>
+  <option :value="searchterm">{{searchterm}}</option>
+</datalist>
                 <div class="input-group-append">
                   <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
                 </div>

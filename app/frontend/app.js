@@ -474,7 +474,7 @@
     Vue.component("search-screen", {
         template: "#search-screen-template",
         data: function () {
-            return { searchterm: "" };
+            return { searchterm: "", suggestions: [] };
         },
         methods: {
             onSubmit: function (e) {
@@ -514,7 +514,15 @@
                 }
             };
 
+            var self = this
+            this.inputListener = function (e) {
+		$.get("/api/suggestions/" + e.target.value).then(function(result) {
+                   self.suggestions = result.results;
+		})
+            };
+
             document.addEventListener("keydown", this.keylistener);
+            $("#searchinput").on("input", this.inputListener);
         },
         destroyed: function () {
             document.removeEventListener("keydown", this.keylistener);

@@ -179,7 +179,7 @@ def _torrent_url_to_magnet(torrent_url):
         if r.status_code == 302:
             location = r.headers.get("Location")
             if location and location.startswith("magnet"):
-                return jsonify(magnet_link=location)
+                return location
         with open(filepath, 'wb') as f:
             f.write(r.content)
         daemon.save_torrent_file(filepath)

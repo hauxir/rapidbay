@@ -40,7 +40,13 @@ docker run -p 5000:5000 -e JACKETT_HOST="http://your.jacket.host" -e JACKETT_API
 
 App will be running at http://localhost:5000
 
-## Configuring which subtitles to download:
+## Subtitles
+
+You'll need a VIP account at OpenSubtitles.org for it to work:
+```
+-e OPENSUBTITLES_USERNAME=someusername -e OPENSUBTITLES_PASSWORD=yourpassword
+```
+### Configuring which subtitles to download:
 
 The default setting downloads english subtitles.
 

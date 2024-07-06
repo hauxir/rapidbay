@@ -63,6 +63,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
     ]
     needs_audio_conversion = not any("aac" in c for c in audio_codecs)
     needs_video_conversion = settings.CONVERT_VIDEO and not any(("avc" in c or "hevc" in c) for c in video_codecs)
+    is_hevc = any(("hevc" in c) for c in video_codecs)
     has_picture_subs = (
         len(
             [
@@ -114,6 +115,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
                 "-c:s mov_text",
                 "-movflags faststart",
                 "-v quiet -stats",
+                "-tag:v hvc1" if is_hevc else "",
                 f'"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" 2>> "{output_filepath}{settings.LOG_POSTFIX}"',
                 "&&",
                 f'mv "{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" "{output_filepath}"',

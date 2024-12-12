@@ -447,7 +447,7 @@
                 } else {
                     var subtitle_tracks = Array.from(video.textTracks);
                     current_subtitle = subtitle_tracks.find(function (t) {
-                        return t.mode !== "disabled";
+                        return t.mode !== "disabled" && t.mode !== "hidden";
                     });
                 }
                 var current_subtitle_url = current_subtitle

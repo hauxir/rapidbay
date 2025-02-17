@@ -62,7 +62,7 @@ def _convert_file_to_mp4(input_filepath, output_filepath, subtitle_filepaths=[])
         t.format.lower() for t in media_info.tracks if t.track_type == "Video"
     ]
     needs_audio_conversion = not any("aac" in c for c in audio_codecs)
-    needs_video_conversion = settings.CONVERT_VIDEO and not any(("avc" in c or "hevc" in c) for c in video_codecs)
+    needs_video_conversion = settings.CONVERT_VIDEO and not any(("avc" in c or "hevc" in c or "av1" in c) for c in video_codecs)
     is_hevc = any(("hevc" in c) for c in video_codecs)
     has_picture_subs = (
         len(

@@ -14,6 +14,7 @@ TORRENT_LISTENING_PORT = None
 DOWNLOAD_DIR = "/tmp/downloads/"
 FILELIST_DIR = "/tmp/filelists/"
 TORRENTS_DIR = "/tmp/torrents/"
+SOCKS_PROXY = None
 DHT_ROUTERS = [
     ("router.utorrent.com", 6881),
     ("router.bittorrent.com", 6881),

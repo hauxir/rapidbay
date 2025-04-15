@@ -172,6 +172,7 @@ class RapidBayDaemon:
             filelist_dir=settings.FILELIST_DIR,
             download_dir=settings.DOWNLOAD_DIR,
             torrents_dir=settings.TORRENTS_DIR,
+            socks_proxy=settings.SOCKS_PROXY,
         )
         self.video_converter = video_conversion.VideoConverter()
         self.thread = Thread(target=self._loop, args=())

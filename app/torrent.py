@@ -88,6 +88,7 @@ class TorrentClient:
         filelist_dir=None,
         download_dir=None,
         torrents_dir=None,
+        socks_proxy=None,
     ):
         self.locks = LockManager()
         self.session = libtorrent.session()
@@ -99,6 +100,20 @@ class TorrentClient:
         for router, port in dht_routers:
             self.session.add_dht_router(router, port)
         self.session.start_dht()
+        if socks_proxy:
+            proxy_settings = libtorrent.proxy_settings()
+            proxy_settings.type = libtorrent.proxy_type.socks5
+            if '@' in socks_proxy:
+                auth, hostport = socks_proxy.split('@')
+                proxy_username, proxy_password = auth.split(':')
+                proxy_host, proxy_port = hostport.split(':')
+                proxy_settings.username = proxy_username
+                proxy_settings.password = proxy_password
+            else:
+                proxy_host, proxy_port = socks_proxy.split(':')
+            proxy_settings.hostname = proxy_host
+            proxy_settings.port = int(proxy_port)
+            self.session.set_proxy(proxy_settings)
         self.filelist_dir = filelist_dir
         self.download_dir = download_dir
         self.torrents_dir = torrents_dir

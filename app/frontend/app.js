@@ -270,7 +270,7 @@
                 ) {
                     event.preventDefault();
                     event.stopPropagation();
-                    video.currentTime -= 60;
+                    video.currentTime -= 15;
                 } else if (
                     event.key.toLowerCase() === "enter" &&
                     videoSelected

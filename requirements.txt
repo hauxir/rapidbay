@@ -10,7 +10,7 @@ parse-torrent-name==1.1.1
 pymediainfo==4.2.1
 python-dateutil==2.9.0.post0
 -e git+https://github.com/agonzalezro/python-opensubtitles@0143db67df5b80155c258887ca36f62a92455d4e#egg=python_opensubtitles
-requests==2.31.0
+requests==2.32.4
 requests-unixsocket==0.3.0
 urllib3==1.26.16
 werkzeug==3.0.6

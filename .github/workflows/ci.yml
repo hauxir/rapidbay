@@ -10,16 +10,13 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.8'
+    - name: Build Docker image
+      run: docker build -t rapidbay-ci .
     
-    - name: Install dependencies
+    - name: Run mypy in Docker container
       run: |
-        python -m pip install --upgrade pip
-        pip install mypy
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
-    - name: Run mypy
-      run: python -m mypy app/
+        docker run --rm \
+          -v ${{ github.workspace }}/app:/app \
+          -w /app \
+          rapidbay-ci \
+          /bin/bash -c "pip install mypy && python -m mypy ."

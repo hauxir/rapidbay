@@ -1,9 +1,9 @@
 import os
-import requests
 from typing import Any, Dict, Optional
 from urllib.parse import unquote
 
 import log
+import requests
 
 RD_TOKEN = os.environ.get("RD_TOKEN")
 
@@ -16,7 +16,7 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
         def get(path: str) -> Dict[str, Any]:
             return requests.get(
                 f"https://api.real-debrid.com/rest/1.0{path}",
-                headers=dict(authorization=f"Bearer {RD_TOKEN}"),
+                headers={"authorization": f"Bearer {RD_TOKEN}"},
             ).json()
 
         def post(path: str, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
@@ -24,26 +24,26 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
                 return requests.post(
                     f"https://api.real-debrid.com/rest/1.0{path}",
                     data,
-                    headers=dict(authorization=f"Bearer {RD_TOKEN}"),
+                    headers={"authorization": f"Bearer {RD_TOKEN}"},
                 ).json()
-            except:
+            except Exception:
                 return None
 
         result = post(
             "/torrents/addMagnet/",
-            dict(magnet=f"magnet:?xt=urn:btih:{magnet_hash}"),
+            {"magnet": f"magnet:?xt=urn:btih:{magnet_hash}"},
         )
         torrent_id = result["id"]  # type: ignore
-        post(f"/torrents/selectFiles/{torrent_id}", dict(files="all"))
+        post(f"/torrents/selectFiles/{torrent_id}", {"files": "all"})
         links = get(f"/torrents/info/{torrent_id}")["links"][:30]
         unrestricted_links = [
-            post("/unrestrict/link", dict(link=link))["download"] for link in links  # type: ignore
+            post("/unrestrict/link", {"link": link})["download"] for link in links  # type: ignore
         ]
-        for i, link in enumerate(unrestricted_links):
+        for _i, link in enumerate(unrestricted_links):
             if unquote(link).endswith(filename):
                 return link
 
-    except Exception as e:
+    except Exception:
         log.write_log()
 
     return None

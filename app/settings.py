@@ -1,3 +1,4 @@
+import contextlib
 import os
 from typing import List, Optional, Tuple
 
@@ -52,8 +53,6 @@ for variable in [item for item in globals() if not item.startswith("__")]:
     NULL = "NULL"
     env_var = os.getenv(variable, NULL)
     if env_var is not NULL:
-        try:
+        with contextlib.suppress(Exception):
             env_var = eval(env_var)
-        except Exception:
-            pass
     globals()[variable] = env_var if env_var is not NULL else globals()[variable]

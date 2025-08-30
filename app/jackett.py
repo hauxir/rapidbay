@@ -1,17 +1,15 @@
+import asyncio
 import os
 import re
-import requests
-from dateutil.parser import parse
 from typing import Any, Dict, List, Optional, Union
 
-import asyncio
 import aiohttp
-
 import log
+import requests
 import settings
 import torrent
 from common import memoize
-
+from dateutil.parser import parse
 
 API_PATH = f"{settings.JACKETT_HOST}/api/v2.0"
 API_KEY = settings.JACKETT_API_KEY
@@ -37,8 +35,8 @@ async def fetch_json(session: aiohttp.ClientSession, url: str) -> Dict[str, Any]
     try:
         async with session.get(url) as response:
             return await response.json()
-    except:
-        return dict()
+    except Exception:
+        return {}
 
 
 async def fetch_all(urls: List[str]) -> List[Dict[str, Any]]:
@@ -72,23 +70,23 @@ def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
 
         results = sorted(results, key=lambda x: x.get("Seeders", 0), reverse=True)
 
-        pattern = re.compile("\s(s\d\d)(e\d\d)?")
+        pattern = re.compile(r"\s(s\d\d)(e\d\d)?")
         season = None
         episode = None
         try:
             season = pattern.search(searchterm.lower())[1]  # type: ignore
             episode = pattern.search(searchterm.lower())[2]  # type: ignore
-        except Exception as e:
+        except Exception:
             pass
 
         if season and (episode is None):
 
             def sort_by_only_season(x: Dict[str, Any]) -> int:
-                pattern = re.compile("([e|E]\d\d)")
+                pattern = re.compile(r"([e|E]\d\d)")
                 try:
                     pattern.search(x.get("Title", ""))[0]  # type: ignore
                     return 0
-                except:
+                except Exception:
                     return 1
 
             results = sorted(results, key=sort_by_only_season, reverse=True)
@@ -112,13 +110,13 @@ def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
                     continue
                 published = result.get("PublishDate")
                 magnet_links.append(
-                    dict(
-                        seeds=result.get("Seeders", 0),
-                        title=result["Title"],
-                        magnet=result.get("MagnetUri"),
-                        torrent_link=result.get("Link"),
-                        published=parse(published) if published else None,
-                    )
+                    {
+                        "seeds": result.get("Seeders", 0),
+                        "title": result["Title"],
+                        "magnet": result.get("MagnetUri"),
+                        "torrent_link": result.get("Link"),
+                        "published": parse(published) if published else None,
+                    }
                 )
     except Exception:
         log.write_log()

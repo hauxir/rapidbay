@@ -1,8 +1,8 @@
 import sys
-import requests
 import time
-from urllib.parse import urlencode, parse_qsl, quote
-import xbmc
+from urllib.parse import parse_qsl, quote, urlencode
+
+import requests
 import xbmcgui
 import xbmcplugin
 
@@ -16,7 +16,7 @@ class RapidbayClient:
         return self._get(f"/api/search/{quote(query)}")
 
     def torrent_url_to_magnet(self, url):
-        return self._post("/api/torrent_url_to_magnet/", dict(url=url))["magnet_link"]
+        return self._post("/api/torrent_url_to_magnet/", {"url": url})["magnet_link"]
 
     def files(self, magnet_link):
         magnet_hash = self._magnet_link_to_hash(magnet_link)
@@ -28,7 +28,7 @@ class RapidbayClient:
 
     def magnet_download(self, magnet_link, filename):
         return self._post(
-            "/api/magnet_download/", dict(magnet_link=magnet_link, filename=filename)
+            "/api/magnet_download/", {"magnet_link": magnet_link, "filename": filename}
         )
 
     def file_status(self, magnet_hash, filename):
@@ -38,13 +38,13 @@ class RapidbayClient:
         return self._get(f"/api/next_file/{magnet_hash}/{quote(filename)}")
 
     def _magnet_link_to_hash(self, magnet_link):
-        return self._post("/api/magnet_files/", dict(magnet_link=magnet_link))[
+        return self._post("/api/magnet_files/", {"magnet_link": magnet_link})[
             "magnet_hash"
         ]
 
     def _request(self, method, path, data=None):
         url = f"{self.rootpath}{path}"
-        cookies = cookies = dict(password=self.password)
+        cookies = {"password": self.password}
         if method == "get":
             return requests.get(url, cookies=cookies).json()
         if method == "post":
@@ -64,7 +64,7 @@ client = RapidbayClient(__host__, __password__)
 
 
 def get_url(**kwargs):
-    return "{}?{}".format(__url__, urlencode(kwargs))
+    return f"{__url__}?{urlencode(kwargs)}"
 
 
 def root():
@@ -93,7 +93,7 @@ def search():
 def show_search_results(query):
     for result in client.search(query).get("results", []):
         magnet = result.get("magnet") or ""
-        urlargs = dict(action="listing", torrent_link=result.get("torrent_link"))
+        urlargs = {"action": "listing", "torrent_link": result.get("torrent_link")}
         if magnet:
             urlargs["magnet"] = magnet
         xbmcplugin.addDirectoryItem(

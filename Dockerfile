@@ -22,8 +22,8 @@ COPY app /app
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-RUN rm requirements.txt
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install -r requirements-dev.txt
+RUN rm requirements.txt requirements-dev.txt
 
 CMD bash entrypoint.sh

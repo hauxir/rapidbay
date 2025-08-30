@@ -8,24 +8,6 @@ RUN apt-get update && \
     git \
     mediainfo
 
-COPY requirements.txt /app/
-
-
-# Install mypy type stubs for third-party libraries
-RUN pip install mypy
-RUN pip install types-flask
-RUN pip install types-lxml
-RUN pip install types-requests
-RUN pip install types-python-dateutil
-RUN pip install types-urllib3
-RUN pip install types-setuptools
-RUN pip install types-libtorrent
-
-# Install ruff for linting
-RUN pip install ruff
-
-RUN pip install -r /app/requirements.txt
-
 RUN wget https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 -O /usr/bin/alass
 RUN chmod +x /usr/bin/alass
 
@@ -42,5 +24,7 @@ COPY ruff.toml /app/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 WORKDIR /app
+
+RUN pip install -r requirements.txt
 
 CMD bash entrypoint.sh

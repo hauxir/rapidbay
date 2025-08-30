@@ -8,21 +8,9 @@ RUN apt-get update && \
     git \
     mediainfo
 
-RUN pip install flask
-RUN pip install lxml
-RUN pip install pymediainfo==4.2.1
-RUN pip install iso-639
-RUN pip install requests==2.31.0
-RUN pip install -e git+https://github.com/agonzalezro/python-opensubtitles#egg=python-opensubtitles
-RUN pip install bencodepy
-RUN pip install parse-torrent-name
-RUN pip install python-dateutil
-RUN pip install gunicorn
-RUN pip install requests_unixsocket
-RUN pip install aiohttp==3.7.4.post0
-RUN pip install lockfile
-RUN pip install diskcache
-RUN pip install urllib3==1.26.16
+COPY requirements.txt /app/
+
+RUN pip install -r /app/requirements.txt
 
 # Install mypy type stubs for third-party libraries
 RUN pip install mypy

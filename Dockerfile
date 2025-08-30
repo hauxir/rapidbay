@@ -19,12 +19,11 @@ EXPOSE 6881/udp
 EXPOSE 5000
 
 COPY app /app
-COPY mypy.ini /app/
-COPY ruff.toml /app/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
 WORKDIR /app
 
+COPY requirements.txt .
 RUN pip install -r requirements.txt
+RUN rm requirements.txt
 
 CMD bash entrypoint.sh

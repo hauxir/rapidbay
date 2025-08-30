@@ -1,4 +1,7 @@
 # Ruff configuration
+line-length = 120
+target-version = "py38"
+
 [lint]
 # Enable pycodestyle, pyflakes, and more
 select = [
@@ -42,10 +45,6 @@ exclude = [
 
 [lint.isort]
 known-first-party = ["app"]
-
-# Line length and Python version (root level settings)
-line-length = 120
-target-version = "py38"
 
 # Format settings
 [format]

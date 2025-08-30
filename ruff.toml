@@ -43,10 +43,8 @@ exclude = [
 [lint.isort]
 known-first-party = ["app"]
 
-# Line length
+# Line length and Python version (root level settings)
 line-length = 120
-
-# Python version
 target-version = "py38"
 
 # Format settings

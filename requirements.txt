@@ -1,5 +1,5 @@
 # Runtime dependencies
-aiohttp==3.9.5
+aiohttp==3.12.14
 bencodepy==0.9.5
 diskcache==5.6.3
 flask==3.0.3

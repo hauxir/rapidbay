@@ -19,7 +19,7 @@ RUN pip install parse-torrent-name
 RUN pip install python-dateutil
 RUN pip install gunicorn
 RUN pip install requests_unixsocket
-RUN pip install aiohttp
+RUN pip install aiohttp==3.7.4.post0
 RUN pip install lockfile
 RUN pip install diskcache
 RUN pip install urllib3==1.26.16

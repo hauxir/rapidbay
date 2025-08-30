@@ -68,7 +68,7 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
         }
         sub_filenames = list(set(sub_filenames + list(sub_ids.values())))
 
-        def _download_subtitle_chunk(current_sub_ids=sub_ids, retries: int = 5) -> None:
+        def _download_subtitle_chunk(current_sub_ids: Dict[str, str] = sub_ids, retries: int = 5) -> None:
             nonlocal ost
             if not current_sub_ids:
                 return

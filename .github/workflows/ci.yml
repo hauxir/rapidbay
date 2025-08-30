@@ -16,7 +16,7 @@ jobs:
     - name: Run mypy in Docker container
       run: |
         docker run --rm \
-          -v ${{ github.workspace }}/app:/app \
+          -v ${{ github.workspace }}:/app \
           -w /app \
           rapidbay-ci \
-          /bin/bash -c "pip install mypy && python -m mypy ."
+          /bin/bash -c "pip install mypy && python -m mypy app"

@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Any, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 from xmlrpc.client import ProtocolError
 
 import log

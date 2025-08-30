@@ -1,5 +1,6 @@
 import os
 import time
+from typing import Any, Dict, Generator, List, Optional
 from xmlrpc.client import ProtocolError
 
 import log
@@ -9,14 +10,16 @@ from pythonopensubtitles.opensubtitles import OpenSubtitles
 from pythonopensubtitles.utils import File
 
 
-def _chunks(l, n):
+def _chunks(l: List[Any], n: int) -> Generator[List[Any], None, None]:
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
         yield l[i : i + n]
 
 
 @log.catch_and_log_exceptions
-def download_all_subtitles(filepath, skip=[]):
+def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> None:
+    if skip is None:
+        skip = []
     dirname = os.path.dirname(filepath)
     basename = os.path.basename(filepath)
     basename_without_ext = os.path.splitext(basename)[0]
@@ -57,7 +60,7 @@ def download_all_subtitles(filepath, skip=[]):
         if r["ISO639"] in settings.SUBTITLE_LANGUAGES
     ]
     wait_before_next_chunk = False
-    sub_filenames = []
+    sub_filenames: List[str] = []
     for chunk in _chunks(results, 10):
         sub_ids = {
             r["IDSubtitleFile"]: f'{basename_without_ext}.{r["ISO639"]}.srt'
@@ -65,7 +68,7 @@ def download_all_subtitles(filepath, skip=[]):
         }
         sub_filenames = list(set(sub_filenames + list(sub_ids.values())))
 
-        def _download_subtitle_chunk(retries=5):
+        def _download_subtitle_chunk(retries: int = 5) -> None:
             nonlocal ost
             if not sub_ids:
                 return
@@ -96,7 +99,7 @@ def download_all_subtitles(filepath, skip=[]):
         os.system(f"mv '{tmp_path}' '{output_path}'")
 
 
-def get_subtitle_language(subtitle_filename):
+def get_subtitle_language(subtitle_filename: str) -> Optional[str]:
     subtitle_filename = subtitle_filename.lower()
     assert subtitle_filename.endswith(".srt")
     filename_without_extension = os.path.splitext(subtitle_filename)[0]

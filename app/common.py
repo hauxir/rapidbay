@@ -1,10 +1,13 @@
 import os
 import threading
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
 import diskcache
 
+F = TypeVar('F', bound=Callable[..., Any])
 
-def threaded(fn):
-    def wrapper(*args, **kwargs):
+
+def threaded(fn: F) -> Callable[..., threading.Thread]:
+    def wrapper(*args: Any, **kwargs: Any) -> threading.Thread:
         thread = threading.Thread(target=fn, args=args, kwargs=kwargs)
         thread.start()
         return thread
@@ -12,7 +15,7 @@ def threaded(fn):
     return wrapper
 
 
-def path_hierarchy(path):
+def path_hierarchy(path: str) -> Union[Dict[str, List[Any]], List[Any], str]:
     hierarchy = os.path.basename(path)
     try:
         return {
@@ -28,11 +31,11 @@ def path_hierarchy(path):
     return hierarchy
 
 
-def memoize(expire=300):
-    def decorator(func):
+def memoize(expire: int = 300) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         cache = diskcache.Cache("/tmp/cache/")
 
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             key = (args, frozenset(kwargs.items()))
             if key in cache:
                 return cache[key]

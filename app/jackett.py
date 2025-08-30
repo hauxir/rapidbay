@@ -2,6 +2,7 @@ import os
 import re
 import requests
 from dateutil.parser import parse
+from typing import Any, Dict, List, Optional, Union
 
 import asyncio
 import aiohttp
@@ -17,7 +18,7 @@ API_KEY = settings.JACKETT_API_KEY
 
 
 @memoize(3600)
-def get_indexers():
+def get_indexers() -> List[str]:
     cache_dir = "/tmp/cache/jackett"
 
     if not os.path.exists(cache_dir):
@@ -32,7 +33,7 @@ def get_indexers():
     return [i.get("ID") for i in indexers_json]
 
 
-async def fetch_json(session, url):
+async def fetch_json(session: aiohttp.ClientSession, url: str) -> Dict[str, Any]:
     try:
         async with session.get(url) as response:
             return await response.json()
@@ -40,7 +41,7 @@ async def fetch_json(session, url):
         return dict()
 
 
-async def fetch_all(urls):
+async def fetch_all(urls: List[str]) -> List[Dict[str, Any]]:
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
         tasks = []
         for url in urls:
@@ -51,10 +52,10 @@ async def fetch_all(urls):
 
 
 @memoize(300)
-def search(searchterm):
+def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
     magnet_links = []
     try:
-        results = []
+        results: List[Dict[str, Any]] = []
         urls = [
             f"{API_PATH}/indexers/{indexer}/results?apikey={API_KEY}&Query={searchterm}"
             for indexer in get_indexers()
@@ -75,17 +76,17 @@ def search(searchterm):
         season = None
         episode = None
         try:
-            season = pattern.search(searchterm.lower())[1]
-            episode = pattern.search(searchterm.lower())[2]
+            season = pattern.search(searchterm.lower())[1]  # type: ignore
+            episode = pattern.search(searchterm.lower())[2]  # type: ignore
         except Exception as e:
             pass
 
         if season and (episode is None):
 
-            def sort_by_only_season(x):
+            def sort_by_only_season(x: Dict[str, Any]) -> int:
                 pattern = re.compile("([e|E]\d\d)")
                 try:
-                    pattern.search(x.get("Title", ""))[0]
+                    pattern.search(x.get("Title", ""))[0]  # type: ignore
                     return 0
                 except:
                     return 1

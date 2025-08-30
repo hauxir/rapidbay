@@ -23,7 +23,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app: Flask = Flask(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
 app.use_x_sendfile = True
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)  # type: ignore[method-assign]
 
 daemon: DaemonClient = DaemonClient()
 

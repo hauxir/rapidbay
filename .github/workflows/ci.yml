@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Build Docker image
+      run: docker build -t rapidbay-ci .
+
+    - name: Run mypy in Docker container
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}:/ci \
+          -w /ci \
+          rapidbay-ci \
+          /bin/bash -c "mypy ."

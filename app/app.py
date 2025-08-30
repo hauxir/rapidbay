@@ -9,6 +9,7 @@ import subprocess
 import urllib
 import PTN
 from functools import wraps
+from typing import List, Dict, Any, Optional, Callable, Union, Tuple
 
 import jackett
 import settings
@@ -19,23 +20,23 @@ from rapidbaydaemon import FileStatus, get_filepaths, DaemonClient
 from werkzeug.exceptions import NotFound
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-app = Flask(__name__)
+app: Flask = Flask(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
 app.use_x_sendfile = True
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)  # type: ignore[method-assign]
 
-daemon = DaemonClient()
+daemon: DaemonClient = DaemonClient()
 
 
 @app.after_request
-def add_header(response):
+def add_header(response: Response) -> Response:
     response.headers["x-set-cookie"] = response.headers.get("set-cookie")
     return response
 
 
 @app.after_request
-def after_request(resp):
-    x_sendfile = resp.headers.get("X-Sendfile")
+def after_request(resp: Response) -> Response:
+    x_sendfile: Optional[str] = resp.headers.get("X-Sendfile")
     if x_sendfile:
         resp.headers["X-Accel-Redirect"] = urllib.parse.quote(f"/nginx/{x_sendfile}")
         del resp.headers["X-Sendfile"]
@@ -43,11 +44,11 @@ def after_request(resp):
     return resp
 
 
-def _get_files(magnet_hash):
-    filepaths = get_filepaths(magnet_hash)
+def _get_files(magnet_hash: str) -> Optional[List[str]]:
+    filepaths: Optional[List[str]] = get_filepaths(magnet_hash)
     if filepaths:
-        files = [os.path.basename(f) for f in filepaths]
-        supported_files = [
+        files: List[str] = [os.path.basename(f) for f in filepaths]
+        supported_files: List[str] = [
             f
             for f in files
             if any(f.endswith(f".{ext}") for ext in settings.SUPPORTED_EXTENSIONS)
@@ -56,30 +57,30 @@ def _get_files(magnet_hash):
         if not supported_files:
             return files
 
-        def get_episode_info(fn):
+        def get_episode_info(fn: str) -> List[Optional[Union[int, str]]]:
             try:
-                parsed = PTN.parse(fn)
-                episode_num = parsed.get("episode")
-                season_num = parsed.get("season")
-                year = parsed.get("year")
+                parsed: Dict[str, Any] = PTN.parse(fn)
+                episode_num: Optional[Union[int, str]] = parsed.get("episode")
+                season_num: Optional[Union[int, str]] = parsed.get("season")
+                year: Optional[Union[int, str]] = parsed.get("year")
                 return [season_num, episode_num, year]
             except TypeError:
-                return [None,None,None]
+                return [None, None, None]
 
-        def is_episode(fn):
-            extension = os.path.splitext(fn)[1][1:]
+        def is_episode(fn: str) -> bool:
+            extension: str = os.path.splitext(fn)[1][1:]
             if extension in settings.VIDEO_EXTENSIONS:
-                [season_num, episode_num, year] = get_episode_info(fn)
+                season_num, episode_num, year = get_episode_info(fn)
                 return bool(episode_num or year)
             return False
 
         if not any(list(map(is_episode, files))):
             return supported_files
 
-        def get_episode_string(fn):
-            extension = os.path.splitext(fn)[1][1:]
+        def get_episode_string(fn: str) -> str:
+            extension: str = os.path.splitext(fn)[1][1:]
             if extension in settings.VIDEO_EXTENSIONS:
-                [season_num, episode_num, year] = get_episode_info(fn)
+                season_num, episode_num, year = get_episode_info(fn)
                 if episode_num and season_num:
                     return f"S{season_num:03}E{episode_num:03}"
                 if episode_num:
@@ -95,14 +96,14 @@ def _get_files(magnet_hash):
     return None
 
 
-def _weighted_sort_date_seeds(results):
-    getdate = lambda d: d.date() if d else datetime.datetime.now().date()
-    dates = sorted([getdate(r.get("published")) for r in results])
+def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    getdate: Callable[[Optional[datetime.datetime]], datetime.date] = lambda d: d.date() if d else datetime.datetime.now().date()
+    dates: List[datetime.date] = sorted([getdate(r.get("published")) for r in results])
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
 
 @app.route("/robots.txt")
-def robots():
+def robots() -> Response:
     return Response(
         """User-agent: *
 Disallow: /""",
@@ -110,10 +111,10 @@ Disallow: /""",
     )
 
 
-def authorize(f):
+def authorize(f: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(f)
-    def decorated_function(*args, **kws):
-        password = request.cookies.get('password')
+    def decorated_function(*args: Any, **kws: Any) -> Any:
+        password: Optional[str] = request.cookies.get('password')
         if settings.PASSWORD and password != settings.PASSWORD:
             abort(404)
         return f(*args, **kws)
@@ -122,24 +123,24 @@ def authorize(f):
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
-def frontend(path):
+def frontend(path: str) -> Response:
     if not path.startswith("index.html"):
         try:
             return send_from_directory("/app/frontend/", path)
         except NotFound:
             pass
-    password = request.cookies.get('password')
+    password: Optional[str] = request.cookies.get('password')
     if not settings.PASSWORD or password == settings.PASSWORD:
         return send_from_directory("/app/frontend/", "index.html", last_modified=datetime.datetime.now())
     return send_from_directory("/app/frontend/", "login.html", last_modified=datetime.datetime.now())
 
 
 @app.route("/api", methods=["POST"])
-def login():
-    password = request.form.get("password")
+def login() -> Response:
+    password: Optional[str] = request.form.get("password")
     if not password:
         abort(404)
-    response = jsonify()
+    response: Response = jsonify()
     if settings.PASSWORD and password == settings.PASSWORD:
         response.set_cookie('password', password)
     return response
@@ -147,9 +148,9 @@ def login():
 @app.route("/api/search/", defaults=dict(searchterm=""))
 @app.route("/api/search/<string:searchterm>")
 @authorize
-def search(searchterm):
+def search(searchterm: str) -> Response:
     if settings.JACKETT_HOST:
-        results = jackett.search(searchterm)
+        results: List[Dict[str, Any]] = jackett.search(searchterm)
     else:
         results = [
             dict(
@@ -163,21 +164,21 @@ def search(searchterm):
                 magnet="N/A"
             )
         ]
-    filtered_results = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
-    rest = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+    filtered_results: List[Dict[str, Any]] = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+    rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
 
     if searchterm == "":
         return jsonify(results=_weighted_sort_date_seeds(filtered_results) + rest)
     return jsonify(results=filtered_results + rest)
 
 
-def _torrent_url_to_magnet(torrent_url):
-    filepath = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
-    magnet_link = None
+def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
+    filepath: str = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
+    magnet_link: Optional[str] = None
     try:
-        r = requests.get(torrent_url, allow_redirects=False, timeout=30)
+        r: requests.Response = requests.get(torrent_url, allow_redirects=False, timeout=30)
         if r.status_code == 302:
-            location = r.headers.get("Location")
+            location: Optional[str] = r.headers.get("Location")
             if location and location.startswith("magnet"):
                 return location
         with open(filepath, 'wb') as f:
@@ -194,48 +195,48 @@ def _torrent_url_to_magnet(torrent_url):
 
 @app.route("/api/torrent_url_to_magnet/", methods=["POST"])
 @authorize
-def torrent_url_to_magnet():
-    torrent_url = request.form.get("url")
-    magnet_link = _torrent_url_to_magnet(torrent_url)
+def torrent_url_to_magnet() -> Response:
+    torrent_url: Optional[str] = request.form.get("url")
+    magnet_link: Optional[str] = _torrent_url_to_magnet(torrent_url)  # type: ignore
     return jsonify(magnet_link=magnet_link)
 
 
 @app.route("/api/magnet_files/", methods=["POST"])
 @authorize
-def magnet_info():
-    magnet_link = request.form.get("magnet_link")
-    magnet_hash = torrent.get_hash(magnet_link)
+def magnet_info() -> Response:
+    magnet_link: Optional[str] = request.form.get("magnet_link")
+    magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
     if not _get_files(magnet_hash):
-        daemon.fetch_filelist_from_link(magnet_link)
+        daemon.fetch_filelist_from_link(magnet_link)  # type: ignore
     return jsonify(magnet_hash=magnet_hash)
 
 
 @app.route("/api/magnet_download/", methods=["POST"])
 @authorize
-def magnet_download():
-    magnet_link = request.form.get("magnet_link")
-    filename = request.form.get("filename")
-    magnet_hash = torrent.get_hash(magnet_link)
-    if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:
-        daemon.download_file(magnet_link, filename)
+def magnet_download() -> Response:
+    magnet_link: Optional[str] = request.form.get("magnet_link")
+    filename: Optional[str] = request.form.get("filename")
+    magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
+    if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:  # type: ignore
+        daemon.download_file(magnet_link, filename)  # type: ignore
     return jsonify(magnet_hash=magnet_hash)
 
 
 @app.route("/api/magnet/<string:magnet_hash>/<string:filename>")
 @authorize
-def file_status(magnet_hash, filename):
+def file_status(magnet_hash: str, filename: str) -> Response:
     return jsonify(**daemon.get_file_status(magnet_hash, filename))
 
 
 @app.route("/api/next_file/<string:magnet_hash>/<string:filename>")
 @authorize
-def next_file(magnet_hash, filename):
-    next_filename = None
+def next_file(magnet_hash: str, filename: str) -> Response:
+    next_filename: Optional[str] = None
     if settings.AUTO_PLAY_NEXT_FILE:
-        files = _get_files(magnet_hash)
+        files: Optional[List[str]] = _get_files(magnet_hash)
         if files:
             try:
-                index = files.index(filename) + 1
+                index: int = files.index(filename) + 1
                 next_filename = files[index]
             except ValueError:
                 pass
@@ -246,22 +247,22 @@ def next_file(magnet_hash, filename):
 
 @app.route("/api/magnet/<string:magnet_hash>/")
 @authorize
-def files(magnet_hash):
-    files = _get_files(magnet_hash)
+def files(magnet_hash: str) -> Response:
+    files_list: Optional[List[str]] = _get_files(magnet_hash)
 
-    if files:
+    if files_list:
         return jsonify(
-            files=files
+            files=files_list
         )
     return jsonify(files=None)
 
 
 @app.route("/error.log")
 @authorize
-def errorlog():
+def errorlog() -> Response:
     try:
         with open(settings.LOGFILE, "r") as f:
-            data = f.read()
+            data: str = f.read()
     except IOError:
         data = ""
     return Response(data, mimetype="text/plain")
@@ -269,7 +270,7 @@ def errorlog():
 
 @app.route("/api/status")
 @authorize
-def status():
+def status() -> Response:
     return jsonify(
         output_dir=path_hierarchy(settings.OUTPUT_DIR),
         filelist_dir=path_hierarchy(settings.FILELIST_DIR),
@@ -286,24 +287,24 @@ def status():
 @app.route("/kodi.repo", defaults={"path": ""})
 @app.route("/kodi.repo/", defaults={"path": ""})
 @app.route("/kodi.repo/<string:path>")
-def kodi_repo(path):
-    password = request.authorization.password if request.authorization else None
+def kodi_repo(path: str) -> Response:
+    password: Optional[str] = request.authorization.password if request.authorization else None
     if not settings.PASSWORD or password == settings.PASSWORD:
-        zip_filename = "rapidbay.zip"
+        zip_filename: str = "rapidbay.zip"
         if path == zip_filename:
-            creds = dict(host=request.url_root.rstrip("/"), password=settings.PASSWORD)
+            creds: Dict[str, Optional[str]] = dict(host=request.url_root.rstrip("/"), password=settings.PASSWORD)
             with open("/app/kodi.addon/creds.json", "w") as f:
                 json.dump(creds, f)
-            filehash = (
+            filehash: str = (
                 subprocess.Popen(
                     "find /app/kodi.addon/ -type f -exec shasum {} \; | shasum | head -c 8",
                     stdout=subprocess.PIPE,
                     shell=True,
                 )
-                .stdout.read()
+                .stdout.read()  # type: ignore
                 .decode()
             )
-            filename = f"kodi_addon-{filehash}.zip"
+            filename: str = f"kodi_addon-{filehash}.zip"
             if not os.path.exists(f"/tmp/{filename}"):
                 os.system(f"cd /app/; zip -r /tmp/{filename} kodi.addon")
             return send_from_directory(

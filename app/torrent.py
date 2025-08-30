@@ -1,17 +1,15 @@
-import urllib
+import base64
+import contextlib
+import hashlib
 import json
 import os
+import random
 import shutil
 import time
-import random
-import sys
-import hashlib
-import base64
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import bencodepy
 import libtorrent
-
 from locking import LockManager
 
 
@@ -85,7 +83,7 @@ class TorrentClient:
     def __init__(
         self,
         listening_port: Optional[int] = None,
-        dht_routers: List[Tuple[str, int]] = [],
+        dht_routers: Optional[List[Tuple[str, int]]] = None,
         filelist_dir: Optional[str] = None,
         download_dir: Optional[str] = None,
         torrents_dir: Optional[str] = None,
@@ -97,7 +95,7 @@ class TorrentClient:
         else:
             rand = random.randrange(17000, 18000)
             self.session.listen_on(rand, rand + 10000)
-        for router, port in dht_routers:
+        for router, port in dht_routers or []:
             self.session.add_dht_router(router, port)
         self.session.start_dht()
         self.filelist_dir: Optional[str] = filelist_dir
@@ -112,7 +110,7 @@ class TorrentClient:
         with self.locks.lock(magnet_hash):
             if os.path.isfile(filename):
                 try:
-                    with open(filename, "r") as f:
+                    with open(filename) as f:
                         data = f.read().replace("\n", "")
                         json.loads(data)
                         return
@@ -151,10 +149,8 @@ class TorrentClient:
             h = self.torrents[magnet_hash]
         except KeyError:
             return
-        try:
+        with contextlib.suppress(Exception):
             self.session.remove_torrent(h)
-        except Exception:
-            pass
         del self.torrents[magnet_hash]
         if remove_files:
             try:
@@ -171,7 +167,7 @@ class TorrentClient:
         magnet_hash = get_hash(magnet_link)
         info = libtorrent.torrent_info(filepath)
         h = self.torrents.get(magnet_hash) or self.session.add_torrent(
-            dict(ti=info, save_path=os.path.join(self.download_dir, magnet_hash))  # type: ignore
+            {"ti": info, "save_path": os.path.join(self.download_dir, magnet_hash)}  # type: ignore
         )
         self.torrents[magnet_hash] = h
         files = get_torrent_info(h).files()
@@ -183,7 +179,7 @@ class TorrentClient:
         h = libtorrent.add_magnet_uri(
             self.session,
             magnet_link,
-            dict(save_path=os.path.join(self.download_dir, magnet_hash)),  # type: ignore
+            {"save_path": os.path.join(self.download_dir, magnet_hash)},  # type: ignore
         )
         files = get_torrent_info(h).files()
         prioritize_files(h, [0] * len(files))

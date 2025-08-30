@@ -4,7 +4,7 @@ on:
   push:
 
 jobs:
-  type-check:
+  ci:
     runs-on: ubuntu-latest
 
     steps:
@@ -13,10 +13,10 @@ jobs:
     - name: Build Docker image
       run: docker build -t rapidbay-ci .
 
-    - name: Run mypy in Docker container
+    - name: Run CI checks in Docker container
       run: |
         docker run --rm \
           -v ${{ github.workspace }}:/ci \
           -w /ci \
           rapidbay-ci \
-          /bin/bash -c "mypy ."
+          /bin/bash /ci/ci.sh

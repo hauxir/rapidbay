@@ -1,22 +1,22 @@
+import contextlib
 import datetime
-import asyncio
 import json
 import os
-import string
 import random
-import requests
+import string
 import subprocess
 import urllib
-import PTN
 from functools import wraps
-from typing import List, Dict, Any, Optional, Callable, Union, Tuple
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import jackett
+import PTN
+import requests
 import settings
 import torrent
-from common import path_hierarchy, memoize
-from flask import Flask, Response, jsonify, request, send_from_directory, abort
-from rapidbaydaemon import FileStatus, get_filepaths, DaemonClient
+from common import path_hierarchy
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
+from rapidbaydaemon import DaemonClient, FileStatus, get_filepaths
 from werkzeug.exceptions import NotFound
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -97,7 +97,8 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
 
 
 def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    getdate: Callable[[Optional[datetime.datetime]], datetime.date] = lambda d: d.date() if d else datetime.datetime.now().date()
+    def getdate(d: Optional[datetime.datetime]) -> datetime.date:
+        return d.date() if d else datetime.datetime.now().date()
     dates: List[datetime.date] = sorted([getdate(r.get("published")) for r in results])
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
@@ -145,7 +146,7 @@ def login() -> Response:
         response.set_cookie('password', password)
     return response
 
-@app.route("/api/search/", defaults=dict(searchterm=""))
+@app.route("/api/search/", defaults={"searchterm": ""})
 @app.route("/api/search/<string:searchterm>")
 @authorize
 def search(searchterm: str) -> Response:
@@ -153,16 +154,16 @@ def search(searchterm: str) -> Response:
         results: List[Dict[str, Any]] = jackett.search(searchterm)
     else:
         results = [
-            dict(
-                title="NO JACKETT SERVER CONFIGURED",
-                seeds=1337,
-                magnet="N/A"
-            ),
-            dict(
-                title="Please connect Jackett using the config variables JACKETT_HOST and JACKETT_API_KEY",
-                seeds=1337,
-                magnet="N/A"
-            )
+            {
+                "title": "NO JACKETT SERVER CONFIGURED",
+                "seeds": 1337,
+                "magnet": "N/A"
+            },
+            {
+                "title": "Please connect Jackett using the config variables JACKETT_HOST and JACKETT_API_KEY",
+                "seeds": 1337,
+                "magnet": "N/A"
+            }
         ]
     filtered_results: List[Dict[str, Any]] = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
     rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
@@ -186,10 +187,8 @@ def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
         daemon.save_torrent_file(filepath)
         magnet_link = torrent.make_magnet_from_torrent_file(filepath)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.remove(filepath)
-        except FileNotFoundError:
-            pass
     return magnet_link
 
 
@@ -261,9 +260,9 @@ def files(magnet_hash: str) -> Response:
 @authorize
 def errorlog() -> Response:
     try:
-        with open(settings.LOGFILE, "r") as f:
+        with open(settings.LOGFILE) as f:
             data: str = f.read()
-    except IOError:
+    except OSError:
         data = ""
     return Response(data, mimetype="text/plain")
 
@@ -292,12 +291,12 @@ def kodi_repo(path: str) -> Response:
     if not settings.PASSWORD or password == settings.PASSWORD:
         zip_filename: str = "rapidbay.zip"
         if path == zip_filename:
-            creds: Dict[str, Optional[str]] = dict(host=request.url_root.rstrip("/"), password=settings.PASSWORD)
+            creds: Dict[str, Optional[str]] = {"host": request.url_root.rstrip("/"), "password": settings.PASSWORD}
             with open("/app/kodi.addon/creds.json", "w") as f:
                 json.dump(creds, f)
             filehash: str = (
                 subprocess.Popen(
-                    "find /app/kodi.addon/ -type f -exec shasum {} \; | shasum | head -c 8",
+                    r"find /app/kodi.addon/ -type f -exec shasum {} \; | shasum | head -c 8",
                     stdout=subprocess.PIPE,
                     shell=True,
                 )

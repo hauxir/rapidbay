@@ -10,10 +10,10 @@ from pythonopensubtitles.opensubtitles import OpenSubtitles
 from pythonopensubtitles.utils import File
 
 
-def _chunks(l: List[Any], n: int) -> Generator[List[Any], None, None]:
-    """Yield successive n-sized chunks from l."""
-    for i in range(0, len(l), n):
-        yield l[i : i + n]
+def _chunks(items: List[Any], n: int) -> Generator[List[Any], None, None]:
+    """Yield successive n-sized chunks from items."""
+    for i in range(0, len(items), n):
+        yield items[i : i + n]
 
 
 @log.catch_and_log_exceptions
@@ -38,7 +38,7 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
         ]
     )
     languages_in_results_from_hash = [
-        lang_id for lang_id in [r.get("SubLanguageID") for r in results_from_hash]
+        r.get("SubLanguageID") for r in results_from_hash
     ]
     results_from_filename = (
             [
@@ -68,14 +68,14 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
         }
         sub_filenames = list(set(sub_filenames + list(sub_ids.values())))
 
-        def _download_subtitle_chunk(retries: int = 5) -> None:
+        def _download_subtitle_chunk(current_sub_ids: Dict[str, str] = sub_ids, retries: int = 5) -> None:
             nonlocal ost
-            if not sub_ids:
+            if not current_sub_ids:
                 return
             try:
                 ost.download_subtitles(
-                    [_id for _id in sub_ids.keys()],
-                    override_filenames=sub_ids,
+                    list(current_sub_ids.keys()),
+                    override_filenames=current_sub_ids,
                     output_directory=dirname,
                     extension="srt",
                 )
@@ -85,7 +85,7 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
                 time.sleep(10)
                 ost = OpenSubtitles()
                 ost.login(None, None)
-                _download_subtitle_chunk(retries=retries - 1)
+                _download_subtitle_chunk(current_sub_ids, retries=retries - 1)
 
         if wait_before_next_chunk:
             time.sleep(10)

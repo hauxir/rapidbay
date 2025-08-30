@@ -1,0 +1,55 @@
+# Ruff configuration
+line-length = 120
+target-version = "py38"
+
+[lint]
+# Enable pycodestyle, pyflakes, and more
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",  # line too long (handled by line-length)
+    "E203",  # whitespace before ':'
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+# Exclude directories
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    "dist",
+    "build",
+    "*.egg",
+    "app/frontend",
+]
+
+# Per-file ignores
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py files
+"app/frontend/**" = ["F821"]  # Ignore undefined names in Kodi frontend
+
+[lint.isort]
+known-first-party = ["app"]
+
+# Format settings
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

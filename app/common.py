@@ -1,6 +1,7 @@
 import os
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, List, TypeVar, Union
+
 import diskcache
 
 F = TypeVar('F', bound=Callable[..., Any])
@@ -24,7 +25,7 @@ def path_hierarchy(path: str) -> Union[Dict[str, List[Any]], List[Any], str]:
                 for contents in os.listdir(path)
             ]
         }
-    except OSError as e:
+    except OSError:
         pass
     if hierarchy == "":
         return []

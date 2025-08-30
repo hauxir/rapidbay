@@ -1,9 +1,10 @@
+import contextlib
 import datetime
 import os
 import re
 import time
 from subprocess import Popen
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import log
 import settings
@@ -14,7 +15,7 @@ from subtitles import get_subtitle_language
 
 def _recursive_filepaths(dir_name: str) -> List[str]:
     list_of_file: List[str] = os.listdir(dir_name)
-    all_files: List[str] = list()
+    all_files: List[str] = []
     for entry in list_of_file:
         full_path: str = os.path.join(dir_name, entry)
         if os.path.isdir(full_path):
@@ -39,7 +40,6 @@ def _extract_subtitles_as_vtt(filepath: str) -> Popen:
     output_dir: str = os.path.dirname(filepath)
     basename: str = os.path.basename(filepath)
     filename_without_extension: str = os.path.splitext(basename)[0]
-    media_info = MediaInfo.parse(filepath)
     sub_tracks: List[Tuple[int, str]] = get_sub_tracks(filepath)
     return Popen(
         f'ffmpeg -nostdin -v quiet -i "{filepath}" '
@@ -131,7 +131,7 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
 def get_conversion_progress(filepath: str) -> float:
     log_filepath: str = f"{filepath}{settings.LOG_POSTFIX}"
     if os.path.isfile(log_filepath):
-        with open(log_filepath, "r") as f:
+        with open(log_filepath) as f:
             lines: List[str] = f.readlines()
             first_line: str = lines[0]
             last_line: str = lines[-1]
@@ -193,7 +193,5 @@ class VideoConverter:
             _extract_subtitles_as_vtt(output_filepath).wait()
 
         finally:
-            try:
+            with contextlib.suppress(KeyError):
                 del self.file_conversions[output_filepath]
-            except KeyError:
-                pass

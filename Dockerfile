@@ -44,6 +44,7 @@ EXPOSE 6881/udp
 EXPOSE 5000
 
 COPY app /app
+COPY mypy.ini /app/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 WORKDIR /app

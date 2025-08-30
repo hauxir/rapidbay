@@ -29,7 +29,6 @@ RUN pip install types-flask
 RUN pip install types-lxml
 RUN pip install types-requests
 RUN pip install types-python-dateutil
-RUN pip install types-aiohttp
 RUN pip install types-urllib3
 RUN pip install types-setuptools
 RUN pip install types-libtorrent

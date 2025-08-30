@@ -25,6 +25,7 @@ RUN pip install diskcache
 RUN pip install urllib3==1.26.16
 
 # Install mypy type stubs for third-party libraries
+RUN pip install mypy
 RUN pip install types-flask
 RUN pip install types-lxml
 RUN pip install types-requests

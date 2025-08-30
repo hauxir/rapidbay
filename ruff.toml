@@ -36,12 +36,13 @@ exclude = [
     "dist",
     "build",
     "*.egg",
-    "**/frontend/",
+    "app/frontend",
 ]
 
 # Per-file ignores
 [lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py files
+"app/frontend/**" = ["F821"]  # Ignore undefined names in Kodi frontend
 
 [lint.isort]
 known-first-party = ["app"]

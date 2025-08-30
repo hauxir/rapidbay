@@ -1,9 +1,9 @@
-import requests
-import urllib.request
+import contextlib
 import os
-from typing import Dict, Optional
-import log
+import urllib.request
+from typing import Dict
 
+import log
 from common import threaded
 
 
@@ -11,10 +11,8 @@ class HttpDownloader:
     downloads: Dict[str, float] = {}
 
     def clear(self, output_path: str) -> None:
-        try:
+        with contextlib.suppress(KeyError):
             del self.downloads[output_path]
-        except KeyError:
-            pass
 
     def download_file(self, url: str, output_path: str) -> None:
         if self.downloads.get(output_path):

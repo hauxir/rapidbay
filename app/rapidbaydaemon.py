@@ -1,23 +1,22 @@
-import json
 import datetime
+import json
 import os
 import shutil
 import time
 from threading import Thread
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional
 
 import http_cache
 import log
+import requests_unixsocket
 import settings
 import subtitles
 import torrent
 import video_conversion
-import requests_unixsocket
-from http_downloader import HttpDownloader
 from common import threaded
+from flask import Flask, Response, jsonify, request
+from http_downloader import HttpDownloader
 from subtitles import get_subtitle_language
-
-from flask import Flask, Response, jsonify, request, send_from_directory, abort
 
 daemon: 'RapidBayDaemon'
 
@@ -32,13 +31,13 @@ class DaemonClient:
         return self.session.post("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path, json=data).json()
 
     def save_torrent_file(self, filepath: str) -> Dict[str, Any]:
-        return self._post(f"/save_torrent_file", dict(filepath=filepath))
+        return self._post("/save_torrent_file", {'filepath': filepath})
 
     def fetch_filelist_from_link(self, magnet_link: str) -> Dict[str, Any]:
-        return self._post(f"/fetch_filelist_from_link", dict(magnet_link=magnet_link))
+        return self._post("/fetch_filelist_from_link", {'magnet_link': magnet_link})
 
     def download_file(self, magnet_link: str, filename: str) -> Dict[str, Any]:
-        return self._post(f"/download_file", dict(magnet_link=magnet_link, filename=filename))
+        return self._post("/download_file", {'magnet_link': magnet_link, 'filename': filename})
 
     def get_file_status(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
         return self._get(f"/get_file_status/{magnet_hash}/{filename}")
@@ -65,7 +64,7 @@ app: Flask = Flask(__name__)
 def get_filepaths(magnet_hash: str) -> Optional[List[str]]:
     filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
     if os.path.exists(filename):
-        with open(filename, "r") as f:
+        with open(filename) as f:
             data = f.read().replace("\n", "")
             return json.loads(data)
     return None
@@ -240,10 +239,10 @@ class RapidBayDaemon:
         h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)  # type: ignore
 
         if download_subtitles:
-            for filename in _subtitle_filenames(
+            for subtitle_filename in _subtitle_filenames(
                 self.torrent_client.torrents.get(magnet_hash), filename
             ):
-                self.torrent_client.download_file(magnet_link, filename)
+                self.torrent_client.download_file(magnet_link, subtitle_filename)
 
     def get_file_status(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
         assert self.thread.is_alive()
@@ -253,13 +252,13 @@ class RapidBayDaemon:
 
         if os.path.isfile(output_filepath):
             if self.video_converter.file_conversions.get(output_filepath):
-                return dict(status=FileStatus.FINISHING_UP)
+                return {'status': FileStatus.FINISHING_UP}
             base_filename = os.path.basename(output_filepath)
             base_filename_without_extension = os.path.splitext(base_filename)[0]
-            return dict(
-                status=FileStatus.READY,
-                filename=base_filename,
-                subtitles=sorted(
+            return {
+                'status': FileStatus.READY,
+                'filename': base_filename,
+                'subtitles': sorted(
                     [
                         f
                         for f in os.listdir(os.path.dirname(output_filepath))
@@ -268,24 +267,24 @@ class RapidBayDaemon:
                     ],
                     key=lambda fn: fn.split("_")[-1],
                 ),
-                supported=any([filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS])
-            )
+                'supported': any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS)
+            }
         if os.path.isfile(
             f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
         ):
             progress = video_conversion.get_conversion_progress(output_filepath)
             if not self.video_converter.file_conversions.get(output_filepath):
-                return dict(status=FileStatus.CONVERSION_FAILED)
-            return dict(status=FileStatus.CONVERTING, progress=progress)
+                return {'status': FileStatus.CONVERSION_FAILED}
+            return {'status': FileStatus.CONVERTING, 'progress': progress}
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h:
-            return dict(status=FileStatus.WAITING_FOR_TORRENT)
+            return {'status': FileStatus.WAITING_FOR_TORRENT}
         if not h.has_metadata():
-            return dict(status=FileStatus.WAITING_FOR_METADATA)
+            return {'status': FileStatus.WAITING_FOR_METADATA}
         files = list(h.get_torrent_info().files())
         i, f = torrent.get_index_and_file_from_files(h, filename)
         if f is None:
-            return dict(status=FileStatus.FILE_NOT_FOUND)
+            return {'status': FileStatus.FILE_NOT_FOUND}
         download_progress = h.file_progress()[i] / f.size
 
         download_path = _get_download_path(magnet_hash, filename)
@@ -302,21 +301,21 @@ class RapidBayDaemon:
                     for i in _subtitle_indexes(h, filename)
                 )
                 if not all_torrent_subtitles_downloaded:
-                    return dict(status=FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT)
+                    return {'status': FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT}
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                 subtitle_download_status = self.subtitle_downloads.get(filepath)
                 if subtitle_download_status == SubtitleDownloadStatus.DOWNLOADING:
-                    return dict(status=FileStatus.DOWNLOADING_SUBTITLES)
+                    return {'status': FileStatus.DOWNLOADING_SUBTITLES}
                 if subtitle_download_status == SubtitleDownloadStatus.FINISHED:
-                    return dict(status=FileStatus.WAITING_FOR_CONVERSION)
+                    return {'status': FileStatus.WAITING_FOR_CONVERSION}
             else:
-                return dict(status=FileStatus.READY_TO_COPY)
-            return dict(status=FileStatus.DOWNLOAD_FINISHED)
-        return dict(
-            status=FileStatus.DOWNLOADING,
-            progress=download_progress,
-            peers=h.status().num_peers,
-        )
+                return {'status': FileStatus.READY_TO_COPY}
+            return {'status': FileStatus.DOWNLOAD_FINISHED}
+        return {
+            'status': FileStatus.DOWNLOADING,
+            'progress': download_progress,
+            'peers': h.status().num_peers,
+        }
 
     def _download_external_subtitles(self, filepath: str, skip: Optional[List[str]] = None) -> None:
         if skip is None:

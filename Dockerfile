@@ -24,6 +24,16 @@ RUN pip install lockfile
 RUN pip install diskcache
 RUN pip install urllib3==1.26.16
 
+# Install mypy type stubs for third-party libraries
+RUN pip install types-flask
+RUN pip install types-lxml
+RUN pip install types-requests
+RUN pip install types-python-dateutil
+RUN pip install types-aiohttp
+RUN pip install types-urllib3
+RUN pip install types-setuptools
+RUN pip install types-libtorrent
+
 RUN wget https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 -O /usr/bin/alass
 RUN chmod +x /usr/bin/alass
 

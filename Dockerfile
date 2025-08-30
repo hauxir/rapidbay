@@ -34,6 +34,9 @@ RUN pip install types-urllib3
 RUN pip install types-setuptools
 RUN pip install types-libtorrent
 
+# Install ruff for linting
+RUN pip install ruff
+
 RUN wget https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 -O /usr/bin/alass
 RUN chmod +x /usr/bin/alass
 
@@ -46,6 +49,7 @@ EXPOSE 5000
 
 COPY app /app
 COPY mypy.ini /app/
+COPY ruff.toml /app/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 WORKDIR /app

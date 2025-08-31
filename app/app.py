@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import http_cache.real_debrid as real_debrid
+import http_cache
 import jackett
 import PTN
 import requests
@@ -257,7 +257,8 @@ def files(magnet_hash: str) -> Response:
         return jsonify(
             files=files_list
         )
-    return jsonify(files=None)
+    cached_files_list = http_cache.get_cached_filelist(magnet_hash)
+    return jsonify(files=cached_files_list)
 
 
 @app.route("/api/debug/real_debrid/<string:magnet_hash>")

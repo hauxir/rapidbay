@@ -260,6 +260,18 @@ def files(magnet_hash: str) -> Response:
     return jsonify(files=None)
 
 
+@app.route("/api/magnet/<string:magnet_hash>/real_debrid")
+@authorize
+def files_real_debrid(magnet_hash: str) -> Response:
+    files_list: Optional[List[str]] = real_debrid.get_filelist(magnet_hash)
+    if files_list:
+        return jsonify(
+            files=[os.path.basename(f) for f in files_list],
+            raw_files=files_list
+        )
+    return jsonify(files=None, raw_files=None)
+
+
 @app.route("/error.log")
 @authorize
 def errorlog() -> Response:

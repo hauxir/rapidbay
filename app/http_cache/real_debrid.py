@@ -1,9 +1,11 @@
+import json
 import os
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 import log
 import requests
+import settings
 
 RD_TOKEN = os.environ.get("RD_TOKEN")
 
@@ -101,7 +103,16 @@ def get_filelist(magnet_hash: str) -> Optional[List[str]]:
             return None
 
         files = torrent_info["files"]
-        return [f.get("path", "") for f in files if isinstance(f, dict) and f.get("path")]
+        file_paths = [f.get("path", "") for f in files if isinstance(f, dict) and f.get("path")]
+        
+        # Write to cache file only if we got results
+        if file_paths:
+            cache_filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
+            os.makedirs(settings.FILELIST_DIR, exist_ok=True)
+            with open(cache_filename, 'w') as f:
+                json.dump(file_paths, f)
+        
+        return file_paths
 
     except Exception as e:
         log.debug(f"Real Debrid filelist error for {magnet_hash}: {str(e)}")

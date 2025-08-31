@@ -1,5 +1,5 @@
 [tool.basedpyright]
-# Python version - matching project Python version
+# Python version - matching project Python version  
 pythonVersion = "3.8"
 pythonPlatform = "All"
 
@@ -64,7 +64,7 @@ reportMissingImports = "none"  # Matches ignore_missing_imports = True for exter
 
 # Execution environment
 executionEnvironments = [
-    { root = "app", pythonVersion = "3.12", extraPaths = [".", "venv/src/python-opensubtitles"] }
+    { root = "app", pythonVersion = "3.8", extraPaths = [".", "venv/src/python-opensubtitles"] }
 ]
 
 # Additional configuration for handling imports

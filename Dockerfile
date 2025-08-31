@@ -8,6 +8,7 @@ RUN apt-get update && \
     zip \
     ffmpeg \
     git \
+    wget \
     mediainfo
 
 RUN wget https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 -O /usr/bin/alass

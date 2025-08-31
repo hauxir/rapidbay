@@ -50,6 +50,10 @@ def after_request(resp: Response) -> Response:
 
 def _get_files(magnet_hash: str) -> Optional[List[str]]:
     filepaths: Optional[List[str]] = get_filepaths(magnet_hash)
+    if not filepaths:
+        # Fallback to Real-Debrid if torrent client doesn't have filelist
+        filepaths = http_cache.real_debrid.get_filelist(magnet_hash)
+    
     if filepaths:
         files: List[str] = [os.path.basename(f) for f in filepaths]
         supported_files: List[str] = [
@@ -257,8 +261,7 @@ def files(magnet_hash: str) -> Response:
         return jsonify(
             files=files_list
         )
-    cached_files_list = http_cache.get_cached_filelist(magnet_hash)
-    return jsonify(files=cached_files_list)
+    return jsonify(files=None)
 
 
 @app.route("/api/debug/real_debrid/<string:magnet_hash>")

@@ -101,7 +101,7 @@ def get_filelist(magnet_hash: str) -> Optional[List[str]]:
             return None
 
         files = torrent_info["files"]
-        return [f.get("path", "") for f in files if isinstance(f, dict) and f.get("path")]
+        return [f.get("path", "") for f in files if isinstance(f, dict) and f.get("path") and f.get("selected", 0) == 1]
 
     except Exception as e:
         log.debug(f"Real Debrid filelist error for {magnet_hash}: {str(e)}")

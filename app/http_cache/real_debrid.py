@@ -31,11 +31,11 @@ def _post(path: str, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
         if not (200 <= response.status_code < 300):
             log.debug(f"Real Debrid POST failed: {path} - Status: {response.status_code}")
             return None
-        
+
         # Some endpoints return empty responses on success (like selectFiles)
         if not response.text.strip():
             return {}
-            
+
         return response.json()
     except Exception as e:
         log.debug(f"Real Debrid POST exception: {path} - {str(e)}")

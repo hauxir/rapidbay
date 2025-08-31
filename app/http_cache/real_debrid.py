@@ -103,7 +103,7 @@ def get_filelist(magnet_hash: str) -> Optional[List[str]]:
             return None
 
         files = torrent_info["files"]
-        file_paths: List[str] = [f.get("path", "") for f in files if isinstance(f, dict) and f.get("path")]
+        file_paths: List[str] = [f.get("path", "").lstrip("/") for f in files if isinstance(f, dict) and f.get("path")]
 
         # Write to cache file only if we got results
         if file_paths:

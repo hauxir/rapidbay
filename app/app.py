@@ -9,6 +9,7 @@ import urllib.parse
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 
+import http_cache
 import jackett
 import PTN
 import requests
@@ -48,6 +49,10 @@ def after_request(resp: Response) -> Response:
 
 def _get_files(magnet_hash: str) -> Optional[List[str]]:
     filepaths: Optional[List[str]] = get_filepaths(magnet_hash)
+
+    if not filepaths:
+        filepaths = http_cache.real_debrid.get_filelist(magnet_hash)
+
     if filepaths:
         files: List[str] = [os.path.basename(f) for f in filepaths]
         supported_files: List[str] = [

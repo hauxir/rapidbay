@@ -33,6 +33,8 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
             "/torrents/addMagnet/",
             {"magnet": f"magnet:?xt=urn:btih:{magnet_hash}"},
         )
+        if not result or "id" not in result:
+            return None
         torrent_id = result["id"]  # type: ignore
         post(f"/torrents/selectFiles/{torrent_id}", {"files": "all"})
         links = get(f"/torrents/info/{torrent_id}")["links"][:30]

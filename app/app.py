@@ -6,9 +6,11 @@ import random
 import string
 import subprocess
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 
+import http_cache.real_debrid as real_debrid
 import jackett
 import PTN
 import requests

@@ -50,10 +50,15 @@ def after_request(resp: Response) -> Response:
 
 def _get_files(magnet_hash: str) -> Optional[List[str]]:
     filepaths: Optional[List[str]] = get_filepaths(magnet_hash)
+    print(f"DEBUG: Torrent client filepaths for {magnet_hash}: {filepaths}")
+
     if not filepaths:
-        # Fallback to Real-Debrid if torrent client doesn't have filelist
+        print(f"DEBUG: No torrent filepaths, trying Real-Debrid for {magnet_hash}")
         filepaths = http_cache.real_debrid.get_filelist(magnet_hash)
-    
+        print(f"DEBUG: Real-Debrid filepaths for {magnet_hash}: {filepaths}")
+    else:
+        print(f"DEBUG: Using torrent client filepaths for {magnet_hash}")
+
     if filepaths:
         files: List[str] = [os.path.basename(f) for f in filepaths]
         supported_files: List[str] = [

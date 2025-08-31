@@ -260,9 +260,9 @@ def files(magnet_hash: str) -> Response:
     return jsonify(files=None)
 
 
-@app.route("/api/magnet/<string:magnet_hash>/real_debrid")
+@app.route("/api/debug/real_debrid/<string:magnet_hash>")
 @authorize
-def files_real_debrid(magnet_hash: str) -> Response:
+def files_real_debrid_debug(magnet_hash: str) -> Response:
     files_list: Optional[List[str]] = real_debrid.get_filelist(magnet_hash)
     if files_list:
         return jsonify(

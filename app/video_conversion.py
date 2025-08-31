@@ -36,7 +36,7 @@ def get_sub_tracks(filepath: str) -> List[Tuple[int, str]]:
     ]
 
 
-def _extract_subtitles_as_vtt(filepath: str) -> Popen[bytes]:
+def _extract_subtitles_as_vtt(filepath: str) -> Any:
     output_dir: str = os.path.dirname(filepath)
     basename: str = os.path.basename(filepath)
     filename_without_extension: str = os.path.splitext(basename)[0]
@@ -53,7 +53,7 @@ def _extract_subtitles_as_vtt(filepath: str) -> Popen[bytes]:
     )
 
 
-def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: Optional[List[Tuple[Optional[str], str]]] = None) -> Popen[bytes]:
+def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: Optional[List[Tuple[Optional[str], str]]] = None) -> Any:
     if subtitle_filepaths is None:
         subtitle_filepaths = []
     output_extension: str = os.path.splitext(output_filepath)[1]
@@ -182,7 +182,7 @@ class VideoConverter:
                 and filepath.endswith(".srt")
             ]
 
-            conversion: Popen[bytes] = _convert_file_to_mp4(
+            conversion: Any = _convert_file_to_mp4(
                 input_filepath, output_filepath, subtitle_filepaths=subtitle_filepaths
             )
             conversion.wait()

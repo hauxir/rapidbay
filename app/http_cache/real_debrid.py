@@ -67,7 +67,6 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
 
         for _i, link in enumerate(unrestricted_links):
             if unquote(str(link)).endswith(filename):
-                log.debug(f"Real Debrid: Found cached file {filename} for {magnet_hash}")
                 return str(link)
 
         log.debug(f"Real Debrid: File {filename} not found in torrent {magnet_hash}")

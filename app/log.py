@@ -1,5 +1,5 @@
 import traceback
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 import settings
 
@@ -16,12 +16,12 @@ def write_log() -> None:
         f.write(traceback.format_exc() + "\n")
 
 
-def catch_and_log_exceptions(fn: F) -> Callable[..., Optional[Any]]:
-    def wrapper(*args: Any, **kwargs: Any) -> Optional[Any]:
+def catch_and_log_exceptions(fn: F) -> F:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return fn(*args, **kwargs)
         except Exception:
             write_log()
             return None
 
-    return wrapper
+    return wrapper  # type: ignore

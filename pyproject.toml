@@ -1,0 +1,73 @@
+[tool.basedpyright]
+# Python version - matching project Python version  
+pythonVersion = "3.8"
+pythonPlatform = "All"
+
+# Import discovery
+exclude = ["**/frontend/**"]
+
+# Type checking mode
+typeCheckingMode = "standard"
+
+# Warnings configuration
+reportUnnecessaryCast = true  # warn_redundant_casts = True
+reportUnnecessaryTypeIgnoreComment = true  # warn_unused_ignores = True
+reportUnusedImport = true  # warn_unused_configs = True
+reportUnusedClass = true
+reportUnusedFunction = true
+reportUnusedVariable = true
+reportDuplicateImport = true
+
+# Error strictness configuration
+reportUntypedFunctionDecorator = "none"  # disallow_untyped_decorators = False
+reportUntypedClassDecorator = "none"  # disallow_untyped_decorators = False
+reportUntypedBaseClass = "none"
+reportUnknownParameterType = "error"  # disallow_untyped_defs = True
+reportUnknownArgumentType = "none"  # disallow_untyped_calls = False
+reportUnknownLambdaType = "error"  # disallow_untyped_defs = True
+reportUnknownVariableType = "error"  # check_untyped_defs = True
+reportUnknownMemberType = "none"
+reportMissingParameterType = "error"  # disallow_incomplete_defs = True
+reportMissingTypeArgument = "warning"
+
+# None/Optional handling configuration
+reportImplicitStringConcatenation = "warning"
+reportCallInDefaultInitializer = "none"
+reportUnnecessaryIsInstance = true  # strict_equality = True
+reportUnnecessaryComparison = true  # strict_equality = True
+reportImplicitOverride = "warning"
+reportShadowedImports = "warning"
+
+# Additional strictness configuration
+reportIncompatibleMethodOverride = true
+reportIncompatibleVariableOverride = true
+reportInconsistentConstructor = true
+reportOverlappingOverload = true
+reportPossiblyUnboundVariable = true  # warn_unreachable = True
+reportConstantRedefinition = "error"
+reportInvalidStringEscapeSequence = "error"
+reportMissingTypeStubs = false
+reportPrivateUsage = "warning"
+reportTypeCommentUsage = "warning"
+reportInvalidTypeVarUse = "error"
+reportAssertAlwaysTrue = "warning"
+reportSelfClsParameterName = "error"
+reportUnusedExpression = "warning"
+reportWildcardImportFromLibrary = "warning"
+reportGeneralTypeIssues = "error"
+
+# Allow old-style typing imports (Dict, List, Optional, Union)
+reportDeprecated = false
+
+# Handle missing imports - for libraries without stubs
+reportMissingImports = "none"  # Matches ignore_missing_imports = True for external libs
+
+# Execution environment
+executionEnvironments = [
+    { root = "app", pythonVersion = "3.8", extraPaths = [".", "venv/src/python-opensubtitles"] }
+]
+
+# Additional configuration for handling imports
+stubPath = "stubs"
+include = ["app", "stubs"]
+useLibraryCodeForTypes = true

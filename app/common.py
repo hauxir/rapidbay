@@ -1,13 +1,11 @@
 import os
 import threading
-from typing import Any, Callable, Dict, List, TypeVar, Union
+from typing import Any, Callable, Dict, List, Union
 
 import diskcache
 
-F = TypeVar('F', bound=Callable[..., Any])
 
-
-def threaded(fn: F) -> Callable[..., threading.Thread]:
+def threaded(fn: Callable[..., Any]) -> Callable[..., threading.Thread]:
     def wrapper(*args: Any, **kwargs: Any) -> threading.Thread:
         thread = threading.Thread(target=fn, args=args, kwargs=kwargs)
         thread.start()

@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 import log
@@ -36,12 +36,12 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
         torrent_id = result["id"]  # type: ignore
         post(f"/torrents/selectFiles/{torrent_id}", {"files": "all"})
         links = get(f"/torrents/info/{torrent_id}")["links"][:30]
-        unrestricted_links = [
+        unrestricted_links: List[Any] = [
             post("/unrestrict/link", {"link": link})["download"] for link in links  # type: ignore
         ]
         for _i, link in enumerate(unrestricted_links):
-            if unquote(link).endswith(filename):
-                return link
+            if unquote(str(link)).endswith(filename):
+                return str(link)
 
     except Exception:
         log.write_log()

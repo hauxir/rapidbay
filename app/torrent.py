@@ -28,9 +28,9 @@ def get_index_and_file_from_files(h: Any, filename: str) -> Tuple[Optional[int],
 
 
 def make_magnet_from_torrent_file(file: str) -> str:
-    metadata = bencodepy.decode_from_file(file)
-    subj = metadata.get(b"info", {})
-    hashcontents = bencodepy.encode(subj)
+    metadata: Any = bencodepy.decode_from_file(file)
+    subj: Any = metadata.get(b"info", {})
+    hashcontents: Any = bencodepy.encode(subj)
     digest = hashlib.sha1(hashcontents).digest()
     b16hash = base64.b16encode(digest).decode().lower()
     return str(
@@ -45,8 +45,8 @@ def make_magnet_from_torrent_file(file: str) -> str:
             [
                 "&tr=" + tr.decode()
                 for trlist in metadata.get(b"announce-list", [])
-                for tr in trlist
-                if tr.decode().strip()
+                for tr in (trlist if isinstance(trlist, list) else [])  # type: ignore
+                if isinstance(tr, bytes) and tr.decode().strip()
             ]
         )
         + "&xl="
@@ -165,8 +165,8 @@ class TorrentClient:
             return None
         magnet_link = make_magnet_from_torrent_file(filepath)
         magnet_hash = get_hash(magnet_link)
-        info = libtorrent.torrent_info(filepath)
-        h = self.torrents.get(magnet_hash) or self.session.add_torrent(
+        info: Any = libtorrent.torrent_info(filepath)
+        h: Any = self.torrents.get(magnet_hash) or self.session.add_torrent(
             {"ti": info, "save_path": os.path.join(self.download_dir, magnet_hash)}  # type: ignore
         )
         self.torrents[magnet_hash] = h
@@ -176,7 +176,7 @@ class TorrentClient:
 
     def _add_magnet_link_to_downloads(self, magnet_link: str) -> Any:
         magnet_hash = get_hash(magnet_link)
-        h = libtorrent.add_magnet_uri(
+        h: Any = libtorrent.add_magnet_uri(
             self.session,
             magnet_link,
             {"save_path": os.path.join(self.download_dir, magnet_hash)},  # type: ignore

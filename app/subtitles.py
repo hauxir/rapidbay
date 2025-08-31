@@ -20,40 +20,40 @@ def _chunks(items: List[Any], n: int) -> Generator[List[Any], None, None]:
 def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> None:
     if skip is None:
         skip = []
-    dirname = os.path.dirname(filepath)
-    basename = os.path.basename(filepath)
-    basename_without_ext = os.path.splitext(basename)[0]
-    ost = OpenSubtitles()
+    dirname: str = os.path.dirname(filepath)
+    basename: str = os.path.basename(filepath)
+    basename_without_ext: str = os.path.splitext(basename)[0]
+    ost: Any = OpenSubtitles()
     ost.login(settings.OPENSUBTITLES_USERNAME, settings.OPENSUBTITLES_PASSWORD)
-    f = File(filepath)
-    h = f.get_hash()
-    language_ids = [
+    f: Any = File(filepath)
+    h: Any = f.get_hash()
+    language_ids: List[Any] = [
       languages.get(part1=lang).part2b for lang in settings.SUBTITLE_LANGUAGES if lang not in skip
     ]
-    results_from_hash = (
+    results_from_hash: List[Any] = (
             [
-            item for sublist in
+            item for sublist in  # type: ignore
             [ost.search_subtitles([{"sublanguageid": langid, "moviehash": h}]) or [] for langid in language_ids]
-            for item in sublist
+            for item in sublist  # type: ignore
         ]
     )
-    languages_in_results_from_hash = [
+    languages_in_results_from_hash: List[Any] = [
         r.get("SubLanguageID") for r in results_from_hash
     ]
-    results_from_filename = (
+    results_from_filename: List[Any] = (
             [
-            item for sublist in
+            item for sublist in  # type: ignore
             [ost.search_subtitles([{"sublanguageid": langid, "query": basename_without_ext}]) or [] for langid in language_ids]
-            for item in sublist
+            for item in sublist  # type: ignore
         ]
     )
-    results_from_filename_but_not_from_hash = [
+    results_from_filename_but_not_from_hash: List[Any] = [
         r
         for r in results_from_filename
         if r.get("SubLanguageID")
         and r.get("SubLanguageID") not in languages_in_results_from_hash
     ]
-    results = results_from_hash + results_from_filename_but_not_from_hash
+    results: List[Any] = results_from_hash + results_from_filename_but_not_from_hash
     results = [
         r
         for r in results
@@ -107,13 +107,13 @@ def get_subtitle_language(subtitle_filename: str) -> Optional[str]:
 
     if len(last_dotted_part) == 3:
         try:
-            three_letter_iso = filename_without_extension[-3:]
+            three_letter_iso: str = filename_without_extension[-3:]
             return languages.get(part2b=three_letter_iso).part2b
         except KeyError:
             return None
     elif len(last_dotted_part) == 2:
         try:
-            two_letter_iso = filename_without_extension[-2:]
+            two_letter_iso: str = filename_without_extension[-2:]
             if two_letter_iso == "pb":
                 two_letter_iso = "pt"
             return languages.get(part1=two_letter_iso).part2b

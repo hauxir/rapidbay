@@ -4,7 +4,7 @@ import os
 import re
 import time
 from subprocess import Popen
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import log
 import settings
@@ -26,17 +26,17 @@ def _recursive_filepaths(dir_name: str) -> List[str]:
 
 
 def get_sub_tracks(filepath: str) -> List[Tuple[int, str]]:
-    media_info = MediaInfo.parse(filepath)
+    media_info: Any = MediaInfo.parse(filepath)
     return [
         (int(t.streamorder), t.language or "en")
-        for (i, t) in enumerate(
-            [t for t in media_info.tracks if t.track_type == "Text" and "Picture" not in (t.codec_id_info or "")]
-        )
+        for t in [
+            t for t in media_info.tracks if t.track_type == "Text" and "Picture" not in (t.codec_id_info or "")
+        ]
         if t.streamorder
     ]
 
 
-def _extract_subtitles_as_vtt(filepath: str) -> Popen:
+def _extract_subtitles_as_vtt(filepath: str) -> Any:
     output_dir: str = os.path.dirname(filepath)
     basename: str = os.path.basename(filepath)
     filename_without_extension: str = os.path.splitext(basename)[0]
@@ -53,11 +53,11 @@ def _extract_subtitles_as_vtt(filepath: str) -> Popen:
     )
 
 
-def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: Optional[List[Tuple[Optional[str], str]]] = None) -> Popen:
+def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: Optional[List[Tuple[Optional[str], str]]] = None) -> Any:
     if subtitle_filepaths is None:
         subtitle_filepaths = []
     output_extension: str = os.path.splitext(output_filepath)[1]
-    media_info = MediaInfo.parse(input_filepath)
+    media_info: Any = MediaInfo.parse(input_filepath)
     audio_codecs: List[str] = [
         t.format.lower() for t in media_info.tracks if t.track_type == "Audio"
     ]
@@ -86,7 +86,7 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
 
     if media_info.tracks:
         try:
-            duration = next(t.duration for t in media_info.tracks if t.duration)
+            duration: Any = next(t.duration for t in media_info.tracks if t.duration)
             duration_int: Optional[int] = int(round(duration / 1000))
         except StopIteration:
             duration_int = None
@@ -97,7 +97,7 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
             [
                 "ffmpeg -nostdin",
                 f'-i "{input_filepath}"',
-                " ".join([f'-f srt -i "{fn}"' for (lang, fn) in subtitle_filepaths]),
+                " ".join([f'-f srt -i "{fn}"' for (_, fn) in subtitle_filepaths]),
                 "-map 0:v?",
                 "-map 0:a?",
                 "-map 0:s?" if n_sub_tracks > 0 else "",
@@ -182,7 +182,7 @@ class VideoConverter:
                 and filepath.endswith(".srt")
             ]
 
-            conversion: Popen = _convert_file_to_mp4(
+            conversion: Any = _convert_file_to_mp4(
                 input_filepath, output_filepath, subtitle_filepaths=subtitle_filepaths
             )
             conversion.wait()

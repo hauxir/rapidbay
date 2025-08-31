@@ -45,13 +45,13 @@ async def fetch_all(urls: List[str]) -> List[Dict[str, Any]]:
         for url in urls:
             tasks.append(asyncio.ensure_future(fetch_json(session, url)))
 
-        json_responses = await asyncio.gather(*tasks)
+        json_responses: List[Dict[str, Any]] = await asyncio.gather(*tasks)
         return json_responses
 
 
 @memoize(300)
 def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
-    magnet_links = []
+    magnet_links: List[Dict[str, Union[int, str, Optional[Any]]]] = []
     try:
         results: List[Dict[str, Any]] = []
         urls = [

@@ -24,10 +24,10 @@ class DaemonClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.session: requests_unixsocket.Session = requests_unixsocket.Session()
 
-    def _get(self, path: str) -> Dict[str, Any]:
+    def _get(self, path: str) -> Any:
         return self.session.get("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path).json()
 
-    def _post(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _post(self, path: str, data: Dict[str, Any]) -> Any:
         return self.session.post("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path, json=data).json()
 
     def save_torrent_file(self, filepath: str) -> Dict[str, Any]:
@@ -81,7 +81,7 @@ def _get_download_path(magnet_hash: str, filename: str) -> Optional[str]:
 def _subtitle_filenames(h: Any, filename: str) -> List[str]:
     files = torrent.get_torrent_info(h).files()
     filename_without_extension = os.path.splitext(filename)[0]
-    subtitle_filenames = []
+    subtitle_filenames: List[str] = []
     for f in files:
         basename = os.path.basename(f.path)
         basename_lower = basename.lower()
@@ -95,8 +95,8 @@ def _subtitle_filenames(h: Any, filename: str) -> List[str]:
 def _subtitle_indexes(h: Any, filename: str) -> List[int]:
     subtitle_filenames = _subtitle_filenames(h, filename)
     files = torrent.get_torrent_info(h).files()
-    subtitle_set = []
-    subtitle_indexes = []
+    subtitle_set: List[str] = []
+    subtitle_indexes: List[int] = []
     for i, f in enumerate(files):
         basename = os.path.basename(f.path).lower()
         if basename in subtitle_filenames and basename not in subtitle_set:
@@ -364,7 +364,7 @@ class RapidBayDaemon:
             if is_state(filename, FileStatus.DOWNLOAD_FINISHED):
                 subtitle_filenames = _subtitle_filenames(h, filepath)
                 available_subtitle_languages = [lang for lang in [get_subtitle_language(fn) for fn in subtitle_filenames] if lang]
-                embedded_subtitle_languages = [lang for (i,lang) in video_conversion.get_sub_tracks(filepath)]
+                embedded_subtitle_languages = [lang for (_, lang) in video_conversion.get_sub_tracks(filepath)]
                 self._download_external_subtitles(filepath, skip=available_subtitle_languages + embedded_subtitle_languages)
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 self.http_downloader.clear(filepath)
@@ -417,59 +417,65 @@ def start() -> None:
 
 
 @app.route("/save_torrent_file", methods=["POST"])
-def _save_torrent_file() -> Response:
-    filepath = request.json.get("filepath")
-    daemon.save_torrent_file(filepath)
+def _save_torrent_file() -> Response:  # type: ignore[reportUnusedFunction]
+    json_data = request.get_json()
+    filepath: str | None = json_data.get("filepath") if json_data else None
+    if filepath:
+        daemon.save_torrent_file(filepath)
     return jsonify({})
 
 
 @app.route("/fetch_filelist_from_link", methods=["POST"])
-def _fetch_filelist_from_link() -> Response:
-    magnet_link = request.json.get("magnet_link")
-    daemon.fetch_filelist_from_link(magnet_link)
+def _fetch_filelist_from_link() -> Response:  # type: ignore[reportUnusedFunction]
+    json_data = request.get_json()
+    magnet_link: str | None = json_data.get("magnet_link") if json_data else None
+    if magnet_link:
+        daemon.fetch_filelist_from_link(magnet_link)
     return jsonify({})
 
 
 @app.route("/download_file", methods=["POST"])
-def _download_file() -> Response:
-    magnet_link = request.json.get("magnet_link")
-    filename = request.json.get("filename")
-    daemon.download_file(magnet_link, filename)
+def _download_file() -> Response:  # type: ignore[reportUnusedFunction]
+    json_data = request.get_json()
+    magnet_link: str | None = json_data.get("magnet_link") if json_data else None
+    filename: str | None = json_data.get("filename") if json_data else None
+    if magnet_link and filename:
+        daemon.download_file(magnet_link, filename)
     return jsonify({})
 
 
 @app.route("/get_file_status/<string:magnet_hash>/<string:filename>")
-def _get_file_status(magnet_hash: str, filename: str) -> Response:
+def _get_file_status(magnet_hash: str, filename: str) -> Response:  # type: ignore[reportUnusedFunction]
     response = daemon.get_file_status(magnet_hash, filename)
     return jsonify(**response)
 
 
 @app.route("/downloads")
-def _downloads() -> Response:
+def _downloads() -> Response:  # type: ignore[reportUnusedFunction]
     response = daemon.downloads()
     return jsonify(**response)
 
 
 @app.route("/subtitle_downloads")
-def _subtitle_downloads() -> Response:
+def _subtitle_downloads() -> Response:  # type: ignore[reportUnusedFunction]
     response = daemon.subtitle_downloads
     return jsonify(**response)
 
 
 @app.route("/session_torrents")
-def _session_torrents() -> Response:
+def _session_torrents() -> Response:  # type: ignore[reportUnusedFunction]
     response = daemon.session_torrents()
     return jsonify(response)
 
 
 @app.route("/file_conversions")
-def _file_conversions() -> Response:
+def _file_conversions() -> Response:  # type: ignore[reportUnusedFunction]
     response = daemon.video_converter.file_conversions
     return jsonify(**response)
 
 
 @app.route("/http_downloads")
-def _http_downloads() -> Response:
+def _http_downloads() -> Response:  # type: ignore[reportUnusedFunction]
     response = daemon.http_downloader.downloads
     return jsonify(**response)
 

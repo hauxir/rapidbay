@@ -5,7 +5,7 @@ import os
 import random
 import string
 import subprocess
-import urllib
+import urllib.parse
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -22,15 +22,17 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 app: Flask = Flask(__name__)
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
-app.use_x_sendfile = True
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)  # type: ignore[method-assign]
+app.config['USE_X_SENDFILE'] = True
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
 
 daemon: DaemonClient = DaemonClient()
 
 
 @app.after_request
 def add_header(response: Response) -> Response:
-    response.headers["x-set-cookie"] = response.headers.get("set-cookie")
+    set_cookie = response.headers.get("set-cookie")
+    if set_cookie:
+        response.headers["x-set-cookie"] = set_cookie
     return response
 
 
@@ -59,7 +61,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
 
         def get_episode_info(fn: str) -> List[Optional[Union[int, str]]]:
             try:
-                parsed: Dict[str, Any] = PTN.parse(fn)
+                parsed: Any = PTN.parse(fn)
                 episode_num: Optional[Union[int, str]] = parsed.get("episode")
                 season_num: Optional[Union[int, str]] = parsed.get("season")
                 year: Optional[Union[int, str]] = parsed.get("year")
@@ -70,7 +72,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
         def is_episode(fn: str) -> bool:
             extension: str = os.path.splitext(fn)[1][1:]
             if extension in settings.VIDEO_EXTENSIONS:
-                season_num, episode_num, year = get_episode_info(fn)
+                _, episode_num, year = get_episode_info(fn)
                 return bool(episode_num or year)
             return False
 

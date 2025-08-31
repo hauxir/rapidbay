@@ -417,65 +417,62 @@ def start() -> None:
 
 
 @app.route("/save_torrent_file", methods=["POST"])
-def _save_torrent_file() -> Response:  # type: ignore[reportUnusedFunction]
-    json_data = request.get_json()
-    filepath: str | None = json_data.get("filepath") if json_data else None
+def save_torrent_file_route() -> Response:
+    filepath: str | None = request.json.get("filepath") if request.json else None
     if filepath:
         daemon.save_torrent_file(filepath)
     return jsonify({})
 
 
 @app.route("/fetch_filelist_from_link", methods=["POST"])
-def _fetch_filelist_from_link() -> Response:  # type: ignore[reportUnusedFunction]
-    json_data = request.get_json()
-    magnet_link: str | None = json_data.get("magnet_link") if json_data else None
+def fetch_filelist_from_link_route() -> Response:
+    magnet_link: str | None = request.json.get("magnet_link") if request.json else None
     if magnet_link:
         daemon.fetch_filelist_from_link(magnet_link)
     return jsonify({})
 
 
 @app.route("/download_file", methods=["POST"])
-def _download_file() -> Response:  # type: ignore[reportUnusedFunction]
-    json_data = request.get_json()
-    magnet_link: str | None = json_data.get("magnet_link") if json_data else None
-    filename: str | None = json_data.get("filename") if json_data else None
+def download_file_route() -> Response:
+    magnet_link: str | None = request.json.get("magnet_link") if request.json else None
+    filename: str | None = request.json.get("filename") if request.json else None
     if magnet_link and filename:
         daemon.download_file(magnet_link, filename)
     return jsonify({})
 
 
 @app.route("/get_file_status/<string:magnet_hash>/<string:filename>")
-def _get_file_status(magnet_hash: str, filename: str) -> Response:  # type: ignore[reportUnusedFunction]
+def get_file_status_route(magnet_hash: str, filename: str) -> Response:
     response = daemon.get_file_status(magnet_hash, filename)
     return jsonify(**response)
 
 
 @app.route("/downloads")
-def _downloads() -> Response:  # type: ignore[reportUnusedFunction]
+def downloads_route() -> Response:
     response = daemon.downloads()
     return jsonify(**response)
 
 
 @app.route("/subtitle_downloads")
-def _subtitle_downloads() -> Response:  # type: ignore[reportUnusedFunction]
+def subtitle_downloads_route() -> Response:
     response = daemon.subtitle_downloads
     return jsonify(**response)
 
 
 @app.route("/session_torrents")
-def _session_torrents() -> Response:  # type: ignore[reportUnusedFunction]
+def session_torrents_route() -> Response:
     response = daemon.session_torrents()
     return jsonify(response)
 
 
 @app.route("/file_conversions")
-def _file_conversions() -> Response:  # type: ignore[reportUnusedFunction]
+def file_conversions_route() -> Response:
     response = daemon.video_converter.file_conversions
     return jsonify(**response)
 
 
 @app.route("/http_downloads")
-def _http_downloads() -> Response:  # type: ignore[reportUnusedFunction]
+def http_downloads_route() -> Response:
     response = daemon.http_downloader.downloads
     return jsonify(**response)
 

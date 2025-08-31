@@ -46,7 +46,7 @@ def after_request(resp: Response) -> Response:
     return resp
 
 
-def get_files(magnet_hash: str) -> Optional[List[str]]:
+def _get_files(magnet_hash: str) -> Optional[List[str]]:
     filepaths: Optional[List[str]] = get_filepaths(magnet_hash)
     if filepaths:
         files: List[str] = [os.path.basename(f) for f in filepaths]
@@ -98,7 +98,7 @@ def get_files(magnet_hash: str) -> Optional[List[str]]:
     return None
 
 
-def weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def getdate(d: Optional[datetime.datetime]) -> datetime.date:
         return d.date() if d else datetime.datetime.now().date()
     dates: List[datetime.date] = sorted([getdate(r.get("published")) for r in results])
@@ -171,11 +171,11 @@ def search(searchterm: str) -> Response:
     rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
 
     if searchterm == "":
-        return jsonify(results=weighted_sort_date_seeds(filtered_results) + rest)
+        return jsonify(results=_weighted_sort_date_seeds(filtered_results) + rest)
     return jsonify(results=filtered_results + rest)
 
 
-def torrent_url_to_magnet_helper(torrent_url: str) -> Optional[str]:
+def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
     filepath: str = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
     magnet_link: Optional[str] = None
     try:
@@ -198,7 +198,7 @@ def torrent_url_to_magnet_helper(torrent_url: str) -> Optional[str]:
 @authorize
 def torrent_url_to_magnet() -> Response:
     torrent_url: Optional[str] = request.form.get("url")
-    magnet_link: Optional[str] = torrent_url_to_magnet_helper(torrent_url)  # type: ignore
+    magnet_link: Optional[str] = _torrent_url_to_magnet(torrent_url)  # type: ignore
     return jsonify(magnet_link=magnet_link)
 
 
@@ -207,7 +207,7 @@ def torrent_url_to_magnet() -> Response:
 def magnet_info() -> Response:
     magnet_link: Optional[str] = request.form.get("magnet_link")
     magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
-    if not get_files(magnet_hash):
+    if not _get_files(magnet_hash):
         daemon.fetch_filelist_from_link(magnet_link)  # type: ignore
     return jsonify(magnet_hash=magnet_hash)
 
@@ -234,7 +234,7 @@ def file_status(magnet_hash: str, filename: str) -> Response:
 def next_file(magnet_hash: str, filename: str) -> Response:
     next_filename: Optional[str] = None
     if settings.AUTO_PLAY_NEXT_FILE:
-        files: Optional[List[str]] = get_files(magnet_hash)
+        files: Optional[List[str]] = _get_files(magnet_hash)
         if files:
             try:
                 index: int = files.index(filename) + 1
@@ -249,7 +249,7 @@ def next_file(magnet_hash: str, filename: str) -> Response:
 @app.route("/api/magnet/<string:magnet_hash>/")
 @authorize
 def files(magnet_hash: str) -> Response:
-    files_list: Optional[List[str]] = get_files(magnet_hash)
+    files_list: Optional[List[str]] = _get_files(magnet_hash)
 
     if files_list:
         return jsonify(

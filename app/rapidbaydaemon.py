@@ -418,7 +418,7 @@ def start() -> None:
 
 @app.route("/save_torrent_file", methods=["POST"])
 def save_torrent_file_route() -> Response:
-    filepath: str | None = request.json.get("filepath") if request.json else None
+    filepath: str | None = request.json.get("filepath") if request.json else None  # type: ignore
     if filepath:
         daemon.save_torrent_file(filepath)
     return jsonify({})
@@ -426,7 +426,7 @@ def save_torrent_file_route() -> Response:
 
 @app.route("/fetch_filelist_from_link", methods=["POST"])
 def fetch_filelist_from_link_route() -> Response:
-    magnet_link: str | None = request.json.get("magnet_link") if request.json else None
+    magnet_link: str | None = request.json.get("magnet_link") if request.json else None  # type: ignore
     if magnet_link:
         daemon.fetch_filelist_from_link(magnet_link)
     return jsonify({})
@@ -434,8 +434,8 @@ def fetch_filelist_from_link_route() -> Response:
 
 @app.route("/download_file", methods=["POST"])
 def download_file_route() -> Response:
-    magnet_link: str | None = request.json.get("magnet_link") if request.json else None
-    filename: str | None = request.json.get("filename") if request.json else None
+    magnet_link: str | None = request.json.get("magnet_link") if request.json else None  # type: ignore
+    filename: str | None = request.json.get("filename") if request.json else None  # type: ignore
     if magnet_link and filename:
         daemon.download_file(magnet_link, filename)
     return jsonify({})

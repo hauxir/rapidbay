@@ -355,6 +355,21 @@ class RapidBayDaemon:
                 self.subtitle_downloads.pop(filepath, None)
             return
 
+        # Check if any HTTP downloads are active and trigger recheck
+        for f in files:
+            filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+            http_progress = self.http_downloader.downloads.get(filepath, -1)
+            if http_progress > 0:
+                # HTTP download is active or completed, force torrent to recheck
+                h.force_recheck()
+
+                if http_progress == 1:
+                    # HTTP download completed, clear the tracking
+                    self.http_downloader.clear(filepath)
+                    log.debug(f"HTTP cache download completed for {filepath}")
+
+                break  # Only need to recheck once per iteration
+
         for f in files:
             filename = os.path.basename(f.path)
 

@@ -15,11 +15,12 @@ jobs:
       id: setup-python
       with:
         python-version: '3.11'
-        cache: 'pip'
 
-    - name: Install Python dependencies
-      if: steps.setup-python.outputs.cache-hit != 'true'
+    - name: Create venv and install dependencies
       run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
 

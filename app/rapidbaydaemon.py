@@ -308,6 +308,9 @@ class RapidBayDaemon:
                     return {'status': FileStatus.DOWNLOADING_SUBTITLES}
                 if subtitle_download_status == SubtitleDownloadStatus.FINISHED:
                     return {'status': FileStatus.WAITING_FOR_CONVERSION}
+                # Handle race condition: if download is complete but no subtitle processing started
+                if subtitle_download_status is None:
+                    return {'status': FileStatus.DOWNLOAD_FINISHED}
             else:
                 return {'status': FileStatus.READY_TO_COPY}
             return {'status': FileStatus.DOWNLOAD_FINISHED}
@@ -369,7 +372,10 @@ class RapidBayDaemon:
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 self.http_downloader.clear(filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-                self.video_converter.convert_file(filepath, output_filepath)
+                # Only try to convert if not already in conversion queue or at max conversions
+                if not self.video_converter.file_conversions.get(output_filepath) and \
+                   len(self.video_converter.file_conversions.keys()) < settings.MAX_PARALLEL_CONVERSIONS:
+                    self.video_converter.convert_file(filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
                 filename, FileStatus.CONVERSION_FAILED
             ):
@@ -390,7 +396,8 @@ class RapidBayDaemon:
                     with self.torrent_client.locks.lock(magnet_hash):
                         self._handle_torrent(magnet_hash)
             except Exception as e:
-                raise e
+                log.debug(f"Error handling torrent {magnet_hash}: {str(e)}")
+                # Continue with other torrents rather than crashing the entire daemon
         _remove_old_files_and_directories(
             settings.OUTPUT_DIR, settings.MAX_OUTPUT_FILE_AGE
         )

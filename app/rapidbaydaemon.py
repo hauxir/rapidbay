@@ -238,6 +238,7 @@ class RapidBayDaemon:
         h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)  # type: ignore
         h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)  # type: ignore
 
+
         if download_subtitles:
             for subtitle_filename in _subtitle_filenames(
                 self.torrent_client.torrents.get(magnet_hash), filename
@@ -379,6 +380,8 @@ class RapidBayDaemon:
                 if not self.video_converter.file_conversions.get(output_filepath) and \
                    len(self.video_converter.file_conversions.keys()) < settings.MAX_PARALLEL_CONVERSIONS:
                     self.video_converter.convert_file(filepath, output_filepath)
+                    # Stop torrent download since we're converting (file is complete)
+                    self.torrent_client.stop_downloading_file(magnet_hash, filename)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
                 filename, FileStatus.CONVERSION_FAILED
             ):

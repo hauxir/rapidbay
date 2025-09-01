@@ -87,7 +87,7 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
     if media_info.tracks:
         try:
             duration: Any = next(t.duration for t in media_info.tracks if t.duration)
-            duration_int: Optional[int] = int(round(duration / 1000))
+            duration_int: Optional[int] = int(round(float(duration) / 1000))
         except StopIteration:
             duration_int = None
         with open(f"{output_filepath}{settings.LOG_POSTFIX}", "w") as f:

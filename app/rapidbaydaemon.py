@@ -231,15 +231,12 @@ class RapidBayDaemon:
                 cached_url = http_cache.get_cached_url(magnet_hash, filename)
                 if cached_url:
                     self.http_downloader.download_file(cached_url, download_path)
-                    # Stop torrent download for this file since we're using HTTP cache
-                    self.torrent_client.stop_downloading_file(magnet_hash, filename)
 
         self.torrent_client.download_file(magnet_link, filename)
 
         h = self.torrent_client.torrents.get(magnet_hash)
         h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)  # type: ignore
         h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)  # type: ignore
-
 
         if download_subtitles:
             for subtitle_filename in _subtitle_filenames(
@@ -311,9 +308,6 @@ class RapidBayDaemon:
                     return {'status': FileStatus.DOWNLOADING_SUBTITLES}
                 if subtitle_download_status == SubtitleDownloadStatus.FINISHED:
                     return {'status': FileStatus.WAITING_FOR_CONVERSION}
-                # Handle race condition: if download is complete but no subtitle processing started
-                if subtitle_download_status is None:
-                    return {'status': FileStatus.DOWNLOAD_FINISHED}
             else:
                 return {'status': FileStatus.READY_TO_COPY}
             return {'status': FileStatus.DOWNLOAD_FINISHED}
@@ -354,28 +348,7 @@ class RapidBayDaemon:
 
         active_filenames = video_filenames if video_filenames else filenames
 
-        # Check if all active files are ready
-        all_files_ready = all(is_state(filename, FileStatus.READY) for filename in active_filenames)
-
-        # Check for any ongoing operations that should prevent torrent removal
-        has_active_operations = False
-        for filename in filenames:
-            status = self.get_file_status(magnet_hash, filename)["status"]
-            if status in [FileStatus.CONVERTING,
-                         FileStatus.DOWNLOADING_SUBTITLES,
-                         FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT,
-                         FileStatus.WAITING_FOR_CONVERSION]:
-                has_active_operations = True
-                break
-
-            # Check for active HTTP downloads
-            download_path = _get_download_path(magnet_hash, filename)
-            if download_path and self.http_downloader.downloads.get(download_path):
-                has_active_operations = True
-                break
-
-        # Only remove torrent if all files are ready AND no active operations
-        if all_files_ready and not has_active_operations:
+        if all(is_state(filename, FileStatus.READY) for filename in active_filenames):
             self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
             for f in files:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
@@ -396,15 +369,7 @@ class RapidBayDaemon:
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 self.http_downloader.clear(filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-                # Check if already converted or conversion failed
-                if os.path.isfile(output_filepath):
-                    return  # File already exists, let status check handle it
-                # Only try to convert if not already in conversion queue or at max conversions
-                if not self.video_converter.file_conversions.get(output_filepath) and \
-                   len(self.video_converter.file_conversions.keys()) < settings.MAX_PARALLEL_CONVERSIONS:
-                    self.video_converter.convert_file(filepath, output_filepath)
-                    # Stop torrent download since we're converting (file is complete)
-                    self.torrent_client.stop_downloading_file(magnet_hash, filename)
+                self.video_converter.convert_file(filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
                 filename, FileStatus.CONVERSION_FAILED
             ):
@@ -425,8 +390,7 @@ class RapidBayDaemon:
                     with self.torrent_client.locks.lock(magnet_hash):
                         self._handle_torrent(magnet_hash)
             except Exception as e:
-                log.debug(f"Error handling torrent {magnet_hash}: {str(e)}")
-                # Continue with other torrents rather than crashing the entire daemon
+                raise e
         _remove_old_files_and_directories(
             settings.OUTPUT_DIR, settings.MAX_OUTPUT_FILE_AGE
         )

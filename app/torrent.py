@@ -146,18 +146,6 @@ class TorrentClient:
             prioritize_files(h, file_priorities)
             self._write_filelist_to_disk(magnet_link)
 
-    def stop_downloading_file(self, magnet_hash: str, filename: str) -> None:
-        h = self.torrents.get(magnet_hash)
-        if not h:
-            return
-        files = get_torrent_info(h).files()
-        file_priorities = h.file_priorities()
-        for i, f in enumerate(files):
-            if f.path.endswith(filename):
-                file_priorities[i] = 0
-                break
-        prioritize_files(h, file_priorities)
-
     def remove_torrent(self, magnet_hash: str, remove_files: bool = False) -> None:
         try:
             h = self.torrents[magnet_hash]

@@ -158,10 +158,10 @@ class VideoConverter:
     @log.catch_and_log_exceptions
     def convert_file(self, input_filepath: str, output_filepath: str) -> None:
         try:
-            if self.file_conversions.get(output_filepath):
-                return
 
             if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
+                return
+            if self.file_conversions.get(output_filepath):
                 return
 
             self.file_conversions[output_filepath] = True

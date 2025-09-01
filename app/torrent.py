@@ -104,7 +104,6 @@ class TorrentClient:
         settings.settings = {
             'listen_interfaces': listen_interfaces,
             'connections_limit': 200,
-            'connections_limit_per_torrent': 50,
             'active_downloads': 8,
             'active_seeds': 8,
             'auto_manage_startup': 60,

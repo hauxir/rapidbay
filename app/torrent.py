@@ -19,7 +19,7 @@ def get_torrent_info(h: libtorrent.torrent_handle) -> libtorrent.torrent_info:
     return h.get_torrent_info()
 
 
-def get_index_and_file_from_files(h: libtorrent.torrent_handle, filename: str) -> Tuple[Optional[int], Optional[libtorrent.file_entry]]:
+def get_index_and_file_from_files(h: libtorrent.torrent_handle, filename: str) -> Tuple[Optional[int], Optional["libtorrent.file_entry"]]:
     files = list(get_torrent_info(h).files())
     try:
         return next((i, f) for (i, f) in enumerate(files) if f.path.endswith(filename))
@@ -90,12 +90,12 @@ class TorrentClient:
     ) -> None:
         self.locks: LockManager = LockManager()
         self.session: libtorrent.session = libtorrent.session()
-        settings = self.session.get_settings()
+        settings = libtorrent.settings_pack()
         if listening_port:
-            settings['listen_interfaces'] = f'0.0.0.0:{listening_port},[::1]:{listening_port}'
+            settings.listen_interfaces = f'0.0.0.0:{listening_port},[::]:{listening_port}'
         else:
             rand = random.randrange(17000, 18000)
-            settings['listen_interfaces'] = f'0.0.0.0:{rand},[::1]:{rand}'
+            settings.listen_interfaces = f'0.0.0.0:{rand},[::]:{rand}'
         self.session.apply_settings(settings)
         for router, port in dht_routers or []:
             self.session.add_dht_node((router, port))

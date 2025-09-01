@@ -23,10 +23,10 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
     dirname: str = os.path.dirname(filepath)
     basename: str = os.path.basename(filepath)
     basename_without_ext: str = os.path.splitext(basename)[0]
-    ost: Any = OpenSubtitles()
+    ost: OpenSubtitles = OpenSubtitles()
     ost.login(settings.OPENSUBTITLES_USERNAME, settings.OPENSUBTITLES_PASSWORD)
-    f: Any = File(filepath)
-    h: Any = f.get_hash()
+    f: File = File(filepath)
+    h = f.get_hash()
     language_ids: List[Any] = [
       languages.get(part1=lang).part2b for lang in settings.SUBTITLE_LANGUAGES if lang not in skip
     ]

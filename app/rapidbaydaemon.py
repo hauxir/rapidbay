@@ -283,7 +283,7 @@ class RapidBayDaemon:
             return {'status': FileStatus.WAITING_FOR_METADATA}
         files = list(h.get_torrent_info().files())
         i, f = torrent.get_index_and_file_from_files(h, filename)
-        if f is None:
+        if f is None or i is None:
             return {'status': FileStatus.FILE_NOT_FOUND}
         download_progress = h.file_progress()[i] / f.size
 

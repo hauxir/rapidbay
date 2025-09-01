@@ -10,13 +10,20 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Build Docker image
-      run: docker build -t rapidbay-ci .
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
-    - name: Run CI checks in Docker container
+    - name: Install Python dependencies
       run: |
-        docker run --rm \
-          -v ${{ github.workspace }}:/ci \
-          -w /ci \
-          rapidbay-ci \
-          /bin/bash /ci/ci.sh
+        python -m pip install --upgrade pip
+        python3 -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+
+    - name: Run CI checks
+      run: |
+        chmod +x ci.sh
+        ./ci.sh

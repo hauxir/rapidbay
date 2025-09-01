@@ -6,7 +6,8 @@ import os
 import random
 import shutil
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
+from urllib.parse import urlparse
 
 import bencodepy
 import libtorrent
@@ -77,6 +78,74 @@ def get_hash(magnet_link: str) -> str:
     ].lower()
 
 
+def parse_proxy_url(proxy_url: Optional[str]) -> Optional[Dict[str, Union[libtorrent.proxy_type_t, str, int, bool]]]:
+    """
+    Parse proxy settings from a URL string or environment variable.
+    Supports HTTP, HTTPS, SOCKS4, SOCKS5 proxy URLs.
+    Format: [protocol://][username:password@]hostname:port
+    
+    Examples:
+      socks5://127.0.0.1:1080
+      http://user:pass@proxy.example.com:8080
+      proxy.example.com:3128 (defaults to http)
+    """
+    # Use provided proxy_url or fall back to environment variable
+    url = proxy_url or os.environ.get('PROXY_URL')
+    if not url:
+        return None
+
+    try:
+        # Parse the proxy URL
+        if '://' not in url:
+            # Add default protocol if missing
+            if any(url.startswith(p) for p in ['socks5:', 'socks4:', 'http:', 'https:']):
+                url = url.replace(':', '://', 1)
+            else:
+                url = 'http://' + url
+
+        parsed = urlparse(url)
+
+        # Determine proxy type
+        proxy_type = libtorrent.proxy_type_t.none
+        if parsed.scheme in ['socks5', 'socks5h']:
+            if parsed.username and parsed.password:
+                proxy_type = libtorrent.proxy_type_t.socks5_pw
+            else:
+                proxy_type = libtorrent.proxy_type_t.socks5
+        elif parsed.scheme == 'socks4':
+            proxy_type = libtorrent.proxy_type_t.socks4
+        elif parsed.scheme in ['http', 'https']:
+            if parsed.username and parsed.password:
+                proxy_type = libtorrent.proxy_type_t.http_pw
+            else:
+                proxy_type = libtorrent.proxy_type_t.http
+
+        if proxy_type != libtorrent.proxy_type_t.none and parsed.hostname:
+            proxy_settings: Dict[str, Union[libtorrent.proxy_type_t, str, int, bool]] = {
+                'proxy_type': proxy_type,
+                'proxy_hostname': parsed.hostname,
+                'proxy_port': parsed.port or 1080,  # Default to 1080 for SOCKS, will be overridden for HTTP
+                'proxy_username': parsed.username or '',
+                'proxy_password': parsed.password or '',
+                'proxy_peer_connections': True,
+                'proxy_tracker_connections': True,
+            }
+
+            # Set default port based on protocol if not specified
+            if not parsed.port:
+                if parsed.scheme in ['http', 'https']:
+                    proxy_settings['proxy_port'] = 8080
+                elif parsed.scheme in ['socks5', 'socks5h', 'socks4']:
+                    proxy_settings['proxy_port'] = 1080
+
+            print(f"Proxy configured: {parsed.scheme}://{parsed.hostname}:{proxy_settings['proxy_port']}")
+            return proxy_settings
+    except Exception as e:
+        print(f"Error parsing proxy URL: {e}")
+
+    return None
+
+
 class TorrentClient:
     torrents: Dict[str, libtorrent.torrent_handle] = {}
 
@@ -87,6 +156,7 @@ class TorrentClient:
         filelist_dir: Optional[str] = None,
         download_dir: Optional[str] = None,
         torrents_dir: Optional[str] = None,
+        proxy_url: Optional[str] = None,
     ) -> None:
         self.locks: LockManager = LockManager()
         if listening_port:
@@ -94,9 +164,25 @@ class TorrentClient:
         else:
             rand = random.randrange(17000, 18000)
             listen_interfaces = f'0.0.0.0:{rand},[::]:{rand}'
-        settings = libtorrent.session_params()
-        settings.settings = {'listen_interfaces': listen_interfaces}
-        self.session: libtorrent.session = libtorrent.session(settings)
+
+        # Create session parameters
+        params = libtorrent.session_params()
+        session_settings = params.settings
+        session_settings['listen_interfaces'] = listen_interfaces
+
+        # Apply proxy settings (explicit proxy_url takes priority over PROXY_URL env var)
+        proxy_settings = parse_proxy_url(proxy_url)
+
+        if proxy_settings:
+            for key, value in proxy_settings.items():
+                session_settings[key] = value
+
+        # Update params with modified settings
+        params.settings = session_settings
+
+        # Create session with configured settings
+        self.session: libtorrent.session = libtorrent.session(params)
+
         for router, port in dht_routers or []:
             self.session.add_dht_node((router, port))
         self.session.start_dht()

@@ -13,9 +13,12 @@ import libtorrent
 from locking import LockManager
 
 
-def get_torrent_info(h: libtorrent.torrent_handle) -> libtorrent.torrent_info:
+def get_torrent_info(h: libtorrent.torrent_handle, timeout: int = 30) -> libtorrent.torrent_info:
+    start_time = time.time()
     while not h.has_metadata():
-        time.sleep(1)
+        if time.time() - start_time > timeout:
+            raise TimeoutError(f"Metadata fetch timeout after {timeout} seconds")
+        time.sleep(0.1)
     return h.get_torrent_info()
 
 
@@ -61,10 +64,13 @@ def torrent_is_finished(h: libtorrent.torrent_handle) -> bool:
     )
 
 
-def prioritize_files(h: libtorrent.torrent_handle, priorities: List[int]) -> None:
+def prioritize_files(h: libtorrent.torrent_handle, priorities: List[int], timeout: int = 10) -> None:
     h.prioritize_files(priorities)
+    start_time = time.time()
     while h.file_priorities() != priorities:
-        time.sleep(1)
+        if time.time() - start_time > timeout:
+            raise TimeoutError(f"File prioritization timeout after {timeout} seconds")
+        time.sleep(0.1)
 
 
 def get_hash(magnet_link: str) -> str:
@@ -95,14 +101,65 @@ class TorrentClient:
             rand = random.randrange(17000, 18000)
             listen_interfaces = f'0.0.0.0:{rand},[::]:{rand}'
         settings = libtorrent.session_params()
-        settings.settings = {'listen_interfaces': listen_interfaces}
+        settings.settings = {
+            'listen_interfaces': listen_interfaces,
+            'connections_limit': 200,
+            'connections_limit_per_torrent': 50,
+            'active_downloads': 8,
+            'active_seeds': 8,
+            'auto_manage_startup': 60,
+            'cache_size': 512,
+            'read_cache_line_size': 32,
+            'write_cache_line_size': 32,
+            'send_buffer_watermark': 500 * 1024,
+            'send_socket_buffer_size': 1024 * 1024,
+            'recv_socket_buffer_size': 1024 * 1024,
+            'coalesce_reads': True,
+            'coalesce_writes': True,
+            'suggest_mode': 1,
+            'enable_dht': True,
+            'enable_lsd': True,
+            'enable_upnp': True,
+            'enable_natpmp': True,
+        }
         self.session: libtorrent.session = libtorrent.session(settings)
-        for router, port in dht_routers or []:
+        
+        # Add default DHT routers if none provided
+        default_dht_routers = [
+            ('router.bittorrent.com', 6881),
+            ('dht.transmissionbt.com', 6881),
+            ('router.utorrent.com', 6881),
+            ('dht.aelitis.com', 6881),
+            ('dht.libtorrent.org', 25401),
+        ]
+        
+        for router, port in (dht_routers or default_dht_routers):
             self.session.add_dht_node((router, port))
         self.session.start_dht()
         self.filelist_dir: Optional[str] = filelist_dir
         self.download_dir: Optional[str] = download_dir
         self.torrents_dir: Optional[str] = torrents_dir
+
+    def process_alerts(self) -> None:
+        """Process session alerts for better torrent monitoring"""
+        alerts = self.session.pop_alerts()
+        for alert in alerts:
+            if isinstance(alert, libtorrent.torrent_finished_alert):
+                torrent_hash = str(alert.handle.info_hash())
+                print(f"Torrent {torrent_hash[:8]} finished downloading")
+            elif isinstance(alert, libtorrent.torrent_error_alert):
+                torrent_hash = str(alert.handle.info_hash())
+                print(f"Torrent {torrent_hash[:8]} error: {alert.error}")
+                # Remove failed torrents from tracking
+                if torrent_hash in self.torrents:
+                    del self.torrents[torrent_hash]
+            elif isinstance(alert, libtorrent.metadata_received_alert):
+                torrent_hash = str(alert.handle.info_hash())
+                print(f"Metadata received for torrent {torrent_hash[:8]}")
+            elif isinstance(alert, libtorrent.dht_bootstrap_alert):
+                print("DHT bootstrap completed")
+            elif isinstance(alert, libtorrent.listen_succeeded_alert):
+                print(f"Listening on {alert.address}:{alert.port}")
 
     def fetch_filelist_from_link(self, magnet_link: str) -> None:
         if self.filelist_dir is None:

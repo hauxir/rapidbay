@@ -94,7 +94,8 @@ class TorrentClient:
         else:
             rand = random.randrange(17000, 18000)
             listen_interfaces = f'0.0.0.0:{rand},[::]:{rand}'
-        settings = {'listen_interfaces': listen_interfaces}
+        settings = libtorrent.session_params()
+        settings.settings = {'listen_interfaces': listen_interfaces}
         self.session: libtorrent.session = libtorrent.session(settings)
         for router, port in dht_routers or []:
             self.session.add_dht_node((router, port))

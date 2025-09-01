@@ -89,14 +89,13 @@ class TorrentClient:
         torrents_dir: Optional[str] = None,
     ) -> None:
         self.locks: LockManager = LockManager()
-        self.session: libtorrent.session = libtorrent.session()
-        settings = libtorrent.settings_pack()
         if listening_port:
-            settings.listen_interfaces = f'0.0.0.0:{listening_port},[::]:{listening_port}'
+            listen_interfaces = f'0.0.0.0:{listening_port},[::]:{listening_port}'
         else:
             rand = random.randrange(17000, 18000)
-            settings.listen_interfaces = f'0.0.0.0:{rand},[::]:{rand}'
-        self.session.apply_settings(settings)
+            listen_interfaces = f'0.0.0.0:{rand},[::]:{rand}'
+        settings = {'listen_interfaces': listen_interfaces}
+        self.session: libtorrent.session = libtorrent.session(settings)
         for router, port in dht_routers or []:
             self.session.add_dht_node((router, port))
         self.session.start_dht()

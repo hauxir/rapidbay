@@ -372,6 +372,9 @@ class RapidBayDaemon:
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
                 self.http_downloader.clear(filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+                # Check if already converted or conversion failed
+                if os.path.isfile(output_filepath):
+                    return  # File already exists, let status check handle it
                 # Only try to convert if not already in conversion queue or at max conversions
                 if not self.video_converter.file_conversions.get(output_filepath) and \
                    len(self.video_converter.file_conversions.keys()) < settings.MAX_PARALLEL_CONVERSIONS:

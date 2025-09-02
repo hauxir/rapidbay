@@ -1,31 +1,36 @@
 import threading
-import time
 from contextlib import contextmanager
 from typing import Any, Dict, Generator
 
 
 class LockManager:
-    locks: Dict[Any, int] = {}
+    locks: Dict[Any, threading.RLock] = {}
+    _lock_creation_lock: threading.Lock = threading.Lock()
 
     def get(self, key: Any) -> None:
-        thread_id = threading.get_ident()
-        while self.locks.get(key) not in [None, thread_id, None]:
-            time.sleep(1)
-        self.locks[key] = thread_id
+        with self._lock_creation_lock:
+            if key not in self.locks:
+                self.locks[key] = threading.RLock()
+        self.locks[key].acquire()
 
     def release(self, key: Any) -> None:
-        del self.locks[key]
+        if key in self.locks:
+            self.locks[key].release()
 
     def is_available(self, key: Any) -> bool:
-        thread_id = threading.get_ident()
-        return self.locks.get(key, thread_id) == thread_id
+        with self._lock_creation_lock:
+            if key not in self.locks:
+                return True
+        lock = self.locks[key]
+        if lock.acquire(blocking=False):
+            lock.release()
+            return True
+        return False
 
     @contextmanager
     def lock(self, key: Any) -> Generator[None, None, None]:
-        thread_id = threading.get_ident()
-        if self.locks.get(key) == thread_id:
+        self.get(key)
+        try:
             yield
-        else:
-            self.get(key)
-            yield
+        finally:
             self.release(key)

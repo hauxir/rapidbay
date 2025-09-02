@@ -1,15 +1,19 @@
 import os
-import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Union
 
 import diskcache
 
+# Global thread pool with reasonable limits
+# Max 20 threads to prevent resource exhaustion
+_thread_pool = ThreadPoolExecutor(max_workers=20, thread_name_prefix="rapidbay")
 
-def threaded(fn: Callable[..., Any]) -> Callable[..., threading.Thread]:
-    def wrapper(*args: Any, **kwargs: Any) -> threading.Thread:
-        thread = threading.Thread(target=fn, args=args, kwargs=kwargs)
-        thread.start()
-        return thread
+
+def threaded(fn: Callable[..., Any]) -> Callable[..., Future[Any]]:
+    def wrapper(*args: Any, **kwargs: Any) -> Future[Any]:
+        # Submit to thread pool instead of creating unlimited threads
+        # Returns a Future that behaves similarly to Thread for compatibility
+        return _thread_pool.submit(fn, *args, **kwargs)
 
     return wrapper
 

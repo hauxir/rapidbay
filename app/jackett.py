@@ -10,9 +10,16 @@ import settings
 import torrent
 from common import memoize
 from dateutil.parser import parse
+from requests.adapters import HTTPAdapter
 
 API_PATH = f"{settings.JACKETT_HOST}/api/v2.0"
 API_KEY = settings.JACKETT_API_KEY
+
+
+# Global session for connection pooling
+_session = requests.Session()
+_session.mount('http://', HTTPAdapter(pool_connections=10, pool_maxsize=10))
+_session.mount('https://', HTTPAdapter(pool_connections=10, pool_maxsize=10))
 
 
 @memoize(3600)
@@ -22,9 +29,7 @@ def get_indexers() -> List[str]:
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
 
-    session = requests.Session()
-
-    indexers_resp = session.get(
+    indexers_resp = _session.get(
         f"{API_PATH}/indexers/all/results?apikey={API_KEY}"
     )
     indexers_json = indexers_resp.json()["Indexers"]

@@ -18,6 +18,7 @@ import torrent
 from common import path_hierarchy
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from rapidbaydaemon import DaemonClient, FileStatus, get_filepaths
+from requests.adapters import HTTPAdapter
 from werkzeug.exceptions import NotFound
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -27,6 +28,11 @@ app.config['USE_X_SENDFILE'] = True
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
 
 daemon: DaemonClient = DaemonClient()
+
+# Global session for connection pooling
+_session = requests.Session()
+_session.mount('http://', HTTPAdapter(pool_connections=5, pool_maxsize=5))
+_session.mount('https://', HTTPAdapter(pool_connections=5, pool_maxsize=5))
 
 
 @app.after_request
@@ -184,7 +190,7 @@ def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
     filepath: str = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
     magnet_link: Optional[str] = None
     try:
-        r: requests.Response = requests.get(torrent_url, allow_redirects=False, timeout=30)
+        r: requests.Response = _session.get(torrent_url, allow_redirects=False, timeout=30)
         if r.status_code == 302:
             location: Optional[str] = r.headers.get("Location")
             if location and location.startswith("magnet"):

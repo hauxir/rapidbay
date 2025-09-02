@@ -6,14 +6,14 @@ import os
 import random
 import shutil
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import bencodepy
 import libtorrent
 from locking import LockManager
 
 # Performance and session constants
-DEFAULT_SESSION_SETTINGS = {
+DEFAULT_SESSION_SETTINGS: Dict[str, Union[int, bool]] = {
     'connections_limit': 200,
     'active_downloads': 8,
     'active_seeds': 8,

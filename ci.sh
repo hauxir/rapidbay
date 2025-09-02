@@ -20,4 +20,8 @@ python -c "import app; print('✓ app imports successfully')"
 cd ..
 
 echo ""
+echo "Running tests..."
+python -m pytest tests/ -v
+
+echo ""
 echo "All checks passed!"

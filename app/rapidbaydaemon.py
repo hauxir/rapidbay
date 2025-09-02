@@ -381,7 +381,7 @@ class RapidBayDaemon:
     def _heartbeat(self) -> None:
         # Process libtorrent session alerts for better monitoring
         self.torrent_client.process_alerts()
-        
+
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)
             if not h:

@@ -122,7 +122,7 @@ class TorrentClient:
             'enable_natpmp': True,
         }
         self.session: libtorrent.session = libtorrent.session(settings)
-        
+
         # Add default DHT routers if none provided
         default_dht_routers = [
             ('router.bittorrent.com', 6881),
@@ -131,7 +131,7 @@ class TorrentClient:
             ('dht.aelitis.com', 6881),
             ('dht.libtorrent.org', 25401),
         ]
-        
+
         for router, port in (dht_routers or default_dht_routers):
             self.session.add_dht_node((router, port))
         self.session.start_dht()

@@ -12,6 +12,35 @@ import bencodepy
 import libtorrent
 from locking import LockManager
 
+# Performance and session constants
+DEFAULT_SESSION_SETTINGS = {
+    'connections_limit': 200,
+    'active_downloads': 8,
+    'active_seeds': 8,
+    'auto_manage_startup': 60,
+    'cache_size': 512,
+    'read_cache_line_size': 32,
+    'write_cache_line_size': 32,
+    'send_buffer_watermark': 500 * 1024,
+    'send_socket_buffer_size': 1024 * 1024,
+    'recv_socket_buffer_size': 1024 * 1024,
+    'coalesce_reads': True,
+    'coalesce_writes': True,
+    'suggest_mode': 1,
+    'enable_dht': True,
+    'enable_lsd': True,
+    'enable_upnp': True,
+    'enable_natpmp': True,
+}
+
+DEFAULT_DHT_ROUTERS = [
+    ('router.bittorrent.com', 6881),
+    ('dht.transmissionbt.com', 6881),
+    ('router.utorrent.com', 6881),
+    ('dht.aelitis.com', 6881),
+    ('dht.libtorrent.org', 25401),
+]
+
 
 def get_torrent_info(h: libtorrent.torrent_handle, timeout: int = 30) -> libtorrent.torrent_info:
     start_time = time.time()
@@ -103,36 +132,11 @@ class TorrentClient:
         settings = libtorrent.session_params()
         settings.settings = {
             'listen_interfaces': listen_interfaces,
-            'connections_limit': 200,
-            'active_downloads': 8,
-            'active_seeds': 8,
-            'auto_manage_startup': 60,
-            'cache_size': 512,
-            'read_cache_line_size': 32,
-            'write_cache_line_size': 32,
-            'send_buffer_watermark': 500 * 1024,
-            'send_socket_buffer_size': 1024 * 1024,
-            'recv_socket_buffer_size': 1024 * 1024,
-            'coalesce_reads': True,
-            'coalesce_writes': True,
-            'suggest_mode': 1,
-            'enable_dht': True,
-            'enable_lsd': True,
-            'enable_upnp': True,
-            'enable_natpmp': True,
+            **DEFAULT_SESSION_SETTINGS,
         }
         self.session: libtorrent.session = libtorrent.session(settings)
 
-        # Add default DHT routers if none provided
-        default_dht_routers = [
-            ('router.bittorrent.com', 6881),
-            ('dht.transmissionbt.com', 6881),
-            ('router.utorrent.com', 6881),
-            ('dht.aelitis.com', 6881),
-            ('dht.libtorrent.org', 25401),
-        ]
-
-        for router, port in (dht_routers or default_dht_routers):
+        for router, port in (dht_routers or DEFAULT_DHT_ROUTERS):
             self.session.add_dht_node((router, port))
         self.session.start_dht()
         self.filelist_dir: Optional[str] = filelist_dir

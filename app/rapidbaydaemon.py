@@ -353,6 +353,7 @@ class RapidBayDaemon:
             for f in files:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                 self.subtitle_downloads.pop(filepath, None)
+                self.http_downloader.clear(filepath)
             return
 
         # Check if any HTTP downloads are active and trigger recheck
@@ -403,6 +404,10 @@ class RapidBayDaemon:
                 continue
             try:
                 if _torrent_is_stale(h):
+                    # Clear any HTTP downloads for this torrent before removing
+                    for f in h.get_files():
+                        filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+                        self.http_downloader.clear(filepath)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
                 elif h.has_metadata():
                     with self.torrent_client.locks.lock(magnet_hash):

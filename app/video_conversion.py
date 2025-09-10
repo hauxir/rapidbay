@@ -95,7 +95,7 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
     return Popen(
         " ".join(
             [
-                "ffmpeg -nostdin",
+                "ffmpeg -nostdin -threads 0",
                 f'-i "{input_filepath}"',
                 " ".join([f'-f srt -i "{fn}"' for (_, fn) in subtitle_filepaths]),
                 "-map 0:v?",

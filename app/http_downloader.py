@@ -8,7 +8,8 @@ from common import threaded
 
 
 class HttpDownloader:
-    downloads: Dict[str, float] = {}
+    def __init__(self) -> None:
+        self.downloads: Dict[str, float] = {}
 
     def clear(self, output_path: str) -> None:
         with contextlib.suppress(KeyError):

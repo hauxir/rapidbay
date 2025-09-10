@@ -405,7 +405,7 @@ class RapidBayDaemon:
             try:
                 if _torrent_is_stale(h):
                     # Clear any HTTP downloads for this torrent before removing
-                    for f in h.get_files():
+                    for f in torrent.get_torrent_info(h).files():
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                         self.http_downloader.clear(filepath)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

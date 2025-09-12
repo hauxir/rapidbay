@@ -292,7 +292,7 @@ class RapidBayDaemon:
 
         if download_path:
             http_progress = self.http_downloader.downloads.get(download_path, 0)
-            
+
             # If HTTP download is complete, trust that over torrent progress
             if http_progress == 1:
                 download_progress = 1

@@ -288,11 +288,18 @@ class RapidBayDaemon:
         download_progress = h.file_progress()[i] / f.size
 
         download_path = _get_download_path(magnet_hash, filename)
+        http_progress = 0
 
         if download_path:
-            download_progress = max(
-                self.http_downloader.downloads.get(download_path, 0), download_progress
-            )
+            http_progress = self.http_downloader.downloads.get(download_path, 0)
+            
+            # If HTTP download is complete, trust that over torrent progress
+            if http_progress == 1:
+                download_progress = 1
+                # Trigger recheck but don't wait for it - let heartbeat handle it
+                h.force_recheck()
+            else:
+                download_progress = max(http_progress, download_progress)
 
         if download_progress == 1:
             if filename_extension[1:] in settings.VIDEO_EXTENSIONS:
@@ -357,7 +364,7 @@ class RapidBayDaemon:
             return
 
         # Check if any HTTP downloads are active and trigger recheck
-        for f in files:
+        for i, f in enumerate(files):
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             http_progress = self.http_downloader.downloads.get(filepath, -1)
             if http_progress > 0:
@@ -365,9 +372,11 @@ class RapidBayDaemon:
                 h.force_recheck()
 
                 if http_progress == 1:
-                    # HTTP download completed, clear the tracking
-                    self.http_downloader.clear(filepath)
-                    log.debug(f"HTTP cache download completed for {filepath}")
+                    # Only clear HTTP tracking if torrent now recognizes the file as complete
+                    torrent_progress = h.file_progress()[i] / f.size if f.size > 0 else 0
+                    if torrent_progress >= 0.99:  # Allow for small rounding errors
+                        self.http_downloader.clear(filepath)
+                        log.debug(f"HTTP cache download completed and recognized by torrent for {filepath}")
 
                 break  # Only need to recheck once per iteration
 

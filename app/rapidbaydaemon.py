@@ -176,7 +176,7 @@ class RapidBayDaemon:
             torrents_dir=settings.TORRENTS_DIR,
         )
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
-        self.thread: Thread = Thread(target=self._loop, args=())
+        self.thread: Thread = Thread(target=self._loop_wrapper, args=())
         self.thread.daemon = True
         self.http_downloader: HttpDownloader = HttpDownloader()
 
@@ -435,6 +435,18 @@ class RapidBayDaemon:
         _remove_old_files_and_directories(
             settings.TORRENTS_DIR, settings.MAX_OUTPUT_FILE_AGE
         )
+
+    def _loop_wrapper(self) -> None:
+        try:
+            self._loop()
+        except Exception as e:
+            import traceback
+            print(f"FATAL: Daemon thread crashed with exception: {e}", flush=True)
+            print("Stack trace:", flush=True)
+            traceback.print_exc()
+            os._exit(1)
+        print("FATAL: Daemon thread exited unexpectedly", flush=True)
+        os._exit(1)
 
     def _loop(self) -> None:
         while True:

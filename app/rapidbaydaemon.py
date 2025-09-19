@@ -440,7 +440,10 @@ class RapidBayDaemon:
         try:
             self._loop()
         except Exception as e:
+            import traceback
             print(f"FATAL: Daemon thread crashed with exception: {e}", flush=True)
+            print("Stack trace:", flush=True)
+            traceback.print_exc()
             os._exit(1)
         print("FATAL: Daemon thread exited unexpectedly", flush=True)
         os._exit(1)

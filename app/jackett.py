@@ -112,7 +112,6 @@ def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
                 magnet_links.append(
                     {
                         "seeds": result.get("Seeders", 0),
-                        "peers": result.get("Peers", 0),
                         "title": result["Title"],
                         "magnet": result.get("MagnetUri"),
                         "torrent_link": result.get("Link"),

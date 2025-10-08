@@ -1,6 +1,7 @@
 import contextlib
 import datetime
 import json
+import math
 import os
 import random
 import string
@@ -104,10 +105,39 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
 
 
 def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    def getdate(d: Optional[datetime.datetime]) -> datetime.date:
-        return d.date() if d else datetime.datetime.now().date()
-    dates: List[datetime.date] = sorted([getdate(r.get("published")) for r in results])
-    return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
+    """Velocity-based trending: favors content gaining traction quickly"""
+    now = datetime.datetime.now()
+
+    def score(result: Dict[str, Any]) -> float:
+        seeds = result.get("seeds", 1)
+        peers = result.get("peers", 0)
+        published = result.get("published")
+
+        # Activity score: leechers indicate active downloading
+        activity_ratio = peers / max(seeds, 1)
+        base_score = seeds + peers
+
+        # Hours since publish
+        if published:
+            age_hours = (now - published).total_seconds() / 3600
+        else:
+            # Unknown publish date: assume very old
+            age_hours = 24 * 365  # 1 year
+
+        # Velocity score: log(popularity) / time decay
+        # Similar to Reddit's "hot" algorithm
+        if age_hours > 0:
+            velocity = math.log10(max(base_score, 1)) / math.pow(age_hours + 2, 1.5)
+        else:
+            velocity = base_score
+
+        # Boost if actively downloading (high peer-to-seed ratio)
+        if activity_ratio > 0.5:
+            velocity *= 1.5
+
+        return velocity
+
+    return sorted(results, key=score, reverse=True)
 
 
 @app.route("/robots.txt")

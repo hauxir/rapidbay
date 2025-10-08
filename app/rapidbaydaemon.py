@@ -437,6 +437,12 @@ class RapidBayDaemon:
             settings.TORRENTS_DIR, settings.MAX_OUTPUT_FILE_AGE
         )
 
+        # Clean up orphaned http_downloads entries
+        active_hashes = set(self.torrent_client.torrents.keys())
+        for filepath in list(self.http_downloader.downloads.keys()):
+            if not any(hash in filepath for hash in active_hashes):
+                self.http_downloader.clear(filepath)
+
     def _loop_wrapper(self) -> None:
         try:
             self._loop()

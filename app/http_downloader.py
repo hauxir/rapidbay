@@ -34,4 +34,3 @@ class HttpDownloader:
         dirname = os.path.dirname(output_path)
         os.makedirs(dirname, exist_ok=True)
         urllib.request.urlretrieve(url, output_path, progress)
-        self.clear(output_path)

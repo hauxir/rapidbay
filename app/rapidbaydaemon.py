@@ -364,13 +364,12 @@ class RapidBayDaemon:
             return
 
         # Check if any HTTP downloads are active and trigger recheck
+        needs_recheck = False
         for i, f in enumerate(files):
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             http_progress = self.http_downloader.downloads.get(filepath, -1)
             if http_progress > 0:
-                # HTTP download is active or completed, force torrent to recheck
-                h.force_recheck()
-
+                needs_recheck = True
                 if http_progress == 1:
                     # Only clear HTTP tracking if torrent now recognizes the file as complete
                     torrent_progress = h.file_progress()[i] / f.size if f.size > 0 else 0
@@ -378,7 +377,8 @@ class RapidBayDaemon:
                         self.http_downloader.clear(filepath)
                         log.debug(f"HTTP cache download completed and recognized by torrent for {filepath}")
 
-                break  # Only need to recheck once per iteration
+        if needs_recheck:
+            h.force_recheck()
 
         for f in files:
             filename = os.path.basename(f.path)
@@ -416,6 +416,7 @@ class RapidBayDaemon:
                     # Clear any HTTP downloads for this torrent before removing
                     for f in torrent.get_torrent_info(h).files():
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+                        self.subtitle_downloads.pop(filepath, None)
                         self.http_downloader.clear(filepath)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
                 elif h.has_metadata():

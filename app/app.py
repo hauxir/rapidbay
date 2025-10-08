@@ -106,7 +106,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
 
 def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Velocity-based trending: favors content gaining traction quickly"""
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc)
 
     def score(result: Dict[str, Any]) -> float:
         seeds = result.get("seeds", 1)
@@ -119,6 +119,9 @@ def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, A
 
         # Hours since publish
         if published:
+            # Handle both timezone-aware and naive datetimes
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=datetime.timezone.utc)
             age_hours = (now - published).total_seconds() / 3600
         else:
             # Unknown publish date: assume very old

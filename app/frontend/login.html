@@ -45,9 +45,11 @@
         <script>
             var storedCookie = localStorage.getItem("cookie");
             var form = document.getElementsByTagName("form")[0];
-            if (storedCookie) {
+            if (storedCookie && !document.cookie) {
                 document.cookie = storedCookie;
                 location.reload();
+            } else if (storedCookie) {
+                localStorage.removeItem("cookie");
             }
             form.onsubmit = function (e) {
                 e.preventDefault();

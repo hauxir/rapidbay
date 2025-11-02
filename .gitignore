@@ -3,3 +3,6 @@ __pycache__/
 tmp/
 filelists/
 creds.json
+# UV cache
+.uv-cache/
+.venv/

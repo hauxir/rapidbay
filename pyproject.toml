@@ -1,3 +1,49 @@
+[build-system]
+requires = ["setuptools>=77.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Rapidbay"
+version = "1.0.0"
+license = "MIT"
+dependencies = [
+    "aiohttp==3.9.5",
+    "bencodepy==0.9.5",
+    "diskcache==5.6.3",
+    "flask==3.0.3",
+    "gunicorn==23.0.0",
+    "iso-639==0.4.5",
+    "lxml==5.4.0",
+    "parse-torrent-name==1.1.1",
+    "pymediainfo==4.2.1",
+    "python-dateutil==2.9.0.post0",
+    "python-opensubtitles @ git+https://github.com/agonzalezro/python-opensubtitles@0143db67df5b80155c258887ca36f62a92455d4e",
+    "requests==2.31.0",
+    "requests-unixsocket==0.3.0",
+    "urllib3==1.26.16",
+    "werkzeug==3.0.6",
+    "libtorrent==2.0.11",
+    "types-libtorrent==2.0.11.20250816",
+]
+
+[project.optional-dependencies]
+dev = [
+    "basedpyright==1.31.3",
+    "types-click==7.1.8",
+    "types-html5lib==1.1.11.20241018",
+    "types-Jinja2==2.11.9",
+    "types-libtorrent==2.0.11.20250816",
+    "types-lxml==2025.8.25",
+    "types-MarkupSafe==1.1.10",
+    "types-python-dateutil==2.9.0.20241206",
+    "types-requests==2.28.11.17",
+    "types-setuptools==75.8.0.20250110",
+    "types-urllib3==1.26.25.14",
+    "types-Werkzeug==1.0.9",
+    "ruff==0.12.11",
+    "pytest==8.3.4",
+]
+
 [tool.basedpyright]
 # Python version - matching project Python version  
 pythonVersion = "3.8"
@@ -132,3 +178,6 @@ line-ending = "auto"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["app"]
+
+[tool.setuptools]
+packages = ["app"]

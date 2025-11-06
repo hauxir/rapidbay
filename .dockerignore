@@ -14,5 +14,3 @@ __pycache__/
 !README.md
 .github/
 tests/
-requirements.txt
-requirements-dev.txt

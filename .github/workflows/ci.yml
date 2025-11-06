@@ -10,30 +10,18 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
     - name: Set up Python
-      uses: actions/setup-python@v4
-      id: setup-python
-      with:
-        python-version: '3.11'
+      run: uv python install 3.11
 
-    - name: Cache venv
-      uses: actions/cache@v3
-      id: cache-venv
-      with:
-        path: venv
-        key: ${{ runner.os }}-venv-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-
-    - name: Create venv and install dependencies
-      if: steps.cache-venv.outputs.cache-hit != 'true'
-      run: |
-        python -m venv venv
-        source venv/bin/activate
-        pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install -r requirements-dev.txt
+    - name: Install dependencies
+      run: uv sync --all-extras
 
     - name: Run CI checks
       run: |
-        source venv/bin/activate
         chmod +x ci.sh
-        ./ci.sh
+        uv run ./ci.sh

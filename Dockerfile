@@ -7,6 +7,8 @@ RUN apt-get update && \
     git \
     wget \
     ca-certificates \
+    python3 \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Download alass binary
@@ -18,6 +20,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy project files
 COPY pyproject.toml uv.lock .python-version ./
+COPY app ./app
 
 # Install Python dependencies using UV
 RUN uv sync --frozen --no-cache --no-dev
@@ -31,14 +34,16 @@ RUN apt-get update && \
     ffmpeg \
     mediainfo \
     ca-certificates \
+    python3 \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy alass binary from builder
 COPY --from=builder /usr/bin/alass /usr/bin/alass
 
-# Copy UV-managed Python installation and virtual environment from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH="/root/.local/bin:$PATH"
+# Copy virtual environment from builder
+COPY --from=builder /.venv /.venv
+ENV PATH="/.venv/bin:$PATH"
 
 # BitTorrent incoming
 EXPOSE 6881

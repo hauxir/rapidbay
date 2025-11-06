@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=77.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "Rapidbay"
 version = "1.0.0"
-license = {text = "MIT"}
+license = "MIT"
 dependencies = [
     "aiohttp==3.9.5",
     "bencodepy==0.9.5",
@@ -174,3 +178,6 @@ line-ending = "auto"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["app"]
+
+[tool.setuptools]
+packages = ["app"]

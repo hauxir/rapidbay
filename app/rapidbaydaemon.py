@@ -123,20 +123,25 @@ def _remove_old_files_and_directories(dirname: str, max_age: int) -> None:
     except FileNotFoundError:
         return
     for subpath in subpaths:
-        modified = datetime.datetime.strptime(
-            time.ctime(os.path.getmtime(os.path.join(dirname, subpath))),
-            "%a %b %d %H:%M:%S %Y",
-        )
+        path = os.path.join(dirname, subpath)
+        try:
+            modified = datetime.datetime.strptime(
+                time.ctime(os.path.getmtime(path)),
+                "%a %b %d %H:%M:%S %Y",
+            )
+        except FileNotFoundError:
+            continue
         diff = datetime.datetime.now() - modified
         days, seconds = diff.days, diff.seconds
-        hours = days * 24 + seconds
         hours = days * 24 + seconds // 3600
         if hours > max_age:
-            path = os.path.join(dirname, subpath)
-            if os.path.isdir(path):
-                shutil.rmtree(path)
-            elif os.path.isfile(path):
-                os.remove(path)
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                elif os.path.isfile(path):
+                    os.remove(path)
+            except FileNotFoundError:
+                pass
 
 
 def _torrent_is_stale(h: Any) -> bool:

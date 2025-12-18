@@ -27,5 +27,7 @@ class LockManager:
             yield
         else:
             self.get(key)
-            yield
-            self.release(key)
+            try:
+                yield
+            finally:
+                self.release(key)

@@ -3,32 +3,38 @@ import json
 import os
 import shutil
 import time
+from contextlib import asynccontextmanager
 from threading import Thread
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import http_cache
+import httpx
 import log
-import requests_unixsocket
 import settings
 import subtitles
 import torrent
 import video_conversion
 from common import threaded
-from flask import Flask, Response, jsonify, request
+from fastapi import Body, FastAPI
 from http_downloader import HttpDownloader
 from subtitles import get_subtitle_language
 
 daemon: 'RapidBayDaemon'
 
+
 class DaemonClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.session: requests_unixsocket.Session = requests_unixsocket.Session()
+        if settings.DEV_MODE:
+            self.client: httpx.Client = httpx.Client(base_url=f"http://localhost:{settings.DAEMON_PORT}")
+        else:
+            transport = httpx.HTTPTransport(uds=settings.DAEMON_SOCKET)
+            self.client = httpx.Client(transport=transport, base_url="http://localhost")
 
     def _get(self, path: str) -> Any:
-        return self.session.get("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path).json()
+        return self.client.get(path).json()
 
     def _post(self, path: str, data: Dict[str, Any]) -> Any:
-        return self.session.post("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path, json=data).json()
+        return self.client.post(path, json=data).json()
 
     def save_torrent_file(self, filepath: str) -> Dict[str, Any]:
         return self._post("/save_torrent_file", {'filepath': filepath})
@@ -56,9 +62,6 @@ class DaemonClient:
 
     def http_downloads(self) -> Dict[str, Any]:
         return self._get("/http_downloads")
-
-
-app: Flask = Flask(__name__)
 
 
 def get_filepaths(magnet_hash: str) -> Optional[List[str]]:
@@ -472,66 +475,70 @@ def start() -> None:
     daemon.start()
 
 
-@app.route("/save_torrent_file", methods=["POST"])
-def save_torrent_file_route() -> Response:
-    filepath: str | None = request.json.get("filepath") if request.json else None  # type: ignore
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    start()
+    yield
+
+
+app: FastAPI = FastAPI(lifespan=lifespan)
+
+
+@app.post("/save_torrent_file")
+def save_torrent_file_route(filepath: Optional[str] = Body(default=None, embed=True)) -> Dict[str, Any]:
     if filepath:
         daemon.save_torrent_file(filepath)
-    return jsonify({})
+    return {}
 
 
-@app.route("/fetch_filelist_from_link", methods=["POST"])
-def fetch_filelist_from_link_route() -> Response:
-    magnet_link: str | None = request.json.get("magnet_link") if request.json else None  # type: ignore
+@app.post("/fetch_filelist_from_link")
+def fetch_filelist_from_link_route(magnet_link: Optional[str] = Body(default=None, embed=True)) -> Dict[str, Any]:
     if magnet_link:
         daemon.fetch_filelist_from_link(magnet_link)
-    return jsonify({})
+    return {}
 
 
-@app.route("/download_file", methods=["POST"])
-def download_file_route() -> Response:
-    magnet_link: str | None = request.json.get("magnet_link") if request.json else None  # type: ignore
-    filename: str | None = request.json.get("filename") if request.json else None  # type: ignore
+@app.post("/download_file")
+def download_file_route(
+    magnet_link: Optional[str] = Body(default=None, embed=True),
+    filename: Optional[str] = Body(default=None, embed=True)
+) -> Dict[str, Any]:
     if magnet_link and filename:
         daemon.download_file(magnet_link, filename)
-    return jsonify({})
+    return {}
 
 
-@app.route("/get_file_status/<string:magnet_hash>/<string:filename>")
-def get_file_status_route(magnet_hash: str, filename: str) -> Response:
+@app.get("/get_file_status/{magnet_hash}/{filename}")
+def get_file_status_route(magnet_hash: str, filename: str) -> Dict[str, Any]:
     response = daemon.get_file_status(magnet_hash, filename)
-    return jsonify(**response)
+    return response
 
 
-@app.route("/downloads")
-def downloads_route() -> Response:
+@app.get("/downloads")
+def downloads_route() -> Dict[str, Any]:
     response = daemon.downloads()
-    return jsonify(**response)
+    return response
 
 
-@app.route("/subtitle_downloads")
-def subtitle_downloads_route() -> Response:
+@app.get("/subtitle_downloads")
+def subtitle_downloads_route() -> Dict[str, str]:
     response = daemon.subtitle_downloads
-    return jsonify(**response)
+    return response
 
 
-@app.route("/session_torrents")
-def session_torrents_route() -> Response:
+@app.get("/session_torrents")
+def session_torrents_route() -> List[str]:
     response = daemon.session_torrents()
-    return jsonify(response)
+    return response
 
 
-@app.route("/file_conversions")
-def file_conversions_route() -> Response:
+@app.get("/file_conversions")
+def file_conversions_route() -> Dict[str, Any]:
     response = daemon.video_converter.file_conversions
-    return jsonify(**response)
+    return response
 
 
-@app.route("/http_downloads")
-def http_downloads_route() -> Response:
+@app.get("/http_downloads")
+def http_downloads_route() -> Dict[str, Any]:
     response = daemon.http_downloader.downloads
-    return jsonify(**response)
-
-
-with app.app_context():
-    start()
+    return response

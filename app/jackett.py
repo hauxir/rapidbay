@@ -17,7 +17,7 @@ API_KEY = settings.JACKETT_API_KEY
 
 @memoize(3600)
 def get_indexers() -> List[str]:
-    cache_dir = "/tmp/cache/jackett"
+    cache_dir = os.path.join(settings.CACHE_DIR, "jackett")
 
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)

@@ -3,6 +3,7 @@ import threading
 from typing import Any, Callable, Dict, List, Union
 
 import diskcache
+import settings
 
 
 def threaded(fn: Callable[..., Any]) -> Callable[..., threading.Thread]:
@@ -32,7 +33,7 @@ def path_hierarchy(path: str) -> Union[Dict[str, List[Any]], List[Any], str]:
 
 def memoize(expire: int = 300) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        cache = diskcache.Cache("/tmp/cache/")
+        cache = diskcache.Cache(settings.CACHE_DIR)
 
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             key = (args, frozenset(kwargs.items()))

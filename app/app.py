@@ -6,8 +6,7 @@ import random
 import string
 import subprocess
 import urllib.parse
-from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import http_cache
 import jackett
@@ -16,35 +15,33 @@ import requests
 import settings
 import torrent
 from common import path_hierarchy
-from flask import Flask, Response, abort, jsonify, request, send_from_directory
+from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from rapidbaydaemon import DaemonClient, FileStatus, get_filepaths
-from werkzeug.exceptions import NotFound
-from werkzeug.middleware.proxy_fix import ProxyFix
+from starlette.middleware.base import BaseHTTPMiddleware
 
-app: Flask = Flask(__name__)
-app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
-app.config['USE_X_SENDFILE'] = True
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
+app: FastAPI = FastAPI()
 
 daemon: DaemonClient = DaemonClient()
 
 
-@app.after_request
-def add_header(response: Response) -> Response:
-    set_cookie = response.headers.get("set-cookie")
-    if set_cookie:
-        response.headers["x-set-cookie"] = set_cookie
-    return response
+class HeaderMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        response: Response = await call_next(request)
+        # Move set-cookie header to x-set-cookie header
+        set_cookie = response.headers.get("set-cookie")
+        if set_cookie:
+            response.headers["x-set-cookie"] = set_cookie
+        # Convert X-Sendfile to X-Accel-Redirect for Nginx (harmless if nginx not present)
+        x_sendfile: Optional[str] = response.headers.get("X-Sendfile")
+        if x_sendfile:
+            response.headers["X-Accel-Redirect"] = urllib.parse.quote(f"/nginx/{x_sendfile}")
+            del response.headers["X-Sendfile"]
+        response.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
+        return response
 
 
-@app.after_request
-def after_request(resp: Response) -> Response:
-    x_sendfile: Optional[str] = resp.headers.get("X-Sendfile")
-    if x_sendfile:
-        resp.headers["X-Accel-Redirect"] = urllib.parse.quote(f"/nginx/{x_sendfile}")
-        del resp.headers["X-Sendfile"]
-    resp.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
-    return resp
+app.add_middleware(HeaderMiddleware)
 
 
 def _get_files(magnet_hash: str) -> Optional[List[str]]:
@@ -110,53 +107,58 @@ def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
 
-@app.route("/robots.txt")
-def robots() -> Response:
-    return Response(
+@app.get("/robots.txt")
+def robots() -> PlainTextResponse:
+    return PlainTextResponse(
         """User-agent: *
 Disallow: /""",
-        mimetype="text/plain",
     )
 
 
-def authorize(f: Callable[..., Any]) -> Callable[..., Any]:
-    @wraps(f)
-    def decorated_function(*args: Any, **kws: Any) -> Any:
-        password: Optional[str] = request.cookies.get('password')
-        if settings.PASSWORD and password != settings.PASSWORD:
-            abort(404)
-        return f(*args, **kws)
-    return decorated_function
+def authorize(password: Optional[str] = Cookie(default=None)) -> None:
+    if settings.PASSWORD and password != settings.PASSWORD:
+        raise HTTPException(status_code=404)
 
 
-@app.route("/", defaults={"path": ""})
-@app.route("/<path:path>")
-def frontend(path: str) -> Response:
+def _send_from_directory(directory: str, filename: str, last_modified: Optional[datetime.datetime] = None) -> FileResponse:
+    filepath = os.path.join(directory, filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+    headers: Dict[str, str] = {}
+    if last_modified:
+        headers["Last-Modified"] = last_modified.strftime("%a, %d %b %Y %H:%M:%S GMT")
+    return FileResponse(filepath, headers=headers)
+
+
+@app.get("/{path:path}")
+def frontend(path: str, password: Optional[str] = Cookie(default=None)) -> Response:
+    if path == "":
+        path = "index.html"
     if not path.startswith("index.html"):
         try:
-            return send_from_directory("/app/frontend/", path)
-        except NotFound:
+            filepath = os.path.join(settings.FRONTEND_DIR, path)
+            if os.path.isfile(filepath):
+                return FileResponse(filepath)
+        except Exception:
             pass
-    password: Optional[str] = request.cookies.get('password')
     if not settings.PASSWORD or password == settings.PASSWORD:
-        return send_from_directory("/app/frontend/", "index.html", last_modified=datetime.datetime.now())
-    return send_from_directory("/app/frontend/", "login.html", last_modified=datetime.datetime.now())
+        return _send_from_directory(settings.FRONTEND_DIR, "index.html", last_modified=datetime.datetime.now())
+    return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())
 
 
-@app.route("/api", methods=["POST"])
-def login() -> Response:
-    password: Optional[str] = request.form.get("password")
+@app.post("/api")
+def login(password: Optional[str] = Form(default=None)) -> Response:
     if not password:
-        abort(404)
-    response: Response = jsonify()
+        raise HTTPException(status_code=404)
+    response = Response(content="{}", media_type="application/json")
     if settings.PASSWORD and password == settings.PASSWORD:
-        response.set_cookie('password', password)
+        response.set_cookie(key='password', value=password)
     return response
 
-@app.route("/api/search/", defaults={"searchterm": ""})
-@app.route("/api/search/<string:searchterm>")
-@authorize
-def search(searchterm: str) -> Response:
+
+@app.get("/api/search/")
+@app.get("/api/search/{searchterm}")
+def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
     if settings.JACKETT_HOST:
         results: List[Dict[str, Any]] = jackett.search(searchterm)
     else:
@@ -176,12 +178,12 @@ def search(searchterm: str) -> Response:
     rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
 
     if searchterm == "":
-        return jsonify(results=_weighted_sort_date_seeds(filtered_results) + rest)
-    return jsonify(results=filtered_results + rest)
+        return {"results": _weighted_sort_date_seeds(filtered_results) + rest}
+    return {"results": filtered_results + rest}
 
 
 def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
-    filepath: str = "/tmp/" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent"
+    filepath: str = os.path.join(settings.DATA_DIR, ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent")
     magnet_link: Optional[str] = None
     try:
         r: requests.Response = requests.get(torrent_url, allow_redirects=False, timeout=30)
@@ -199,44 +201,39 @@ def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
     return magnet_link
 
 
-@app.route("/api/torrent_url_to_magnet/", methods=["POST"])
-@authorize
-def torrent_url_to_magnet() -> Response:
-    torrent_url: Optional[str] = request.form.get("url")
-    magnet_link: Optional[str] = _torrent_url_to_magnet(torrent_url)  # type: ignore
-    return jsonify(magnet_link=magnet_link)
+@app.post("/api/torrent_url_to_magnet/")
+def torrent_url_to_magnet(url: Optional[str] = Form(default=None), _: None = Depends(authorize)) -> Dict[str, Any]:
+    magnet_link: Optional[str] = _torrent_url_to_magnet(url)  # type: ignore
+    return {"magnet_link": magnet_link}
 
 
-@app.route("/api/magnet_files/", methods=["POST"])
-@authorize
-def magnet_info() -> Response:
-    magnet_link: Optional[str] = request.form.get("magnet_link")
+@app.post("/api/magnet_files/")
+def magnet_info(magnet_link: Optional[str] = Form(default=None), _: None = Depends(authorize)) -> Dict[str, str]:
     magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
     if not _get_files(magnet_hash):
         daemon.fetch_filelist_from_link(magnet_link)  # type: ignore
-    return jsonify(magnet_hash=magnet_hash)
+    return {"magnet_hash": magnet_hash}
 
 
-@app.route("/api/magnet_download/", methods=["POST"])
-@authorize
-def magnet_download() -> Response:
-    magnet_link: Optional[str] = request.form.get("magnet_link")
-    filename: Optional[str] = request.form.get("filename")
+@app.post("/api/magnet_download/")
+def magnet_download(
+    magnet_link: Optional[str] = Form(default=None),
+    filename: Optional[str] = Form(default=None),
+    _: None = Depends(authorize)
+) -> Dict[str, str]:
     magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
     if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:  # type: ignore
         daemon.download_file(magnet_link, filename)  # type: ignore
-    return jsonify(magnet_hash=magnet_hash)
+    return {"magnet_hash": magnet_hash}
 
 
-@app.route("/api/magnet/<string:magnet_hash>/<string:filename>")
-@authorize
-def file_status(magnet_hash: str, filename: str) -> Response:
-    return jsonify(**daemon.get_file_status(magnet_hash, filename))
+@app.get("/api/magnet/{magnet_hash}/{filename}")
+def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    return daemon.get_file_status(magnet_hash, filename)
 
 
-@app.route("/api/next_file/<string:magnet_hash>/<string:filename>")
-@authorize
-def next_file(magnet_hash: str, filename: str) -> Response:
+@app.get("/api/next_file/{magnet_hash}/{filename}")
+def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Optional[str]]:
     next_filename: Optional[str] = None
     if settings.AUTO_PLAY_NEXT_FILE:
         files: Optional[List[str]] = _get_files(magnet_hash)
@@ -248,62 +245,69 @@ def next_file(magnet_hash: str, filename: str) -> Response:
                 pass
             except IndexError:
                 pass
-    return jsonify(next_filename=next_filename)
+    return {"next_filename": next_filename}
 
 
-@app.route("/api/magnet/<string:magnet_hash>/")
-@authorize
-def files(magnet_hash: str) -> Response:
+@app.get("/api/magnet/{magnet_hash}/")
+def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Optional[List[str]]]:
     files_list: Optional[List[str]] = _get_files(magnet_hash)
 
     if files_list:
-        return jsonify(
-            files=files_list
-        )
-    return jsonify(files=None)
+        return {"files": files_list}
+    return {"files": None}
 
 
-@app.route("/error.log")
-@authorize
-def errorlog() -> Response:
+@app.get("/error.log")
+def errorlog(_: None = Depends(authorize)) -> PlainTextResponse:
     try:
         with open(settings.LOGFILE) as f:
             data: str = f.read()
     except OSError:
         data = ""
-    return Response(data, mimetype="text/plain")
+    return PlainTextResponse(data)
 
 
-@app.route("/api/status")
-@authorize
-def status() -> Response:
-    return jsonify(
-        output_dir=path_hierarchy(settings.OUTPUT_DIR),
-        filelist_dir=path_hierarchy(settings.FILELIST_DIR),
-        torrents_dir=path_hierarchy(settings.TORRENTS_DIR),
-        downloads_dir=path_hierarchy(settings.DOWNLOAD_DIR),
-        subtitle_downloads=daemon.subtitle_downloads(),
-        torrent_downloads=daemon.downloads(),
-        session_torrents=daemon.session_torrents(),
-        conversions=daemon.file_conversions(),
-        http_downloads=daemon.http_downloads(),
-    )
+@app.get("/api/status")
+def status(_: None = Depends(authorize)) -> Dict[str, Any]:
+    return {
+        "output_dir": path_hierarchy(settings.OUTPUT_DIR),
+        "filelist_dir": path_hierarchy(settings.FILELIST_DIR),
+        "torrents_dir": path_hierarchy(settings.TORRENTS_DIR),
+        "downloads_dir": path_hierarchy(settings.DOWNLOAD_DIR),
+        "subtitle_downloads": daemon.subtitle_downloads(),
+        "torrent_downloads": daemon.downloads(),
+        "session_torrents": daemon.session_torrents(),
+        "conversions": daemon.file_conversions(),
+        "http_downloads": daemon.http_downloads(),
+    }
 
 
-@app.route("/kodi.repo", defaults={"path": ""})
-@app.route("/kodi.repo/", defaults={"path": ""})
-@app.route("/kodi.repo/<string:path>")
-def kodi_repo(path: str) -> Response:
-    password: Optional[str] = request.authorization.password if request.authorization else None
+@app.get("/kodi.repo")
+@app.get("/kodi.repo/")
+@app.get("/kodi.repo/{path}")
+def kodi_repo(request: Request, path: str = "") -> Response:
+    # Extract basic auth password
+    password: Optional[str] = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Basic "):
+        import base64
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            if ":" in decoded:
+                password = decoded.split(":", 1)[1]
+        except Exception:
+            pass
+
     if not settings.PASSWORD or password == settings.PASSWORD:
         zip_filename: str = "rapidbay.zip"
         if path == zip_filename:
-            creds: Dict[str, Optional[str]] = {"host": request.url_root.rstrip("/"), "password": settings.PASSWORD}
-            with open("/app/kodi.addon/creds.json", "w") as f:
+            creds: Dict[str, Optional[str]] = {"host": str(request.base_url).rstrip("/"), "password": settings.PASSWORD}
+            creds_file = os.path.join(settings.KODI_ADDON_DIR, "creds.json")
+            with open(creds_file, "w") as f:
                 json.dump(creds, f)
             filehash: str = (
                 subprocess.Popen(
-                    r"find /app/kodi.addon/ -type f -exec shasum {} \; | shasum | head -c 8",
+                    f"find {settings.KODI_ADDON_DIR} -type f -exec shasum {{}} \\; | shasum | head -c 8",
                     stdout=subprocess.PIPE,
                     shell=True,
                 )
@@ -311,17 +315,19 @@ def kodi_repo(path: str) -> Response:
                 .decode()
             )
             filename: str = f"kodi_addon-{filehash}.zip"
-            if not os.path.exists(f"/tmp/{filename}"):
-                os.system(f"cd /app/; zip -r /tmp/{filename} kodi.addon")
-            return send_from_directory(
-                "/tmp/", filename, last_modified=datetime.datetime.now()
-            )
-        return Response(
+            zip_path = os.path.join(settings.DATA_DIR, filename)
+            if not os.path.exists(zip_path):
+                kodi_parent = os.path.dirname(settings.KODI_ADDON_DIR)
+                kodi_name = os.path.basename(settings.KODI_ADDON_DIR)
+                os.system(f"cd {kodi_parent}; zip -r {zip_path} {kodi_name}")
+            return _send_from_directory(settings.DATA_DIR, filename, last_modified=datetime.datetime.now())
+        return HTMLResponse(
             f"""<!DOCTYPE html>
         <a href="{zip_filename}">{zip_filename}</a>
         """,
-            mimetype="text/html",
         )
     return Response(
-        "Wrong password", 401, {"WWW-Authenticate": 'Basic realm="Login Required"'}
+        content="Wrong password",
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="Login Required"'}
     )

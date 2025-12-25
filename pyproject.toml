@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "Rapidbay"
 version = "1.0.0"
 license = "MIT"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "aiohttp==3.9.5",
     "bencodepy==0.9.5",
@@ -45,7 +45,7 @@ dev = [
 
 [tool.basedpyright]
 # Python version - matching project Python version  
-pythonVersion = "3.8"
+pythonVersion = "3.9"
 pythonPlatform = "All"
 
 # Import discovery
@@ -109,7 +109,7 @@ reportMissingImports = "none"  # Matches ignore_missing_imports = True for exter
 
 # Execution environment
 executionEnvironments = [
-    { root = "app", pythonVersion = "3.8", extraPaths = ["."] }
+    { root = "app", pythonVersion = "3.9", extraPaths = ["."] }
 ]
 
 # Additional configuration for handling imports
@@ -120,7 +120,7 @@ useLibraryCodeForTypes = true
 [tool.ruff]
 # Ruff configuration
 line-length = 120
-target-version = "py38"
+target-version = "py39"
 
 [tool.ruff.lint]
 # Enable pycodestyle, pyflakes, and more
@@ -140,6 +140,8 @@ select = [
 ignore = [
     "E501",  # line too long (handled by line-length)
     "E203",  # whitespace before ':'
+    "UP006", # use list instead of List (keep old-style for consistency)
+    "UP035", # import from collections.abc (keep typing imports for consistency)
 ]
 
 # Allow autofix for all enabled rules

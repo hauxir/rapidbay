@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple
 PASSWORD: Optional[str] = None
 AUTO_PLAY_NEXT_FILE: bool = True
 DEV_MODE: bool = False  # Set to True to run without nginx/docker
-DAEMON_PORT: int = 5001  # Port for daemon in dev mode
 
 # PATHS - Placeholder values, will be set after env var loading
 _data_dir: str = ""
@@ -18,7 +17,6 @@ _torrents_dir: str = ""
 _output_dir: str = ""
 _frontend_dir: str = ""
 _kodi_addon_dir: str = ""
-_daemon_socket: str = ""
 
 # JACKETT
 JACKETT_HOST: Optional[str] = None
@@ -77,7 +75,6 @@ _torrents_dir = os.getenv("TORRENTS_DIR", "")
 _output_dir = os.getenv("OUTPUT_DIR", "")
 _frontend_dir = os.getenv("FRONTEND_DIR", "")
 _kodi_addon_dir = os.getenv("KODI_ADDON_DIR", "")
-_daemon_socket = os.getenv("DAEMON_SOCKET", "")
 
 # Compute final path values (only assigned once)
 DATA_DIR: str = _data_dir if _data_dir else ("./data" if DEV_MODE else "/tmp")
@@ -89,4 +86,3 @@ TORRENTS_DIR: str = _torrents_dir if _torrents_dir else os.path.join(DATA_DIR, "
 OUTPUT_DIR: str = _output_dir if _output_dir else os.path.join(DATA_DIR, "output") + "/"
 FRONTEND_DIR: str = _frontend_dir if _frontend_dir else ("./app/frontend" if DEV_MODE else "/app/frontend")
 KODI_ADDON_DIR: str = _kodi_addon_dir if _kodi_addon_dir else ("./app/kodi.addon" if DEV_MODE else "/app/kodi.addon")
-DAEMON_SOCKET: str = _daemon_socket if _daemon_socket else (os.path.join(DATA_DIR, "rapidbaydaemon.sock") if DEV_MODE else "/app/rapidbaydaemon.sock")

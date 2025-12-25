@@ -3,65 +3,18 @@ import json
 import os
 import shutil
 import time
-from contextlib import asynccontextmanager
 from threading import Thread
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import http_cache
-import httpx
 import log
 import settings
 import subtitles
 import torrent
 import video_conversion
 from common import threaded
-from fastapi import Body, FastAPI
 from http_downloader import HttpDownloader
 from subtitles import get_subtitle_language
-
-daemon: 'RapidBayDaemon'
-
-
-class DaemonClient:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if settings.DEV_MODE:
-            self.client: httpx.Client = httpx.Client(base_url=f"http://localhost:{settings.DAEMON_PORT}")
-        else:
-            transport = httpx.HTTPTransport(uds=settings.DAEMON_SOCKET)
-            self.client = httpx.Client(transport=transport, base_url="http://localhost")
-
-    def _get(self, path: str) -> Any:
-        return self.client.get(path).json()
-
-    def _post(self, path: str, data: Dict[str, Any]) -> Any:
-        return self.client.post(path, json=data).json()
-
-    def save_torrent_file(self, filepath: str) -> Dict[str, Any]:
-        return self._post("/save_torrent_file", {'filepath': filepath})
-
-    def fetch_filelist_from_link(self, magnet_link: str) -> Dict[str, Any]:
-        return self._post("/fetch_filelist_from_link", {'magnet_link': magnet_link})
-
-    def download_file(self, magnet_link: str, filename: str) -> Dict[str, Any]:
-        return self._post("/download_file", {'magnet_link': magnet_link, 'filename': filename})
-
-    def get_file_status(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
-        return self._get(f"/get_file_status/{magnet_hash}/{filename}")
-
-    def downloads(self) -> Dict[str, Any]:
-        return self._get("/downloads")
-
-    def subtitle_downloads(self) -> Dict[str, Any]:
-        return self._get("/subtitle_downloads")
-
-    def session_torrents(self) -> Dict[str, Any]:
-        return self._get("/session_torrents")
-
-    def file_conversions(self) -> Dict[str, Any]:
-        return self._get("/file_conversions")
-
-    def http_downloads(self) -> Dict[str, Any]:
-        return self._get("/http_downloads")
 
 
 def get_filepaths(magnet_hash: str) -> Optional[List[str]]:
@@ -467,78 +420,3 @@ class RapidBayDaemon:
         while True:
             self._heartbeat()
             time.sleep(1)
-
-
-def start() -> None:
-    global daemon
-    daemon = RapidBayDaemon()
-    daemon.start()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    start()
-    yield
-
-
-app: FastAPI = FastAPI(lifespan=lifespan)
-
-
-@app.post("/save_torrent_file")
-def save_torrent_file_route(filepath: Optional[str] = Body(default=None, embed=True)) -> Dict[str, Any]:
-    if filepath:
-        daemon.save_torrent_file(filepath)
-    return {}
-
-
-@app.post("/fetch_filelist_from_link")
-def fetch_filelist_from_link_route(magnet_link: Optional[str] = Body(default=None, embed=True)) -> Dict[str, Any]:
-    if magnet_link:
-        daemon.fetch_filelist_from_link(magnet_link)
-    return {}
-
-
-@app.post("/download_file")
-def download_file_route(
-    magnet_link: Optional[str] = Body(default=None, embed=True),
-    filename: Optional[str] = Body(default=None, embed=True)
-) -> Dict[str, Any]:
-    if magnet_link and filename:
-        daemon.download_file(magnet_link, filename)
-    return {}
-
-
-@app.get("/get_file_status/{magnet_hash}/{filename}")
-def get_file_status_route(magnet_hash: str, filename: str) -> Dict[str, Any]:
-    response = daemon.get_file_status(magnet_hash, filename)
-    return response
-
-
-@app.get("/downloads")
-def downloads_route() -> Dict[str, Any]:
-    response = daemon.downloads()
-    return response
-
-
-@app.get("/subtitle_downloads")
-def subtitle_downloads_route() -> Dict[str, str]:
-    response = daemon.subtitle_downloads
-    return response
-
-
-@app.get("/session_torrents")
-def session_torrents_route() -> List[str]:
-    response = daemon.session_torrents()
-    return response
-
-
-@app.get("/file_conversions")
-def file_conversions_route() -> Dict[str, Any]:
-    response = daemon.video_converter.file_conversions
-    return response
-
-
-@app.get("/http_downloads")
-def http_downloads_route() -> Dict[str, Any]:
-    response = daemon.http_downloader.downloads
-    return response

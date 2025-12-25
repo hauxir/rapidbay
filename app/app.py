@@ -6,7 +6,8 @@ import random
 import string
 import subprocess
 import urllib.parse
-from typing import Any, Dict, List, Optional, Union
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 import http_cache
 import jackett
@@ -17,12 +18,22 @@ import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
-from rapidbaydaemon import DaemonClient, FileStatus, get_filepaths
+from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from starlette.middleware.base import BaseHTTPMiddleware
 
-app: FastAPI = FastAPI()
+# Global daemon instance
+daemon: RapidBayDaemon
 
-daemon: DaemonClient = DaemonClient()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    global daemon
+    daemon = RapidBayDaemon()
+    daemon.start()
+    yield
+
+
+app: FastAPI = FastAPI(lifespan=lifespan)
 
 
 class HeaderMiddleware(BaseHTTPMiddleware):
@@ -274,11 +285,11 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "filelist_dir": path_hierarchy(settings.FILELIST_DIR),
         "torrents_dir": path_hierarchy(settings.TORRENTS_DIR),
         "downloads_dir": path_hierarchy(settings.DOWNLOAD_DIR),
-        "subtitle_downloads": daemon.subtitle_downloads(),
+        "subtitle_downloads": daemon.subtitle_downloads,
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
-        "conversions": daemon.file_conversions(),
-        "http_downloads": daemon.http_downloads(),
+        "conversions": daemon.video_converter.file_conversions,
+        "http_downloads": daemon.http_downloader.downloads,
     }
 
 

@@ -5,18 +5,17 @@ from typing import List, Optional, Tuple
 # RAPIDBAY
 PASSWORD: Optional[str] = None
 AUTO_PLAY_NEXT_FILE: bool = True
-STANDALONE: bool = False  # Set to True to run without Docker/nginx
 
-# PATHS - Placeholder values, will be set after env var loading
-_data_dir: str = ""
-_cache_dir: str = ""
-_logfile: str = ""
-_download_dir: str = ""
-_filelist_dir: str = ""
-_torrents_dir: str = ""
-_output_dir: str = ""
-_frontend_dir: str = ""
-_kodi_addon_dir: str = ""
+# PATHS - Defaults for standalone, Docker overrides via env vars
+DATA_DIR: str = "./data"
+CACHE_DIR: str = ""
+LOGFILE: str = ""
+DOWNLOAD_DIR: str = ""
+FILELIST_DIR: str = ""
+TORRENTS_DIR: str = ""
+OUTPUT_DIR: str = ""
+FRONTEND_DIR: str = "./app/frontend"
+KODI_ADDON_DIR: str = "./app/kodi.addon"
 
 # JACKETT
 JACKETT_HOST: Optional[str] = None
@@ -56,7 +55,7 @@ MAX_PARALLEL_CONVERSIONS: int = 2
 OPENSUBTITLES_USERNAME: Optional[str] = None
 OPENSUBTITLES_PASSWORD: Optional[str] = None
 
-# Load environment variables (for non-path settings)
+# Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:
     _NULL = "NULL"
     _env_var = os.getenv(_variable, _NULL)
@@ -65,24 +64,16 @@ for _variable in [item for item in list(globals().keys()) if not item.startswith
             _env_var = eval(_env_var)
         globals()[_variable] = _env_var
 
-# Load path overrides from environment
-_data_dir = os.getenv("DATA_DIR", "")
-_cache_dir = os.getenv("CACHE_DIR", "")
-_logfile = os.getenv("LOGFILE", "")
-_download_dir = os.getenv("DOWNLOAD_DIR", "")
-_filelist_dir = os.getenv("FILELIST_DIR", "")
-_torrents_dir = os.getenv("TORRENTS_DIR", "")
-_output_dir = os.getenv("OUTPUT_DIR", "")
-_frontend_dir = os.getenv("FRONTEND_DIR", "")
-_kodi_addon_dir = os.getenv("KODI_ADDON_DIR", "")
-
-# Compute final path values (only assigned once)
-DATA_DIR: str = _data_dir if _data_dir else ("./data" if STANDALONE else "/tmp")
-CACHE_DIR: str = _cache_dir if _cache_dir else os.path.join(DATA_DIR, "cache")
-LOGFILE: str = _logfile if _logfile else os.path.join(DATA_DIR, "rapidbay_errors.log")
-DOWNLOAD_DIR: str = _download_dir if _download_dir else os.path.join(DATA_DIR, "downloads") + "/"
-FILELIST_DIR: str = _filelist_dir if _filelist_dir else os.path.join(DATA_DIR, "filelists") + "/"
-TORRENTS_DIR: str = _torrents_dir if _torrents_dir else os.path.join(DATA_DIR, "torrents") + "/"
-OUTPUT_DIR: str = _output_dir if _output_dir else os.path.join(DATA_DIR, "output") + "/"
-FRONTEND_DIR: str = _frontend_dir if _frontend_dir else ("./app/frontend" if STANDALONE else "/app/frontend")
-KODI_ADDON_DIR: str = _kodi_addon_dir if _kodi_addon_dir else ("./app/kodi.addon" if STANDALONE else "/app/kodi.addon")
+# Compute derived paths (if not explicitly set)
+if not CACHE_DIR:
+    CACHE_DIR = os.path.join(DATA_DIR, "cache")
+if not LOGFILE:
+    LOGFILE = os.path.join(DATA_DIR, "rapidbay_errors.log")
+if not DOWNLOAD_DIR:
+    DOWNLOAD_DIR = os.path.join(DATA_DIR, "downloads") + "/"
+if not FILELIST_DIR:
+    FILELIST_DIR = os.path.join(DATA_DIR, "filelists") + "/"
+if not TORRENTS_DIR:
+    TORRENTS_DIR = os.path.join(DATA_DIR, "torrents") + "/"
+if not OUTPUT_DIR:
+    OUTPUT_DIR = os.path.join(DATA_DIR, "output") + "/"

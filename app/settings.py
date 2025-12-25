@@ -6,16 +6,16 @@ from typing import List, Optional, Tuple
 PASSWORD: Optional[str] = None
 AUTO_PLAY_NEXT_FILE: bool = True
 
-# PATHS - Defaults for standalone, Docker overrides via env vars
-DATA_DIR: str = "./data"
-CACHE_DIR: str = ""
-LOGFILE: str = ""
-DOWNLOAD_DIR: str = ""
-FILELIST_DIR: str = ""
-TORRENTS_DIR: str = ""
-OUTPUT_DIR: str = ""
-FRONTEND_DIR: str = "./app/frontend"
-KODI_ADDON_DIR: str = "./app/kodi.addon"
+# PATHS - temp values, final constants computed below
+_data_dir: str = "./data"
+_cache_dir: str = ""
+_logfile: str = ""
+_download_dir: str = ""
+_filelist_dir: str = ""
+_torrents_dir: str = ""
+_output_dir: str = ""
+_frontend_dir: str = "./app/frontend"
+_kodi_addon_dir: str = "./app/kodi.addon"
 
 # JACKETT
 JACKETT_HOST: Optional[str] = None
@@ -64,16 +64,24 @@ for _variable in [item for item in list(globals().keys()) if not item.startswith
             _env_var = eval(_env_var)
         globals()[_variable] = _env_var
 
-# Compute derived paths (if not explicitly set)
-if not CACHE_DIR:
-    CACHE_DIR = os.path.join(DATA_DIR, "cache")
-if not LOGFILE:
-    LOGFILE = os.path.join(DATA_DIR, "rapidbay_errors.log")
-if not DOWNLOAD_DIR:
-    DOWNLOAD_DIR = os.path.join(DATA_DIR, "downloads") + "/"
-if not FILELIST_DIR:
-    FILELIST_DIR = os.path.join(DATA_DIR, "filelists") + "/"
-if not TORRENTS_DIR:
-    TORRENTS_DIR = os.path.join(DATA_DIR, "torrents") + "/"
-if not OUTPUT_DIR:
-    OUTPUT_DIR = os.path.join(DATA_DIR, "output") + "/"
+# Load path overrides from environment
+_data_dir = os.getenv("DATA_DIR", _data_dir)
+_cache_dir = os.getenv("CACHE_DIR", _cache_dir)
+_logfile = os.getenv("LOGFILE", _logfile)
+_download_dir = os.getenv("DOWNLOAD_DIR", _download_dir)
+_filelist_dir = os.getenv("FILELIST_DIR", _filelist_dir)
+_torrents_dir = os.getenv("TORRENTS_DIR", _torrents_dir)
+_output_dir = os.getenv("OUTPUT_DIR", _output_dir)
+_frontend_dir = os.getenv("FRONTEND_DIR", _frontend_dir)
+_kodi_addon_dir = os.getenv("KODI_ADDON_DIR", _kodi_addon_dir)
+
+# Compute final path constants (assigned once)
+DATA_DIR: str = _data_dir
+CACHE_DIR: str = _cache_dir if _cache_dir else os.path.join(_data_dir, "cache")
+LOGFILE: str = _logfile if _logfile else os.path.join(_data_dir, "rapidbay_errors.log")
+DOWNLOAD_DIR: str = _download_dir if _download_dir else os.path.join(_data_dir, "downloads") + "/"
+FILELIST_DIR: str = _filelist_dir if _filelist_dir else os.path.join(_data_dir, "filelists") + "/"
+TORRENTS_DIR: str = _torrents_dir if _torrents_dir else os.path.join(_data_dir, "torrents") + "/"
+OUTPUT_DIR: str = _output_dir if _output_dir else os.path.join(_data_dir, "output") + "/"
+FRONTEND_DIR: str = _frontend_dir
+KODI_ADDON_DIR: str = _kodi_addon_dir

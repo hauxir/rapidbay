@@ -115,6 +115,8 @@ executionEnvironments = [
 stubPath = "stubs"
 include = ["app", "stubs"]
 useLibraryCodeForTypes = true
+venvPath = "."
+venv = "venv"
 
 [tool.ruff]
 # Ruff configuration

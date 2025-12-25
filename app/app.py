@@ -222,7 +222,7 @@ def torrent_url_to_magnet(url: Optional[str] = Form(default=None), _: None = Dep
 def magnet_info(magnet_link: Optional[str] = Form(default=None), _: None = Depends(authorize)) -> Dict[str, str]:
     magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
     if not _get_files(magnet_hash):
-        daemon.fetch_filelist_from_link(magnet_link)  # type: ignore
+        daemon.fetch_filelist_from_link(magnet_link)
     return {"magnet_hash": magnet_hash}
 
 
@@ -232,9 +232,11 @@ def magnet_download(
     filename: Optional[str] = Form(default=None),
     _: None = Depends(authorize)
 ) -> Dict[str, str]:
-    magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
-    if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:  # type: ignore
-        daemon.download_file(magnet_link, filename)  # type: ignore
+    if not magnet_link or not filename:
+        raise HTTPException(status_code=400, detail="magnet_link and filename required")
+    magnet_hash: str = torrent.get_hash(magnet_link)
+    if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:
+        daemon.download_file(magnet_link, filename)
     return {"magnet_hash": magnet_hash}
 
 

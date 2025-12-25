@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 # RAPIDBAY
 PASSWORD: Optional[str] = None
 AUTO_PLAY_NEXT_FILE: bool = True
-DEV_MODE: bool = False  # Set to True to run without nginx/docker
+STANDALONE: bool = False  # Set to True to run without Docker/nginx
 
 # PATHS - Placeholder values, will be set after env var loading
 _data_dir: str = ""
@@ -77,12 +77,12 @@ _frontend_dir = os.getenv("FRONTEND_DIR", "")
 _kodi_addon_dir = os.getenv("KODI_ADDON_DIR", "")
 
 # Compute final path values (only assigned once)
-DATA_DIR: str = _data_dir if _data_dir else ("./data" if DEV_MODE else "/tmp")
+DATA_DIR: str = _data_dir if _data_dir else ("./data" if STANDALONE else "/tmp")
 CACHE_DIR: str = _cache_dir if _cache_dir else os.path.join(DATA_DIR, "cache")
 LOGFILE: str = _logfile if _logfile else os.path.join(DATA_DIR, "rapidbay_errors.log")
 DOWNLOAD_DIR: str = _download_dir if _download_dir else os.path.join(DATA_DIR, "downloads") + "/"
 FILELIST_DIR: str = _filelist_dir if _filelist_dir else os.path.join(DATA_DIR, "filelists") + "/"
 TORRENTS_DIR: str = _torrents_dir if _torrents_dir else os.path.join(DATA_DIR, "torrents") + "/"
 OUTPUT_DIR: str = _output_dir if _output_dir else os.path.join(DATA_DIR, "output") + "/"
-FRONTEND_DIR: str = _frontend_dir if _frontend_dir else ("./app/frontend" if DEV_MODE else "/app/frontend")
-KODI_ADDON_DIR: str = _kodi_addon_dir if _kodi_addon_dir else ("./app/kodi.addon" if DEV_MODE else "/app/kodi.addon")
+FRONTEND_DIR: str = _frontend_dir if _frontend_dir else ("./app/frontend" if STANDALONE else "/app/frontend")
+KODI_ADDON_DIR: str = _kodi_addon_dir if _kodi_addon_dir else ("./app/kodi.addon" if STANDALONE else "/app/kodi.addon")

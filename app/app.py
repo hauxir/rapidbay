@@ -26,7 +26,7 @@ daemon: DaemonClient = DaemonClient()
 
 
 class HeaderMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
+    async def dispatch(self, request: Request, call_next: Any) -> Response:  # type: ignore[override]
         response: Response = await call_next(request)
         # Move set-cookie header to x-set-cookie header
         set_cookie = response.headers.get("set-cookie")

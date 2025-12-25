@@ -141,22 +141,6 @@ def _send_from_directory(directory: str, filename: str, last_modified: Optional[
     return FileResponse(filepath, headers=headers)
 
 
-@app.get("/{path:path}")
-def frontend(path: str, password: Optional[str] = Cookie(default=None)) -> Response:
-    if path == "":
-        path = "index.html"
-    if not path.startswith("index.html"):
-        try:
-            filepath = os.path.join(settings.FRONTEND_DIR, path)
-            if os.path.isfile(filepath):
-                return FileResponse(filepath)
-        except Exception:
-            pass
-    if not settings.PASSWORD or password == settings.PASSWORD:
-        return _send_from_directory(settings.FRONTEND_DIR, "index.html", last_modified=datetime.datetime.now())
-    return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())
-
-
 @app.post("/api")
 def login(password: Optional[str] = Form(default=None)) -> Response:
     if not password:
@@ -344,3 +328,31 @@ def kodi_repo(request: Request, path: str = "") -> Response:
         status_code=401,
         headers={"WWW-Authenticate": 'Basic realm="Login Required"'}
     )
+
+
+@app.get("/play/{magnet_hash}/{filename:path}")
+def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Response:
+    directory = os.path.join(settings.OUTPUT_DIR, magnet_hash)
+    filepath = os.path.join(directory, filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+    response = FileResponse(filepath)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+
+# Catch-all route for frontend - MUST be defined last
+@app.get("/{path:path}")
+def frontend(path: str, password: Optional[str] = Cookie(default=None)) -> Response:
+    if path == "":
+        path = "index.html"
+    if not path.startswith("index.html"):
+        try:
+            filepath = os.path.join(settings.FRONTEND_DIR, path)
+            if os.path.isfile(filepath):
+                return FileResponse(filepath)
+        except Exception:
+            pass
+    if not settings.PASSWORD or password == settings.PASSWORD:
+        return _send_from_directory(settings.FRONTEND_DIR, "index.html", last_modified=datetime.datetime.now())
+    return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())

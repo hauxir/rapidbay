@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "Rapidbay"
 version = "1.0.0"
 license = "MIT"
+requires-python = ">=3.8"
 dependencies = [
     "aiohttp==3.9.5",
     "bencodepy==0.9.5",
@@ -108,15 +109,13 @@ reportMissingImports = "none"  # Matches ignore_missing_imports = True for exter
 
 # Execution environment
 executionEnvironments = [
-    { root = "app", pythonVersion = "3.8", extraPaths = [".", "venv/src/python-opensubtitles"] }
+    { root = "app", pythonVersion = "3.8", extraPaths = ["."] }
 ]
 
 # Additional configuration for handling imports
 stubPath = "stubs"
 include = ["app", "stubs"]
 useLibraryCodeForTypes = true
-venvPath = "."
-venv = "venv"
 
 [tool.ruff]
 # Ruff configuration

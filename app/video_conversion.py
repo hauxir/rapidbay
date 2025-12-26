@@ -152,7 +152,8 @@ def get_conversion_progress(filepath: str) -> float:
 
 
 class VideoConverter:
-    file_conversions: Dict[str, bool] = {}
+    def __init__(self) -> None:
+        self.file_conversions: Dict[str, bool] = {}
 
     @threaded
     @log.catch_and_log_exceptions

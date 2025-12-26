@@ -126,9 +126,8 @@ class SubtitleDownloadStatus:
 
 
 class RapidBayDaemon:
-    subtitle_downloads: Dict[str, str] = {}
-
     def __init__(self) -> None:
+        self.subtitle_downloads: Dict[str, str] = {}
         self.torrent_client: torrent.TorrentClient = torrent.TorrentClient(
             listening_port=settings.TORRENT_LISTENING_PORT,
             dht_routers=settings.DHT_ROUTERS,

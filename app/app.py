@@ -292,8 +292,8 @@ def kodi_repo(request: Request, path: str = "") -> Response:
             decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
             if ":" in decoded:
                 password = decoded.split(":", 1)[1]
-        except Exception:
-            pass
+        except (ValueError, UnicodeDecodeError):
+            pass  # Invalid base64 or encoding - treat as no auth
 
     if not settings.PASSWORD or password == settings.PASSWORD:
         zip_filename: str = "rapidbay.zip"
@@ -347,12 +347,9 @@ def frontend(path: str, password: Optional[str] = Cookie(default=None)) -> Respo
     if path == "":
         path = "index.html"
     if not path.startswith("index.html"):
-        try:
-            filepath = os.path.join(settings.FRONTEND_DIR, path)
-            if os.path.isfile(filepath):
-                return FileResponse(filepath)
-        except Exception:
-            pass
+        filepath = os.path.join(settings.FRONTEND_DIR, path)
+        if os.path.isfile(filepath):
+            return FileResponse(filepath)
     if not settings.PASSWORD or password == settings.PASSWORD:
         return _send_from_directory(settings.FRONTEND_DIR, "index.html", last_modified=datetime.datetime.now())
     return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())

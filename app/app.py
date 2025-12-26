@@ -241,6 +241,8 @@ def login(password: Optional[str] = Form(default=None)) -> Response:
 def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
     if settings.JACKETT_HOST:
         results: List[Dict[str, Any]] = jackett.search(searchterm)
+        # Filter out results without magnet links
+        results = [r for r in results if r.get("magnet")]
     else:
         results = [
             {

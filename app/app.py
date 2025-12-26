@@ -33,7 +33,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app: FastAPI = FastAPI(lifespan=lifespan)
+app: FastAPI = FastAPI(
+    lifespan=lifespan,
+    servers=[{"url": "/", "description": "Current server"}],
+)
 
 
 class HeaderMiddleware(BaseHTTPMiddleware):

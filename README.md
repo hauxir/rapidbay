@@ -32,10 +32,48 @@ There's also a [docker-compose example](https://github.com/hauxir/rapidbay/blob/
 
 ## Running:
 
-Requires Docker
+### With Docker (recommended)
 
 ```
 docker run -p 5000:5000 -e JACKETT_HOST="http://your.jacket.host" -e JACKETT_API_KEY="YourAPIKey" hauxir/rapidbay
+```
+
+### Without Docker
+
+**System dependencies:**
+
+```bash
+# Ubuntu/Debian
+sudo apt install python3 python3-venv ffmpeg mediainfo nginx
+
+# macOS
+brew install python ffmpeg mediainfo nginx
+```
+
+**Optional:** Install [alass](https://github.com/kaegi/alass/releases) for subtitle synchronization.
+
+**Install Python dependencies:**
+
+```bash
+# Using uv (recommended)
+uv sync
+
+# Or using pip
+python3 -m venv .venv
+source .venv/bin/activate
+pip install .
+```
+
+**Run the app:**
+
+```bash
+# Set environment variables
+export JACKETT_HOST="http://your.jacket.host"
+export JACKETT_API_KEY="YourAPIKey"
+
+# Run directly (without nginx)
+cd app
+uvicorn app:app --host 0.0.0.0 --port 5000 --workers 1 --timeout-keep-alive 900
 ```
 
 App will be running at http://localhost:5000

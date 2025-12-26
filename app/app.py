@@ -19,8 +19,57 @@ from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from starlette.middleware.base import BaseHTTPMiddleware
+
+
+# Response models for OpenAPI schema
+class SearchResult(BaseModel):
+    title: str
+    seeds: int
+    magnet: str
+
+
+class SearchResponse(BaseModel):
+    results: List[SearchResult]
+
+
+class MagnetLinkResponse(BaseModel):
+    magnet_link: Optional[str]
+
+
+class MagnetHashResponse(BaseModel):
+    magnet_hash: str
+
+
+class FileStatusResponse(BaseModel):
+    status: str
+    filename: Optional[str] = None
+    subtitles: Optional[List[str]] = None
+    supported: Optional[bool] = None
+    progress: Optional[float] = None
+    peers: Optional[int] = None
+
+
+class NextFileResponse(BaseModel):
+    next_filename: Optional[str]
+
+
+class FilesResponse(BaseModel):
+    files: Optional[List[str]]
+
+
+class StatusResponse(BaseModel):
+    output_dir: Any
+    filelist_dir: Any
+    torrents_dir: Any
+    downloads_dir: Any
+    subtitle_downloads: Any
+    torrent_downloads: Any
+    session_torrents: List[str]
+    conversions: Any
+    http_downloads: Any
 
 # Global daemon instance
 daemon: RapidBayDaemon
@@ -178,8 +227,8 @@ def login(password: Optional[str] = Form(default=None)) -> Response:
     return response
 
 
-@app.get("/api/search/")
-@app.get("/api/search/{searchterm}")
+@app.get("/api/search/", response_model=SearchResponse)
+@app.get("/api/search/{searchterm}", response_model=SearchResponse)
 def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
     if settings.JACKETT_HOST:
         results: List[Dict[str, Any]] = jackett.search(searchterm)
@@ -223,13 +272,13 @@ def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
     return magnet_link
 
 
-@app.post("/api/torrent_url_to_magnet/")
+@app.post("/api/torrent_url_to_magnet/", response_model=MagnetLinkResponse)
 def torrent_url_to_magnet(url: Optional[str] = Form(default=None), _: None = Depends(authorize)) -> Dict[str, Any]:
     magnet_link: Optional[str] = _torrent_url_to_magnet(url)  # type: ignore
     return {"magnet_link": magnet_link}
 
 
-@app.post("/api/magnet_files/")
+@app.post("/api/magnet_files/", response_model=MagnetHashResponse)
 def magnet_info(magnet_link: Optional[str] = Form(default=None), _: None = Depends(authorize)) -> Dict[str, str]:
     magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
     if not _get_files(magnet_hash):
@@ -237,7 +286,7 @@ def magnet_info(magnet_link: Optional[str] = Form(default=None), _: None = Depen
     return {"magnet_hash": magnet_hash}
 
 
-@app.post("/api/magnet_download/")
+@app.post("/api/magnet_download/", response_model=MagnetHashResponse)
 def magnet_download(
     magnet_link: Optional[str] = Form(default=None),
     filename: Optional[str] = Form(default=None),
@@ -251,12 +300,12 @@ def magnet_download(
     return {"magnet_hash": magnet_hash}
 
 
-@app.get("/api/magnet/{magnet_hash}/{filename}")
+@app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
 def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
     return daemon.get_file_status(magnet_hash, filename)
 
 
-@app.get("/api/next_file/{magnet_hash}/{filename}")
+@app.get("/api/next_file/{magnet_hash}/{filename}", response_model=NextFileResponse)
 def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Optional[str]]:
     next_filename: Optional[str] = None
     if settings.AUTO_PLAY_NEXT_FILE:
@@ -272,7 +321,7 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
     return {"next_filename": next_filename}
 
 
-@app.get("/api/magnet/{magnet_hash}/")
+@app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)
 def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Optional[List[str]]]:
     files_list: Optional[List[str]] = _get_files(magnet_hash)
 
@@ -291,7 +340,7 @@ def errorlog(_: None = Depends(authorize)) -> PlainTextResponse:
     return PlainTextResponse(data)
 
 
-@app.get("/api/status")
+@app.get("/api/status", response_model=StatusResponse)
 def status(_: None = Depends(authorize)) -> Dict[str, Any]:
     return {
         "output_dir": path_hierarchy(settings.OUTPUT_DIR),

@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import random
+import shlex
 import string
 import subprocess
 import urllib.parse
@@ -383,7 +384,7 @@ def kodi_repo(request: Request, path: str = "") -> Response:
                 json.dump(creds, f)
             filehash: str = (
                 subprocess.Popen(
-                    f"find {settings.KODI_ADDON_DIR} -type f -exec shasum {{}} \\; | shasum | head -c 8",
+                    f"find {shlex.quote(settings.KODI_ADDON_DIR)} -type f -exec shasum {{}} \\; | shasum | head -c 8",
                     stdout=subprocess.PIPE,
                     shell=True,
                 )
@@ -395,7 +396,7 @@ def kodi_repo(request: Request, path: str = "") -> Response:
             if not os.path.exists(zip_path):
                 kodi_parent = os.path.dirname(settings.KODI_ADDON_DIR)
                 kodi_name = os.path.basename(settings.KODI_ADDON_DIR)
-                os.system(f"cd {kodi_parent}; zip -r {zip_path} {kodi_name}")
+                os.system(f"cd {shlex.quote(kodi_parent)}; zip -r {shlex.quote(zip_path)} {shlex.quote(kodi_name)}")
             return _send_from_directory(settings.DATA_DIR, filename, last_modified=datetime.datetime.now())
         return HTMLResponse(
             f"""<!DOCTYPE html>
@@ -411,8 +412,10 @@ def kodi_repo(request: Request, path: str = "") -> Response:
 
 @app.get("/play/{magnet_hash}/{filename:path}")
 def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Response:
-    directory = os.path.join(settings.OUTPUT_DIR, magnet_hash)
-    filepath = os.path.join(directory, filename)
+    directory = os.path.realpath(os.path.join(settings.OUTPUT_DIR, magnet_hash))
+    filepath = os.path.realpath(os.path.join(directory, filename))
+    if not filepath.startswith(directory + os.sep):
+        raise HTTPException(status_code=404, detail="File not found")
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="File not found")
     response = FileResponse(filepath)

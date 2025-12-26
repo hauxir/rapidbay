@@ -41,11 +41,12 @@ app: FastAPI = FastAPI(lifespan=lifespan, openapi_url=None)
 def custom_openapi(request: Request) -> Dict[str, Any]:
     from fastapi.openapi.utils import get_openapi
 
+    host = settings.OPENAPI_HOST or str(request.base_url).rstrip("/")
     return get_openapi(
         title="RapidBay",
         version="1.0.0",
         routes=app.routes,
-        servers=[{"url": str(request.base_url).rstrip("/"), "description": "RapidBay API"}],
+        servers=[{"url": host, "description": "RapidBay API"}],
     )
 
 

@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 # RAPIDBAY
 PASSWORD: Optional[str] = None
 AUTO_PLAY_NEXT_FILE: bool = True
+OPENAPI_HOST: Optional[str] = None
 
 # PATHS - temp values, final constants computed below
 _data_dir: str = "./data"

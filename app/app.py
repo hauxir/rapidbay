@@ -369,7 +369,7 @@ def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Respo
 
 
 # Catch-all route for frontend - MUST be defined last
-@app.get("/{path:path}")
+@app.get("/{path:path}", include_in_schema=False)
 def frontend(path: str, password: Optional[str] = Cookie(default=None)) -> Response:
     if path == "":
         path = "index.html"

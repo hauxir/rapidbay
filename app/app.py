@@ -194,7 +194,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def authorize(
     credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer_scheme)],
-    password: Annotated[Optional[str], Cookie(default=None, include_in_schema=False)],
+    password: Annotated[Optional[str], Cookie(include_in_schema=False)] = None,
 ) -> None:
     if not settings.PASSWORD:
         return

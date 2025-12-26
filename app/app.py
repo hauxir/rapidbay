@@ -185,6 +185,11 @@ def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
 
+@app.get("/health")
+def health() -> Dict[str, bool]:
+    return {"ok": daemon.thread.is_alive()}
+
+
 @app.get("/robots.txt")
 def robots() -> PlainTextResponse:
     return PlainTextResponse(

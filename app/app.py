@@ -18,6 +18,7 @@ import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -33,10 +34,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app: FastAPI = FastAPI(
-    lifespan=lifespan,
-    servers=[{"url": "/", "description": "Current server"}],
-)
+app: FastAPI = FastAPI(lifespan=lifespan, openapi_url=None)
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def custom_openapi(request: Request) -> Dict[str, Any]:
+    from fastapi.openapi.utils import get_openapi
+
+    return get_openapi(
+        title="RapidBay",
+        version="1.0.0",
+        routes=app.routes,
+        servers=[{"url": str(request.base_url).rstrip("/"), "description": "RapidBay API"}],
+    )
 
 
 class HeaderMiddleware(BaseHTTPMiddleware):
@@ -129,9 +139,22 @@ Disallow: /""",
     )
 
 
-def authorize(password: Optional[str] = Cookie(default=None)) -> None:
-    if settings.PASSWORD and password != settings.PASSWORD:
-        raise HTTPException(status_code=404)
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def authorize(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    password: Optional[str] = Cookie(default=None, include_in_schema=False),
+) -> None:
+    if not settings.PASSWORD:
+        return
+    # Check Bearer token first
+    if credentials and credentials.credentials == settings.PASSWORD:
+        return
+    # Fall back to cookie
+    if password == settings.PASSWORD:
+        return
+    raise HTTPException(status_code=404)
 
 
 def _send_from_directory(directory: str, filename: str, last_modified: Optional[datetime.datetime] = None) -> FileResponse:

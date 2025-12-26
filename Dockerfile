@@ -53,7 +53,6 @@ EXPOSE 6881/udp
 EXPOSE 5000
 
 COPY app /app
-COPY run.sh /app/run.sh
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 WORKDIR /app
 

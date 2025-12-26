@@ -7,7 +7,7 @@ import string
 import subprocess
 import urllib.parse
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Dict, List, Optional, Union
+from typing import Annotated, Any, AsyncIterator, Dict, List, Optional, Union
 
 import http_cache
 import jackett
@@ -193,8 +193,8 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def authorize(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-    password: Optional[str] = Cookie(default=None, include_in_schema=False),
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer_scheme)],
+    password: Annotated[Optional[str], Cookie(default=None, include_in_schema=False)],
 ) -> None:
     if not settings.PASSWORD:
         return

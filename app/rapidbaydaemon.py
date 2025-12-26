@@ -422,6 +422,5 @@ class RapidBayDaemon:
             os._exit(1)
 
     def _loop(self) -> None:
-        while not self._stop_event.is_set():
+        while not self._stop_event.wait(timeout=1):
             self._heartbeat()
-            time.sleep(1)

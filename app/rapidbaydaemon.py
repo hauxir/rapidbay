@@ -3,7 +3,7 @@ import json
 import os
 import shutil
 import time
-from threading import Thread
+from threading import Event, Thread
 from typing import Any, Dict, List, Optional
 
 import http_cache
@@ -136,12 +136,17 @@ class RapidBayDaemon:
             torrents_dir=settings.TORRENTS_DIR,
         )
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
+        self._stop_event: Event = Event()
         self.thread: Thread = Thread(target=self._loop_wrapper, args=())
         self.thread.daemon = True
         self.http_downloader: HttpDownloader = HttpDownloader()
 
     def start(self) -> None:
         self.thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.thread.join(timeout=5.0)
 
     def downloads(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         result: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -412,10 +417,11 @@ class RapidBayDaemon:
             print("Stack trace:", flush=True)
             traceback.print_exc()
             os._exit(1)
-        print("FATAL: Daemon thread exited unexpectedly", flush=True)
-        os._exit(1)
+        if not self._stop_event.is_set():
+            print("FATAL: Daemon thread exited unexpectedly", flush=True)
+            os._exit(1)
 
     def _loop(self) -> None:
-        while True:
+        while not self._stop_event.is_set():
             self._heartbeat()
             time.sleep(1)

@@ -80,7 +80,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global daemon
     daemon = RapidBayDaemon()
     daemon.start()
-    yield
+    try:
+        yield
+    finally:
+        daemon.stop()
 
 
 app: FastAPI = FastAPI(lifespan=lifespan, openapi_url=None)

@@ -53,7 +53,10 @@ EXPOSE 6881/udp
 EXPOSE 5000
 
 COPY app /app
+COPY run.sh /run.sh
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-WORKDIR /app
+WORKDIR /
 
-CMD bash entrypoint.sh
+ENV USE_NGINX=1 DATA_DIR=/tmp FRONTEND_DIR=/app/frontend KODI_ADDON_DIR=/app/kodi.addon
+
+CMD ["./run.sh"]

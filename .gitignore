@@ -6,3 +6,5 @@ creds.json
 # UV cache
 .uv-cache/
 .venv/
+# Dev mode data directory
+data/

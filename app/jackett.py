@@ -17,7 +17,7 @@ API_KEY = settings.JACKETT_API_KEY
 
 @memoize(3600)
 def get_indexers() -> List[str]:
-    cache_dir = "/tmp/cache/jackett"
+    cache_dir = os.path.join(settings.CACHE_DIR, "jackett")
 
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
@@ -35,8 +35,8 @@ async def fetch_json(session: aiohttp.ClientSession, url: str) -> Dict[str, Any]
     try:
         async with session.get(url) as response:
             return await response.json()
-    except Exception:
-        return {}
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return {}  # Network or timeout error - return empty results
 
 
 async def fetch_all(urls: List[str]) -> List[Dict[str, Any]]:
@@ -73,21 +73,16 @@ def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
         pattern = re.compile(r"\s(s\d\d)(e\d\d)?")
         season = None
         episode = None
-        try:
-            season = pattern.search(searchterm.lower())[1]  # type: ignore
-            episode = pattern.search(searchterm.lower())[2]  # type: ignore
-        except Exception:
-            pass
+        match = pattern.search(searchterm.lower())
+        if match:
+            season = match.group(1)
+            episode = match.group(2)
 
         if season and (episode is None):
 
             def sort_by_only_season(x: Dict[str, Any]) -> int:
-                pattern = re.compile(r"([e|E]\d\d)")
-                try:
-                    pattern.search(x.get("Title", ""))[0]  # type: ignore
-                    return 0
-                except Exception:
-                    return 1
+                episode_pattern = re.compile(r"[eE]\d\d")
+                return 0 if episode_pattern.search(x.get("Title", "")) else 1
 
             results = sorted(results, key=sort_by_only_season, reverse=True)
 
@@ -118,6 +113,7 @@ def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
                         "published": parse(published) if published else None,
                     }
                 )
-    except Exception:
+    except (requests.RequestException, aiohttp.ClientError, KeyError, ValueError) as e:
         log.write_log()
+        log.debug(f"Search failed: {e}")
     return magnet_links

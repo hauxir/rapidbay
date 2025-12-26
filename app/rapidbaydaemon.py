@@ -3,62 +3,18 @@ import json
 import os
 import shutil
 import time
-from threading import Thread
+from threading import Event, Thread
 from typing import Any, Dict, List, Optional
 
 import http_cache
 import log
-import requests_unixsocket
 import settings
 import subtitles
 import torrent
 import video_conversion
 from common import threaded
-from flask import Flask, Response, jsonify, request
 from http_downloader import HttpDownloader
 from subtitles import get_subtitle_language
-
-daemon: 'RapidBayDaemon'
-
-class DaemonClient:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.session: requests_unixsocket.Session = requests_unixsocket.Session()
-
-    def _get(self, path: str) -> Any:
-        return self.session.get("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path).json()
-
-    def _post(self, path: str, data: Dict[str, Any]) -> Any:
-        return self.session.post("http+unix://" + "%2Fapp%2Frapidbaydaemon.sock" + path, json=data).json()
-
-    def save_torrent_file(self, filepath: str) -> Dict[str, Any]:
-        return self._post("/save_torrent_file", {'filepath': filepath})
-
-    def fetch_filelist_from_link(self, magnet_link: str) -> Dict[str, Any]:
-        return self._post("/fetch_filelist_from_link", {'magnet_link': magnet_link})
-
-    def download_file(self, magnet_link: str, filename: str) -> Dict[str, Any]:
-        return self._post("/download_file", {'magnet_link': magnet_link, 'filename': filename})
-
-    def get_file_status(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
-        return self._get(f"/get_file_status/{magnet_hash}/{filename}")
-
-    def downloads(self) -> Dict[str, Any]:
-        return self._get("/downloads")
-
-    def subtitle_downloads(self) -> Dict[str, Any]:
-        return self._get("/subtitle_downloads")
-
-    def session_torrents(self) -> Dict[str, Any]:
-        return self._get("/session_torrents")
-
-    def file_conversions(self) -> Dict[str, Any]:
-        return self._get("/file_conversions")
-
-    def http_downloads(self) -> Dict[str, Any]:
-        return self._get("/http_downloads")
-
-
-app: Flask = Flask(__name__)
 
 
 def get_filepaths(magnet_hash: str) -> Optional[List[str]]:
@@ -170,9 +126,8 @@ class SubtitleDownloadStatus:
 
 
 class RapidBayDaemon:
-    subtitle_downloads: Dict[str, str] = {}
-
     def __init__(self) -> None:
+        self.subtitle_downloads: Dict[str, str] = {}
         self.torrent_client: torrent.TorrentClient = torrent.TorrentClient(
             listening_port=settings.TORRENT_LISTENING_PORT,
             dht_routers=settings.DHT_ROUTERS,
@@ -181,12 +136,17 @@ class RapidBayDaemon:
             torrents_dir=settings.TORRENTS_DIR,
         )
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
+        self._stop_event: Event = Event()
         self.thread: Thread = Thread(target=self._loop_wrapper, args=())
         self.thread.daemon = True
         self.http_downloader: HttpDownloader = HttpDownloader()
 
     def start(self) -> None:
         self.thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.thread.join(timeout=5.0)
 
     def downloads(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         result: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -457,81 +417,10 @@ class RapidBayDaemon:
             print("Stack trace:", flush=True)
             traceback.print_exc()
             os._exit(1)
-        print("FATAL: Daemon thread exited unexpectedly", flush=True)
-        os._exit(1)
+        if not self._stop_event.is_set():
+            print("FATAL: Daemon thread exited unexpectedly", flush=True)
+            os._exit(1)
 
     def _loop(self) -> None:
-        while True:
+        while not self._stop_event.wait(timeout=1):
             self._heartbeat()
-            time.sleep(1)
-
-
-def start() -> None:
-    global daemon
-    daemon = RapidBayDaemon()
-    daemon.start()
-
-
-@app.route("/save_torrent_file", methods=["POST"])
-def save_torrent_file_route() -> Response:
-    filepath: str | None = request.json.get("filepath") if request.json else None  # type: ignore
-    if filepath:
-        daemon.save_torrent_file(filepath)
-    return jsonify({})
-
-
-@app.route("/fetch_filelist_from_link", methods=["POST"])
-def fetch_filelist_from_link_route() -> Response:
-    magnet_link: str | None = request.json.get("magnet_link") if request.json else None  # type: ignore
-    if magnet_link:
-        daemon.fetch_filelist_from_link(magnet_link)
-    return jsonify({})
-
-
-@app.route("/download_file", methods=["POST"])
-def download_file_route() -> Response:
-    magnet_link: str | None = request.json.get("magnet_link") if request.json else None  # type: ignore
-    filename: str | None = request.json.get("filename") if request.json else None  # type: ignore
-    if magnet_link and filename:
-        daemon.download_file(magnet_link, filename)
-    return jsonify({})
-
-
-@app.route("/get_file_status/<string:magnet_hash>/<string:filename>")
-def get_file_status_route(magnet_hash: str, filename: str) -> Response:
-    response = daemon.get_file_status(magnet_hash, filename)
-    return jsonify(**response)
-
-
-@app.route("/downloads")
-def downloads_route() -> Response:
-    response = daemon.downloads()
-    return jsonify(**response)
-
-
-@app.route("/subtitle_downloads")
-def subtitle_downloads_route() -> Response:
-    response = daemon.subtitle_downloads
-    return jsonify(**response)
-
-
-@app.route("/session_torrents")
-def session_torrents_route() -> Response:
-    response = daemon.session_torrents()
-    return jsonify(response)
-
-
-@app.route("/file_conversions")
-def file_conversions_route() -> Response:
-    response = daemon.video_converter.file_conversions
-    return jsonify(**response)
-
-
-@app.route("/http_downloads")
-def http_downloads_route() -> Response:
-    response = daemon.http_downloader.downloads
-    return jsonify(**response)
-
-
-with app.app_context():
-    start()

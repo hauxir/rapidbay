@@ -54,6 +54,7 @@ EXPOSE 5000
 
 COPY app /app
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN chmod +x /app/run.sh
 WORKDIR /app
 
 ENV USE_NGINX=1 DATA_DIR=/tmp FRONTEND_DIR=/app/frontend KODI_ADDON_DIR=/app/kodi.addon

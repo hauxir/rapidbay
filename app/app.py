@@ -29,7 +29,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 class SearchResult(BaseModel):
     title: str
     seeds: int
-    magnet: str
+    magnet: Optional[str]
+    torrent_link: Optional[str] = None
 
 
 class SearchResponse(BaseModel):

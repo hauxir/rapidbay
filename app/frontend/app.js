@@ -141,8 +141,8 @@
             return t.toLowerCase() !== term.toLowerCase();
         });
         history.unshift(term);
-        if (history.length > 5) {
-            history = history.slice(0, 5);
+        if (history.length > 4) {
+            history = history.slice(0, 4);
         }
         localStorage.setItem("searchHistory", JSON.stringify(history));
     }

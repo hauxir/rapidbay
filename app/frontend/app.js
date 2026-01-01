@@ -705,7 +705,7 @@
                 var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
                 var isHistoryItem = document.activeElement && document.activeElement.closest(".search-history");
                 var isInput = document.activeElement && document.activeElement.tagName === "INPUT";
-                if (lowername === "enter" && isInput) {
+                if (isInput && (lowername === "enter" || lowername === "go" || e.keyCode === 13)) {
                     self.allowSubmit = true;
                 } else if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
                     e.preventDefault();

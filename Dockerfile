@@ -21,11 +21,12 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Copy dependency files first (for caching)
 COPY pyproject.toml uv.lock .python-version ./
 
-# Install Python dependencies using UV
-RUN uv sync --frozen --no-cache --no-dev
+# Install Python dependencies (without local package)
+RUN uv sync --frozen --no-cache --no-dev --no-install-project
 
-# Copy app code after dependencies are installed
+# Copy app code and install local package
 COPY app ./app
+RUN uv sync --frozen --no-cache --no-dev
 
 # Runtime stage
 FROM ubuntu:24.04

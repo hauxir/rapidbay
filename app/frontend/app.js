@@ -645,7 +645,7 @@
                 var onmouseover = document.body.onmouseover;
                 document.body.onmouseover = null;
                 var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
-                if (lowername === "enter") {
+                if (lowername === "enter" && isTopbarButton) {
                     e.preventDefault();
                     document.activeElement.click();
                 } else if (lowername === "arrowdown") {

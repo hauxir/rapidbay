@@ -31,6 +31,7 @@ class SearchResult(BaseModel):
     seeds: int
     magnet: Optional[str]
     torrent_link: Optional[str] = None
+    status: Optional[str] = None  # "downloading", "downloaded", or None
 
 
 class SearchResponse(BaseModel):
@@ -237,6 +238,35 @@ def login(password: Optional[str] = Form(default=None)) -> Response:
     return response
 
 
+def _get_download_status_maps() -> tuple[set[str], set[str]]:
+    """Returns (downloading_hashes, output_hashes)"""
+    downloading: set[str] = set(h.lower() for h in daemon.torrent_client.torrents.keys())
+    output: set[str] = set()
+    try:
+        for name in os.listdir(settings.OUTPUT_DIR):
+            path = os.path.join(settings.OUTPUT_DIR, name)
+            if os.path.isdir(path) and len(name) >= 32:
+                output.add(name.lower())
+    except OSError:
+        pass
+    return downloading, output
+
+
+def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    downloading, output = _get_download_status_maps()
+    for r in results:
+        magnet = r.get("magnet")
+        if magnet:
+            magnet_hash = torrent.get_hash(magnet).lower()
+            is_downloading = magnet_hash in downloading
+            has_output = magnet_hash in output
+            if has_output:
+                r["status"] = "downloaded"
+            elif is_downloading:
+                r["status"] = "downloading"
+    return results
+
+
 @app.get("/api/search/", response_model=SearchResponse)
 @app.get("/api/search/{searchterm}", response_model=SearchResponse)
 def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
@@ -261,8 +291,8 @@ def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]
     rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
 
     if searchterm == "":
-        return {"results": _weighted_sort_date_seeds(filtered_results) + rest}
-    return {"results": filtered_results + rest}
+        return {"results": _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)}
+    return {"results": _add_status_to_results(filtered_results + rest)}
 
 
 def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:

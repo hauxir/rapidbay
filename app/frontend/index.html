@@ -87,7 +87,7 @@
                               v-for="result in results"
                               @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
                               >
-                                  <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')">{{ result.title}}</td>
+                                  <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title}}</td>
                               </tr>
                           </tbody>
                       </table>

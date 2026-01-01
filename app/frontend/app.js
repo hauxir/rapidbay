@@ -400,7 +400,6 @@
                     event.preventDefault();
                     event.stopPropagation();
                     video.currentTime += 60;
-                    self.mousemove_listener();
                 } else if (
                     event.key.toLowerCase() === "arrowleft" &&
                     videoSelected
@@ -408,7 +407,6 @@
                     event.preventDefault();
                     event.stopPropagation();
                     video.currentTime -= 15;
-                    self.mousemove_listener();
                 } else if (
                     event.key.toLowerCase() === "enter" &&
                     videoSelected
@@ -420,15 +418,14 @@
                     } else {
                         video.play();
                     }
-                    self.mousemove_listener();
                 } else if (
                     event.key.toLowerCase() === "mediarewind" &&
                     videoSelected
                 ) {
                     location.href = document.querySelector("video").src;
-                } else {
-                    self.mousemove_listener();
                 }
+                // Always reset hide timer on any key
+                self.mousemove_listener();
             };
 
             document.addEventListener("keydown", this.videokeylistener, true);

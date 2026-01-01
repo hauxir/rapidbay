@@ -18,12 +18,14 @@ RUN wget https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 -
 # Install UV
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy project files
+# Copy dependency files first (for caching)
 COPY pyproject.toml uv.lock .python-version ./
-COPY app ./app
 
 # Install Python dependencies using UV
 RUN uv sync --frozen --no-cache --no-dev
+
+# Copy app code after dependencies are installed
+COPY app ./app
 
 # Runtime stage
 FROM ubuntu:24.04

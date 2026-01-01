@@ -418,6 +418,7 @@
                     } else {
                         video.play();
                     }
+                    self.mousemove_listener();
                 } else if (
                     event.key.toLowerCase() === "mediarewind" &&
                     videoSelected

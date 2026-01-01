@@ -438,7 +438,7 @@
             this.mousemove_listener = function () {
                 self.hovering = true;
                 clearTimeout(timeout);
-                timeout = rbsetTimeout(function () {
+                timeout = setTimeout(function () {
                     self.hovering = false;
                 }, duration);
             };

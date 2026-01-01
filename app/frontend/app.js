@@ -125,6 +125,10 @@
         return JSON.parse(localStorage.getItem("downloadHistory") || "[]");
     }
 
+    function clearHistory() {
+        localStorage.removeItem("downloadHistory");
+    }
+
     function getFavorites() {
         return JSON.parse(localStorage.getItem("favorites") || "[]");
     }
@@ -640,10 +644,24 @@
                 var lowername = name.toLowerCase();
                 var onmouseover = document.body.onmouseover;
                 document.body.onmouseover = null;
-                if (lowername.startsWith("arrow")) {
+                var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
+                if (lowername === "enter") {
+                    e.preventDefault();
+                    document.activeElement.click();
+                } else if (lowername === "arrowdown") {
+                    e.preventDefault();
                     $("input").focus();
-                    document.body.onmouseover = onmouseover;
+                } else if (lowername === "arrowup" && !isTopbarButton) {
+                    e.preventDefault();
+                    $(".topbar-home button:first").focus();
+                } else if (lowername === "arrowright") {
+                    e.preventDefault();
+                    focusNextElement();
+                } else if (lowername === "arrowleft") {
+                    e.preventDefault();
+                    focusPrevElement();
                 }
+                document.body.onmouseover = onmouseover;
             };
 
             document.addEventListener("keydown", this.keylistener);
@@ -670,6 +688,10 @@
                 } else if (result.torrent_link) {
                     navigate("/torrent/" + encodeURIComponent(result.torrent_link));
                 }
+            },
+            onClearHistory: function () {
+                clearHistory();
+                this.results = [];
             },
         },
         template: "#search-results-screen-template",

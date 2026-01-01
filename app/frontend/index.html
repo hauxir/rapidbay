@@ -48,16 +48,16 @@
         <script type="text/x-template" id="search-screen-template">
             <div class="root">
               <div class="topbar topbar-home">
-                  <button @click="goHistory()" class="btn btn-dark backarrow">
+                  <button tabindex="0" @click="goHistory()" class="btn btn-dark backarrow">
                     <div class="icon history_icon"/>
                   </button>
                   <div>
-                    <button @click="goTrending()" class="btn btn-dark">
+                    <button tabindex="0" @click="goTrending()" class="btn btn-dark">
                       <div class="icon trending_icon"/>
                     </button>
                   </div>
                   <div class="buttons">
-                    <button @click="goFavorites()" class="btn btn-dark">
+                    <button tabindex="0" @click="goFavorites()" class="btn btn-dark">
                       <div class="icon favorites_icon"/>
                     </button>
                   </div>
@@ -67,7 +67,7 @@
                   <div class="input-group mb-3">
                     <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
                     <div class="input-group-append">
-                      <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
+                      <button class="btn btn-light" type="submit" tabindex="-1"><div class="icon search_icon"/></button>
                     </div>
                   </div>
                 </form>
@@ -85,7 +85,7 @@
                       <button @click="back()" class="btn btn-dark backarrow">
                         <div class="icon back_icon"/>
                       </button>
-                      <div v-if="searchterm === '[history]'">
+                      <div v-if="searchterm === '[history]'" @click="onClearHistory()" style="cursor:pointer;">
                           <div class="icon history_icon" style="display:inline-block;vertical-align:middle;"/>
                       </div>
                       <div v-else-if="searchterm === '[favorites]'">

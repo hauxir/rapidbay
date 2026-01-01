@@ -452,11 +452,13 @@
             document.addEventListener("mousemove", this.mousemove_listener);
             document.addEventListener("touchstart", this.mousemove_listener);
             document.addEventListener("click", this.mousemove_listener);
+            document.addEventListener("keydown", this.mousemove_listener);
         },
         destroyed: function () {
             document.removeEventListener("mousemove", this.mousemove_listener);
             document.removeEventListener("touchstart", this.mousemove_listener);
             document.removeEventListener("click", this.mousemove_listener);
+            document.removeEventListener("keydown", this.mousemove_listener);
             document.removeEventListener(
                 "keydown",
                 this.videokeylistener,

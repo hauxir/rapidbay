@@ -128,6 +128,23 @@
 
     function clearHistory() {
         localStorage.removeItem("downloadHistory");
+        localStorage.removeItem("completedFiles");
+    }
+
+    function markFileCompleted(magnet, filename) {
+        var hash = get_hash(magnet);
+        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        if (!completed[hash]) completed[hash] = [];
+        if (completed[hash].indexOf(filename) === -1) {
+            completed[hash].push(filename);
+        }
+        localStorage.setItem("completedFiles", JSON.stringify(completed));
+    }
+
+    function getCompletedFiles(magnet) {
+        var hash = get_hash(magnet);
+        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        return completed[hash] || [];
     }
 
     function getFavorites() {
@@ -138,9 +155,10 @@
     }
 
     function saveFavorite(magnet, filename) {
+        var magnetHash = get_hash(magnet);
         var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
         favorites = favorites.filter(function (f) {
-            return f.magnet !== magnet || f.filename !== filename;
+            return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
         });
         var title = filename || get_magnet_name(magnet);
         favorites.unshift({ magnet: magnet, filename: filename, title: title, ts: Date.now() });
@@ -151,9 +169,10 @@
     }
 
     function removeFavorite(magnet, filename) {
+        var magnetHash = get_hash(magnet);
         var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
         favorites = favorites.filter(function (f) {
-            return f.magnet !== magnet || f.filename !== filename;
+            return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
         });
         localStorage.setItem("favorites", JSON.stringify(favorites));
     }
@@ -301,9 +320,10 @@
                 saveVideoPosition(self.magnet, self.filename, video.currentTime);
             });
 
-            // Clear position when video ends
+            // Clear position and mark completed when video ends
             video.addEventListener("ended", function () {
                 clearVideoPosition(self.magnet, self.filename);
+                markFileCompleted(self.magnet, self.filename);
             });
 
             var captionLanguage = localStorage.getItem("captionLanguage");
@@ -585,10 +605,10 @@
         methods: {
             checkFavorited: function () {
                 var favorites = getFavorites();
-                var magnet = this.magnet;
+                var magnetHash = get_hash(this.magnet);
                 var filename = this.filename;
                 this.isFavorited = favorites.some(function (f) {
-                    return f.magnet === magnet && f.filename === filename;
+                    return get_hash(f.magnet) === magnetHash && f.filename === filename;
                 });
             },
             toggle: function () {
@@ -763,18 +783,21 @@
     Vue.component("filelist-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null, isTorrentFavorited: false };
+            return { results: null, isTorrentFavorited: false, completedFiles: [] };
         },
         template: "#filelist-screen-template",
         methods: {
             back: function () {
                 window.history.back();
             },
+            isCompleted: function (filename) {
+                return this.completedFiles.indexOf(filename) !== -1;
+            },
             checkFavorited: function () {
-                var magnet = this.params.magnet_link;
+                var magnetHash = get_hash(this.params.magnet_link);
                 var favorites = getFavorites();
                 this.isTorrentFavorited = favorites.some(function (f) {
-                    return f.magnet === magnet && !f.filename;
+                    return get_hash(f.magnet) === magnetHash && !f.filename;
                 });
             },
             toggleFavorite: function () {
@@ -789,6 +812,7 @@
         },
         created: function () {
             this.checkFavorited();
+            this.completedFiles = getCompletedFiles(this.params.magnet_link);
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
             post("/api/magnet_files/", {
@@ -805,10 +829,17 @@
                         }
                         self.results = data.files;
                         rbsetTimeout(function () {
-                            var firstTr =
-                                document.getElementsByTagName("tr")[0];
-                            if (firstTr) {
-                                firstTr.focus();
+                            // Find first unwatched file
+                            var firstUnwatched = 0;
+                            for (var i = 0; i < self.results.length; i++) {
+                                if (self.completedFiles.indexOf(self.results[i]) === -1) {
+                                    firstUnwatched = i;
+                                    break;
+                                }
+                            }
+                            var rows = document.getElementsByTagName("tr");
+                            if (rows[firstUnwatched]) {
+                                rows[firstUnwatched].focus();
                             }
                         });
                     }

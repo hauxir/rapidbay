@@ -142,7 +142,7 @@
                       tabindex="0"
                       v-for="result in results"
                       @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + encodeURIComponent(result))">
-                          <td>{{ result }}</td>
+                          <td><span v-if="isCompleted(result)">&#x2713; </span>{{ result }}</td>
                       </tr>
                       </tbody>
                   </table>

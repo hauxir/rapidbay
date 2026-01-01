@@ -651,13 +651,11 @@
     Vue.component("search-screen", {
         template: "#search-screen-template",
         data: function () {
-            return { searchterm: "", searchHistory: [], allowSubmit: false };
+            return { searchterm: "", searchHistory: [] };
         },
         methods: {
             onSubmit: function (e) {
                 e.preventDefault();
-                if (!this.allowSubmit) return;
-                this.allowSubmit = false;
                 if (this.searchterm.startsWith("magnet:")) {
                     navigate(
                         "/magnet/" +
@@ -705,9 +703,7 @@
                 var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
                 var isHistoryItem = document.activeElement && document.activeElement.closest(".search-history");
                 var isInput = document.activeElement && document.activeElement.tagName === "INPUT";
-                if (isInput && (lowername === "enter" || lowername === "go" || e.keyCode === 13)) {
-                    self.allowSubmit = true;
-                } else if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
+                if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
                     e.preventDefault();
                     document.activeElement.click();
                 } else if (lowername === "arrowdown") {
@@ -723,22 +719,16 @@
                         $("input").focus().click();
                     }
                 } else if (lowername === "arrowup") {
+                    e.preventDefault();
                     if (isHistoryItem) {
-                        e.preventDefault();
-                        e.stopPropagation();
                         var items = document.querySelectorAll(".search-history-item");
                         var idx = Array.prototype.indexOf.call(items, document.activeElement);
                         if (idx === 0) {
-                            $("input").focus();
+                            $("input").focus().click();
                         } else {
                             focusPrevElement();
                         }
                     } else if (!isTopbarButton) {
-                        // Don't prevent default when in input - let system close keyboard
-                        if (!isInput) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                        }
                         $(".topbar-home button:first").focus();
                     }
                 } else if (lowername === "arrowright" && !isInput) {
@@ -750,10 +740,10 @@
                 }
             };
 
-            document.addEventListener("keydown", this.keylistener, true);
+            document.addEventListener("keydown", this.keylistener);
         },
         destroyed: function () {
-            document.removeEventListener("keydown", this.keylistener, true);
+            document.removeEventListener("keydown", this.keylistener);
         },
     });
 

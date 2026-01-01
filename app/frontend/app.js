@@ -109,6 +109,46 @@
         $.post(url, data, callback);
     }
 
+    function saveToHistory(magnet, filename) {
+        var history = JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+        history = history.filter(function (h) {
+            return h.magnet !== magnet || h.filename !== filename;
+        });
+        history.unshift({ magnet: magnet, filename: filename, ts: Date.now() });
+        if (history.length > 50) {
+            history = history.slice(0, 50);
+        }
+        localStorage.setItem("downloadHistory", JSON.stringify(history));
+    }
+
+    function getHistory() {
+        return JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+    }
+
+    function getFavorites() {
+        return JSON.parse(localStorage.getItem("favorites") || "[]");
+    }
+
+    function saveFavorite(magnet, filename) {
+        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        favorites = favorites.filter(function (f) {
+            return f.magnet !== magnet || f.filename !== filename;
+        });
+        favorites.unshift({ magnet: magnet, filename: filename, ts: Date.now() });
+        if (favorites.length > 100) {
+            favorites = favorites.slice(0, 100);
+        }
+        localStorage.setItem("favorites", JSON.stringify(favorites));
+    }
+
+    function removeFavorite(magnet, filename) {
+        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        favorites = favorites.filter(function (f) {
+            return f.magnet !== magnet || f.filename !== filename;
+        });
+        localStorage.setItem("favorites", JSON.stringify(favorites));
+    }
+
     function get_hash(magnet_link) {
         var hash_start = magnet_link.indexOf("btih:") + 5;
         var hash_end = magnet_link.indexOf("&");
@@ -145,7 +185,7 @@
     });
 
     Vue.component("player", {
-        props: ["supported", "url", "subtitles", "back"],
+        props: ["supported", "url", "subtitles", "back", "magnet", "filename"],
         data: function () {
             return {
                 isDesktop:
@@ -471,6 +511,35 @@
         },
     });
 
+    Vue.component("favorite-button", {
+        template: "#favorite-button-template",
+        props: ["magnet", "filename"],
+        data: function () {
+            return { isFavorited: false };
+        },
+        created: function () {
+            this.checkFavorited();
+        },
+        methods: {
+            checkFavorited: function () {
+                var favorites = getFavorites();
+                var magnet = this.magnet;
+                var filename = this.filename;
+                this.isFavorited = favorites.some(function (f) {
+                    return f.magnet === magnet && f.filename === filename;
+                });
+            },
+            toggle: function () {
+                if (this.isFavorited) {
+                    removeFavorite(this.magnet, this.filename);
+                } else {
+                    saveFavorite(this.magnet, this.filename);
+                }
+                this.isFavorited = !this.isFavorited;
+            },
+        },
+    });
+
     Vue.component("search-screen", {
         template: "#search-screen-template",
         data: function () {
@@ -489,6 +558,15 @@
                 } else {
                     navigate("/search/" + this.searchterm);
                 }
+            },
+            goHistory: function () {
+                navigate("/search/[history]");
+            },
+            goTrending: function () {
+                navigate("/search/");
+            },
+            goFavorites: function () {
+                navigate("/search/[favorites]");
             },
         },
         mounted: function () {
@@ -530,20 +608,48 @@
             back: function () {
                 window.history.back();
             },
+            onResultClick: function (result) {
+                if (result.filename) {
+                    navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)) + "/" + encodeURIComponent(result.filename));
+                } else if (result.magnet) {
+                    navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)));
+                } else {
+                    navigate("/torrent/" + encodeURIComponent(result.torrent_link));
+                }
+            },
         },
         template: "#search-results-screen-template",
         created: function () {
-            this.searchterm = this.params ? this.params.searchterm : "";
             var self = this;
-            get("/api/search/" + self.searchterm, function (data) {
-                self.results = data.results;
+            this.searchterm = this.params ? this.params.searchterm : "";
+
+            if (this.searchterm === "[history]") {
+                this.results = getHistory();
                 rbsetTimeout(function () {
                     var firstTr = document.getElementsByTagName("tr")[0];
                     if (firstTr) {
                         firstTr.focus();
                     }
                 });
-            });
+            } else if (this.searchterm === "[favorites]") {
+                this.results = getFavorites();
+                rbsetTimeout(function () {
+                    var firstTr = document.getElementsByTagName("tr")[0];
+                    if (firstTr) {
+                        firstTr.focus();
+                    }
+                });
+            } else {
+                get("/api/search/" + self.searchterm, function (data) {
+                    self.results = data.results;
+                    rbsetTimeout(function () {
+                        var firstTr = document.getElementsByTagName("tr")[0];
+                        if (firstTr) {
+                            firstTr.focus();
+                        }
+                    });
+                });
+            }
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
         },
@@ -577,15 +683,31 @@
     Vue.component("filelist-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null };
+            return { results: null, favorites: [] };
         },
         template: "#filelist-screen-template",
         methods: {
             back: function () {
                 window.history.back();
             },
+            isFavorited: function (filename) {
+                var magnet = this.params.magnet_link;
+                return this.favorites.some(function (f) {
+                    return f.magnet === magnet && f.filename === filename;
+                });
+            },
+            toggleFavorite: function (filename) {
+                var magnet = this.params.magnet_link;
+                if (this.isFavorited(filename)) {
+                    removeFavorite(magnet, filename);
+                } else {
+                    saveFavorite(magnet, filename);
+                }
+                this.favorites = getFavorites();
+            },
         },
         created: function () {
+            this.favorites = getFavorites();
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
             post("/api/magnet_files/", {
@@ -648,6 +770,7 @@
                 magnet_link: this.params.magnet_link,
                 filename: this.params.filename,
             });
+            saveToHistory(this.params.magnet_link, this.params.filename);
             var self = this;
             var magnet_hash = get_hash(this.params.magnet_link);
             (function get_file_info() {

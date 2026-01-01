@@ -314,3 +314,53 @@ button:focus .icon {
     height: 30px;
     width: 30px;
 }
+
+.history_icon {
+    background-image: url("/lib/icons/history_icon.svg");
+    margin-top: 10px;
+    margin-bottom: 10px;
+    height: 25px;
+    width: 25px;
+}
+
+.favorites_icon {
+    background-image: url("/lib/icons/favorites_icon.svg");
+    margin-top: 10px;
+    margin-bottom: 10px;
+    height: 25px;
+    width: 25px;
+}
+
+.favorites_empty_icon {
+    background-image: url("/lib/icons/favorites_empty_icon.svg");
+    margin-top: 10px;
+    margin-bottom: 10px;
+    height: 25px;
+    width: 25px;
+}
+
+.trending_icon {
+    background-image: url("/lib/icons/trending_icon.svg");
+    margin-top: 10px;
+    margin-bottom: 10px;
+    height: 25px;
+    width: 25px;
+}
+
+.empty-message {
+    color: rgba(255, 255, 255, 0.5);
+    margin: auto;
+}
+
+.topbar-home {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: transparent;
+}
+
+.favorite-cell {
+    width: 50px;
+    text-align: center;
+}

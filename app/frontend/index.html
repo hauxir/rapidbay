@@ -46,14 +46,33 @@
         </script>
 
         <script type="text/x-template" id="search-screen-template">
-            <form @submit="onSubmit">
-              <div class="input-group mb-3">
-                <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
-                <div class="input-group-append">
-                  <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
-                </div>
+            <div class="root">
+              <div class="topbar topbar-home">
+                  <button @click="goHistory()" class="btn btn-dark backarrow">
+                    <div class="icon history_icon"/>
+                  </button>
+                  <div>
+                    <button @click="goTrending()" class="btn btn-dark">
+                      <div class="icon trending_icon"/>
+                    </button>
+                  </div>
+                  <div class="buttons">
+                    <button @click="goFavorites()" class="btn btn-dark">
+                      <div class="icon favorites_icon"/>
+                    </button>
+                  </div>
               </div>
-            </form>
+              <div class="wrapper">
+                <form @submit="onSubmit">
+                  <div class="input-group mb-3">
+                    <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
+                    <div class="input-group-append">
+                      <button class="btn btn-light" type="submit"><div class="icon search_icon"/></button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
         </script>
 
         <script type="text/x-template" id="torrent-link-screen-template">
@@ -66,12 +85,18 @@
                       <button @click="back()" class="btn btn-dark backarrow">
                         <div class="icon back_icon"/>
                       </button>
-                      <div v-if="searchterm">
+                      <div v-if="searchterm === '[history]'">
+                          <div class="icon history_icon" style="display:inline-block;vertical-align:middle;"/>
+                      </div>
+                      <div v-else-if="searchterm === '[favorites]'">
+                          <div class="icon favorites_icon" style="display:inline-block;vertical-align:middle;"/>
+                      </div>
+                      <div v-else-if="searchterm">
                           &#128270;
                           {{ searchterm }}
                       </div>
                       <div v-else>
-                          &#128293;
+                          <div class="icon trending_icon" style="display:inline-block;vertical-align:middle;"/>
                       </div>
                   <div class="buttons">
                       <fullscreen-button/>
@@ -85,9 +110,9 @@
                               <tr
                               tabindex="0"
                               v-for="result in results"
-                              @click="result.magnet ? navigate('/magnet/' + encodeURIComponent(encodeURIComponent(result.magnet))) : navigate('/torrent/' + encodeURIComponent(result.torrent_link))"
+                              @click="onResultClick(result)"
                               >
-                                  <td :title="result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title}}</td>
+                                  <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title || result.filename }}</td>
                               </tr>
                           </tbody>
                       </table>
@@ -115,6 +140,9 @@
                       v-for="result in results"
                       @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + encodeURIComponent(result))">
                           <td>{{ result }}</td>
+                          <td class="favorite-cell" @click.stop="toggleFavorite(result)">
+                            <div :class="'icon ' + (isFavorited(result) ? 'favorites_icon' : 'favorites_empty_icon')"/>
+                          </td>
                       </tr>
                       </tbody>
                   </table>
@@ -124,7 +152,7 @@
 
         <script type="text/x-template" id="download-screen-template">
             <div class="player_wrapper" v-if="play_link">
-	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back"/>
+	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename"/>
             </div>
             <div v-else class="root">
               <div class="topbar">
@@ -135,6 +163,7 @@
                   {{params.filename}}
                   </div>
                   <div class="buttons">
+                      <favorite-button :magnet="params.magnet_link" :filename="params.filename"/>
                       <fullscreen-button/>
                   </div>
               </div>
@@ -163,6 +192,7 @@
                        <div class="buttons" v-if="supported">
                            <chromecast-button v-if="url && isDesktop && isChrome"/>
             	<caption-button v-if="url"/>
+                           <favorite-button :magnet="magnet" :filename="filename"/>
                            <fullscreen-button/>
                        </div>
                    </div>
@@ -192,6 +222,10 @@
 
         <script type="text/x-template" id="chromecast-button-template">
             <button class="btn btn-dark chromecast_button" @click="cast()"><div class="icon chromecast_icon"/></button>
+        </script>
+
+        <script type="text/x-template" id="favorite-button-template">
+            <button class="btn btn-dark" @click="toggle()"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
         </script>
 
         <script src="/app.js"></script>

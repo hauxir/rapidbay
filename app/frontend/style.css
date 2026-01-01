@@ -364,3 +364,10 @@ button:focus .icon {
     width: 50px;
     text-align: center;
 }
+
+.filename-truncate {
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

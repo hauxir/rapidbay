@@ -114,7 +114,7 @@
         history = history.filter(function (h) {
             return h.magnet !== magnet || h.filename !== filename;
         });
-        history.unshift({ magnet: magnet, filename: filename, ts: Date.now() });
+        history.unshift({ magnet: magnet, filename: filename, title: filename, ts: Date.now() });
         if (history.length > 50) {
             history = history.slice(0, 50);
         }
@@ -134,7 +134,8 @@
         favorites = favorites.filter(function (f) {
             return f.magnet !== magnet || f.filename !== filename;
         });
-        favorites.unshift({ magnet: magnet, filename: filename, ts: Date.now() });
+        var title = filename || get_magnet_name(magnet);
+        favorites.unshift({ magnet: magnet, filename: filename, title: title, ts: Date.now() });
         if (favorites.length > 100) {
             favorites = favorites.slice(0, 100);
         }
@@ -149,6 +150,22 @@
         localStorage.setItem("favorites", JSON.stringify(favorites));
     }
 
+    function getVideoPositionKey(magnet, filename) {
+        return "videoPosition_" + get_hash(magnet) + "_" + filename;
+    }
+
+    function saveVideoPosition(magnet, filename, position) {
+        localStorage.setItem(getVideoPositionKey(magnet, filename), position.toString());
+    }
+
+    function getVideoPosition(magnet, filename) {
+        return parseFloat(localStorage.getItem(getVideoPositionKey(magnet, filename))) || 0;
+    }
+
+    function clearVideoPosition(magnet, filename) {
+        localStorage.removeItem(getVideoPositionKey(magnet, filename));
+    }
+
     function get_hash(magnet_link) {
         var hash_start = magnet_link.indexOf("btih:") + 5;
         var hash_end = magnet_link.indexOf("&");
@@ -156,6 +173,14 @@
         return magnet_link
             .substr(hash_start, hash_end - hash_start)
             .toLowerCase();
+    }
+
+    function get_magnet_name(magnet_link) {
+        var match = magnet_link.match(/dn=([^&]+)/);
+        if (match) {
+            return decodeURIComponent(match[1].replace(/\+/g, " "));
+        }
+        return get_hash(magnet_link);
     }
 
     function navigate(path, replaceState) {
@@ -249,6 +274,29 @@
                 });
             });
             video.play();
+
+            // Restore saved position
+            var savedPosition = getVideoPosition(self.magnet, self.filename);
+            if (savedPosition > 0) {
+                video.currentTime = savedPosition;
+            }
+
+            // Save position periodically
+            self.positionInterval = setInterval(function () {
+                if (!video.paused && video.currentTime > 0) {
+                    saveVideoPosition(self.magnet, self.filename, video.currentTime);
+                }
+            }, 5000);
+
+            // Save position on pause
+            video.addEventListener("pause", function () {
+                saveVideoPosition(self.magnet, self.filename, video.currentTime);
+            });
+
+            // Clear position when video ends
+            video.addEventListener("ended", function () {
+                clearVideoPosition(self.magnet, self.filename);
+            });
 
             var captionLanguage = localStorage.getItem("captionLanguage");
             var tracks = video.textTracks;
@@ -361,12 +409,18 @@
                 true
             );
             document.removeEventListener("keydown", this.keylistener);
+            if (this.positionInterval) {
+                clearInterval(this.positionInterval);
+            }
             var video = document.getElementsByTagName("video")[0];
             if (video) {
                 video.textTracks.removeEventListener(
                     "change",
                     this.captionChangeListener
                 );
+                if (video.currentTime > 0) {
+                    saveVideoPosition(this.magnet, this.filename, video.currentTime);
+                }
             }
         },
         template: "#player-template",
@@ -613,7 +667,7 @@
                     navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)) + "/" + encodeURIComponent(result.filename));
                 } else if (result.magnet) {
                     navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)));
-                } else {
+                } else if (result.torrent_link) {
                     navigate("/torrent/" + encodeURIComponent(result.torrent_link));
                 }
             },
@@ -683,31 +737,32 @@
     Vue.component("filelist-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null, favorites: [] };
+            return { results: null, isTorrentFavorited: false };
         },
         template: "#filelist-screen-template",
         methods: {
             back: function () {
                 window.history.back();
             },
-            isFavorited: function (filename) {
+            checkFavorited: function () {
                 var magnet = this.params.magnet_link;
-                return this.favorites.some(function (f) {
-                    return f.magnet === magnet && f.filename === filename;
+                var favorites = getFavorites();
+                this.isTorrentFavorited = favorites.some(function (f) {
+                    return f.magnet === magnet && !f.filename;
                 });
             },
-            toggleFavorite: function (filename) {
+            toggleFavorite: function () {
                 var magnet = this.params.magnet_link;
-                if (this.isFavorited(filename)) {
-                    removeFavorite(magnet, filename);
+                if (this.isTorrentFavorited) {
+                    removeFavorite(magnet, "");
                 } else {
-                    saveFavorite(magnet, filename);
+                    saveFavorite(magnet, "");
                 }
-                this.favorites = getFavorites();
+                this.isTorrentFavorited = !this.isTorrentFavorited;
             },
         },
         created: function () {
-            this.favorites = getFavorites();
+            this.checkFavorited();
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
             post("/api/magnet_files/", {

@@ -38,6 +38,11 @@
         selectables.eq(currentIndex - 1).focus();
     }
 
+    document.addEventListener("mousemove", function () {
+        if (document.activeElement && document.activeElement.tagName !== "INPUT") {
+            document.activeElement.blur();
+        }
+    });
 
     window.isSafari =
         navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
@@ -136,8 +141,8 @@
             return t.toLowerCase() !== term.toLowerCase();
         });
         history.unshift(term);
-        if (history.length > 20) {
-            history = history.slice(0, 20);
+        if (history.length > 5) {
+            history = history.slice(0, 5);
         }
         localStorage.setItem("searchHistory", JSON.stringify(history));
     }

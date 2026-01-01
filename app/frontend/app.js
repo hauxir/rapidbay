@@ -435,11 +435,19 @@
             var timeout;
             var duration = 2800;
             var self = this;
+            var lastCall = 0;
             this.mousemove_listener = function () {
+                var now = Date.now();
+                // Debounce: ignore if called within 100ms
+                if (now - lastCall < 100) return;
+                lastCall = now;
                 self.hovering = true;
                 clearTimeout(timeout);
                 timeout = setTimeout(function () {
                     self.hovering = false;
+                    // Blur video to prevent focus-related events
+                    var video = document.querySelector("video");
+                    if (video) video.blur();
                 }, duration);
             };
             this.mousemove_listener();

@@ -400,6 +400,7 @@
                     event.preventDefault();
                     event.stopPropagation();
                     video.currentTime += 60;
+                    self.mousemove_listener();
                 } else if (
                     event.key.toLowerCase() === "arrowleft" &&
                     videoSelected
@@ -407,6 +408,7 @@
                     event.preventDefault();
                     event.stopPropagation();
                     video.currentTime -= 15;
+                    self.mousemove_listener();
                 } else if (
                     event.key.toLowerCase() === "enter" &&
                     videoSelected

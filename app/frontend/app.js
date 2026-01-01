@@ -722,10 +722,10 @@
                     } else {
                         $("input").focus().click();
                     }
-                } else if (lowername === "arrowup" && !isInput) {
-                    e.preventDefault();
-                    e.stopPropagation();
+                } else if (lowername === "arrowup") {
                     if (isHistoryItem) {
+                        e.preventDefault();
+                        e.stopPropagation();
                         var items = document.querySelectorAll(".search-history-item");
                         var idx = Array.prototype.indexOf.call(items, document.activeElement);
                         if (idx === 0) {
@@ -734,6 +734,11 @@
                             focusPrevElement();
                         }
                     } else if (!isTopbarButton) {
+                        // Don't prevent default when in input - let system close keyboard
+                        if (!isInput) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
                         $(".topbar-home button:first").focus();
                     }
                 } else if (lowername === "arrowright" && !isInput) {

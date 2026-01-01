@@ -365,6 +365,33 @@ button:focus .icon {
     text-align: center;
 }
 
-.filename-truncate {
-    max-width: 35% !important;
+.topbar-flex {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.topbar-flex > button:first-child {
+    position: relative;
+    left: auto;
+    flex-shrink: 0;
+}
+
+.topbar-flex > .filename-truncate {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+    position: relative;
+    left: auto;
+    right: auto;
+    max-width: none;
+}
+
+.topbar-flex > .buttons {
+    flex-shrink: 0;
+    position: relative;
+    margin-right: 0;
 }

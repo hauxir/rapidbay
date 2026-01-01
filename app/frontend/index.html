@@ -155,7 +155,7 @@
 	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename"/>
             </div>
             <div v-else class="root">
-              <div class="topbar">
+              <div class="topbar topbar-flex">
                   <button @click="back()" class="btn btn-dark backarrow">
                     <div class="icon back_icon"/>
                   </button>
@@ -180,11 +180,11 @@
 
         <script type="text/x-template" id="player-template">
                  <div class="video_wrapper">
-                   <div class="topbar" v-if="hovering">
+                   <div class="topbar topbar-flex" v-if="hovering">
                        <button @click="back()" class="btn btn-dark backarrow">
                          <div class="icon back_icon"/>
                        </button>
-                       <div class="video_url_wrapper">
+                       <div class="filename-truncate">
                            <a tabindex="-1" :href="window.location.origin + url" class="video_url">
                                {{decodeURIComponent(url.split("/").pop())}}
                            </a>

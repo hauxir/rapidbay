@@ -741,10 +741,10 @@
                 }
             };
 
-            document.addEventListener("keydown", this.keylistener);
+            document.addEventListener("keydown", this.keylistener, true);
         },
         destroyed: function () {
-            document.removeEventListener("keydown", this.keylistener);
+            document.removeEventListener("keydown", this.keylistener, true);
         },
     });
 

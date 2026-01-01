@@ -70,6 +70,9 @@
                       <button class="btn btn-light" type="submit" tabindex="-1"><div class="icon search_icon"/></button>
                     </div>
                   </div>
+                  <div v-if="searchHistory.length > 0" class="search-history">
+                    <div tabindex="0" v-for="term in searchHistory" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
+                  </div>
                 </form>
               </div>
             </div>
@@ -85,9 +88,9 @@
                       <button @click="back()" class="btn btn-dark backarrow">
                         <div class="icon back_icon"/>
                       </button>
-                      <div v-if="searchterm === '[history]'" @click="onClearHistory()" style="cursor:pointer;">
-                          <div class="icon history_icon" style="display:inline-block;vertical-align:middle;"/>
-                      </div>
+                      <button v-if="searchterm === '[history]'" @click="onClearHistory()" class="btn btn-dark topbar-center-btn">
+                          <div class="icon history_icon"/>
+                      </button>
                       <div v-else-if="searchterm === '[favorites]'">
                           <div class="icon favorites_icon" style="display:inline-block;vertical-align:middle;"/>
                       </div>

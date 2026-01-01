@@ -38,9 +38,6 @@
         selectables.eq(currentIndex - 1).focus();
     }
 
-    document.body.onmouseover = function () {
-        document.activeElement.blur();
-    };
 
     window.isSafari =
         navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
@@ -129,6 +126,24 @@
     function clearHistory() {
         localStorage.removeItem("downloadHistory");
         localStorage.removeItem("completedFiles");
+        localStorage.removeItem("searchHistory");
+    }
+
+    function saveSearchTerm(term) {
+        if (!term || term.trim() === "") return;
+        var history = JSON.parse(localStorage.getItem("searchHistory") || "[]");
+        history = history.filter(function (t) {
+            return t.toLowerCase() !== term.toLowerCase();
+        });
+        history.unshift(term);
+        if (history.length > 20) {
+            history = history.slice(0, 20);
+        }
+        localStorage.setItem("searchHistory", JSON.stringify(history));
+    }
+
+    function getSearchHistory() {
+        return JSON.parse(localStorage.getItem("searchHistory") || "[]");
     }
 
     function markFileCompleted(magnet, filename) {
@@ -625,7 +640,7 @@
     Vue.component("search-screen", {
         template: "#search-screen-template",
         data: function () {
-            return { searchterm: "" };
+            return { searchterm: "", searchHistory: [] };
         },
         methods: {
             onSubmit: function (e) {
@@ -638,8 +653,14 @@
                             )
                     );
                 } else {
+                    saveSearchTerm(this.searchterm);
                     navigate("/search/" + this.searchterm);
                 }
+            },
+            onHistoryClick: function (term) {
+                this.searchterm = term;
+                saveSearchTerm(term);
+                navigate("/search/" + term);
             },
             goHistory: function () {
                 navigate("/search/[history]");
@@ -652,6 +673,8 @@
             },
         },
         mounted: function () {
+            this.searchHistory = getSearchHistory();
+
             if (
                 router.lastRouteResolved().url.toLowerCase() ===
                 "/registerhandler"
@@ -666,26 +689,44 @@
             this.keylistener = function (e) {
                 var name = e.key;
                 var lowername = name.toLowerCase();
-                var onmouseover = document.body.onmouseover;
-                document.body.onmouseover = null;
                 var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
-                if (lowername === "enter" && isTopbarButton) {
+                var isHistoryItem = document.activeElement && document.activeElement.closest(".search-history");
+                var isInput = document.activeElement && document.activeElement.tagName === "INPUT";
+                if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
                     e.preventDefault();
                     document.activeElement.click();
                 } else if (lowername === "arrowdown") {
                     e.preventDefault();
-                    $("input").focus().click();
-                } else if (lowername === "arrowup" && !isTopbarButton) {
+                    if (isInput) {
+                        var firstItem = document.querySelector(".search-history-item");
+                        if (firstItem) {
+                            firstItem.focus();
+                        }
+                    } else if (isHistoryItem) {
+                        focusNextElement();
+                    } else {
+                        $("input").focus().click();
+                    }
+                } else if (lowername === "arrowup") {
                     e.preventDefault();
-                    $(".topbar-home button:first").focus();
-                } else if (lowername === "arrowright") {
+                    if (isHistoryItem) {
+                        var items = document.querySelectorAll(".search-history-item");
+                        var idx = Array.prototype.indexOf.call(items, document.activeElement);
+                        if (idx === 0) {
+                            $("input").focus().click();
+                        } else {
+                            focusPrevElement();
+                        }
+                    } else if (!isTopbarButton) {
+                        $(".topbar-home button:first").focus();
+                    }
+                } else if (lowername === "arrowright" && !isInput) {
                     e.preventDefault();
                     focusNextElement();
-                } else if (lowername === "arrowleft") {
+                } else if (lowername === "arrowleft" && !isInput) {
                     e.preventDefault();
                     focusPrevElement();
                 }
-                document.body.onmouseover = onmouseover;
             };
 
             document.addEventListener("keydown", this.keylistener);

@@ -651,11 +651,13 @@
     Vue.component("search-screen", {
         template: "#search-screen-template",
         data: function () {
-            return { searchterm: "", searchHistory: [] };
+            return { searchterm: "", searchHistory: [], allowSubmit: false };
         },
         methods: {
             onSubmit: function (e) {
                 e.preventDefault();
+                if (!this.allowSubmit) return;
+                this.allowSubmit = false;
                 if (this.searchterm.startsWith("magnet:")) {
                     navigate(
                         "/magnet/" +
@@ -703,7 +705,9 @@
                 var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
                 var isHistoryItem = document.activeElement && document.activeElement.closest(".search-history");
                 var isInput = document.activeElement && document.activeElement.tagName === "INPUT";
-                if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
+                if (lowername === "enter" && isInput) {
+                    self.allowSubmit = true;
+                } else if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
                     e.preventDefault();
                     document.activeElement.click();
                 } else if (lowername === "arrowdown") {

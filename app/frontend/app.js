@@ -109,12 +109,13 @@
         $.post(url, data, callback);
     }
 
-    function saveToHistory(magnet, filename) {
+    function saveToHistory(magnet) {
         var history = JSON.parse(localStorage.getItem("downloadHistory") || "[]");
         history = history.filter(function (h) {
-            return h.magnet !== magnet || h.filename !== filename;
+            return h.magnet !== magnet;
         });
-        history.unshift({ magnet: magnet, filename: filename, title: filename, ts: Date.now() });
+        var title = get_magnet_name(magnet);
+        history.unshift({ magnet: magnet, title: title, ts: Date.now() });
         if (history.length > 50) {
             history = history.slice(0, 50);
         }
@@ -130,7 +131,10 @@
     }
 
     function getFavorites() {
-        return JSON.parse(localStorage.getItem("favorites") || "[]");
+        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        return favorites.sort(function (a, b) {
+            return (a.title || "").localeCompare(b.title || "");
+        });
     }
 
     function saveFavorite(magnet, filename) {
@@ -650,7 +654,7 @@
                     document.activeElement.click();
                 } else if (lowername === "arrowdown") {
                     e.preventDefault();
-                    $("input").focus();
+                    $("input").focus().click();
                 } else if (lowername === "arrowup" && !isTopbarButton) {
                     e.preventDefault();
                     $(".topbar-home button:first").focus();
@@ -847,7 +851,7 @@
                 magnet_link: this.params.magnet_link,
                 filename: this.params.filename,
             });
-            saveToHistory(this.params.magnet_link, this.params.filename);
+            saveToHistory(this.params.magnet_link);
             var self = this;
             var magnet_hash = get_hash(this.params.magnet_link);
             (function get_file_info() {

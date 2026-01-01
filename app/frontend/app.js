@@ -424,8 +424,6 @@
                 ) {
                     location.href = document.querySelector("video").src;
                 }
-                // Always reset hide timer on any key
-                self.mousemove_listener();
             };
 
             document.addEventListener("keydown", this.videokeylistener, true);

@@ -720,15 +720,16 @@
                     }
                 } else if (lowername === "arrowup") {
                     e.preventDefault();
+                    e.stopPropagation();
                     if (isHistoryItem) {
                         var items = document.querySelectorAll(".search-history-item");
                         var idx = Array.prototype.indexOf.call(items, document.activeElement);
                         if (idx === 0) {
-                            $("input").focus().click();
+                            $("input").focus();
                         } else {
                             focusPrevElement();
                         }
-                    } else if (!isTopbarButton) {
+                    } else if (isInput || !isTopbarButton) {
                         $(".topbar-home button:first").focus();
                     }
                 } else if (lowername === "arrowright" && !isInput) {

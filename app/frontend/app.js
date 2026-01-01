@@ -722,7 +722,7 @@
                     } else {
                         $("input").focus().click();
                     }
-                } else if (lowername === "arrowup") {
+                } else if (lowername === "arrowup" && !isInput) {
                     e.preventDefault();
                     e.stopPropagation();
                     if (isHistoryItem) {
@@ -733,7 +733,7 @@
                         } else {
                             focusPrevElement();
                         }
-                    } else if (isInput || !isTopbarButton) {
+                    } else if (!isTopbarButton) {
                         $(".topbar-home button:first").focus();
                     }
                 } else if (lowername === "arrowright" && !isInput) {

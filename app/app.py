@@ -181,6 +181,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
                 r"behind[\s._-]?the[\s._-]?scenes?",
                 r"gag[\s._-]?reels?",
                 r"making[\s._-]?of",
+                r"[\s._-]movie[\s._-]?\d",  # Movie 1, Movie 2, etc.
                 r"bonus", r"featurette", r"interview", r"blooper",
                 r"q&a", r"casting", r"preview", r"promo", r"trailer", r"commentary"
             ]

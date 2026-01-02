@@ -571,6 +571,9 @@ def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Respo
         raise HTTPException(status_code=404, detail="File not found")
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="File not found")
+    # Update mtime to reset expiration timer
+    os.utime(filepath, None)
+    os.utime(directory, None)
     response = FileResponse(filepath)
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response

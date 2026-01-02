@@ -182,7 +182,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
                 r"gag[\s._-]?reels?",
                 r"making[\s._-]?of",
                 r"[\s._-]movie[\s._-]?\d",  # Movie 1, Movie 2, etc.
-                r"bonus", r"featurette", r"interview", r"blooper",
+                r"bonus", r"featurette", r"interview", r"blooper", r"sample",
                 r"q&a", r"casting", r"preview", r"promo", r"trailer", r"commentary"
             ]
             is_bonus = any(re.search(p, fn_lower) for p in bonus_patterns)

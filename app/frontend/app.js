@@ -778,20 +778,28 @@
             this.searchterm = this.params ? this.params.searchterm : "";
 
             function fetchAndApplyStatus(results) {
-                var hashes = results.map(function (r) {
-                    return r.magnet ? get_hash(r.magnet) : null;
-                }).filter(function (h) { return h; });
-                if (hashes.length === 0) return;
+                var hashes = [];
+                var torrent_links = [];
+                results.forEach(function (r) {
+                    if (r.magnet) {
+                        hashes.push(get_hash(r.magnet));
+                    } else if (r.torrent_link) {
+                        torrent_links.push(r.torrent_link);
+                    }
+                });
+                if (hashes.length === 0 && torrent_links.length === 0) return;
                 $.ajax({
                     url: "/api/magnet_status/",
                     type: "POST",
                     contentType: "application/json",
-                    data: JSON.stringify({ hashes: hashes }),
+                    data: JSON.stringify({ hashes: hashes, torrent_links: torrent_links }),
                     success: function (data) {
                         results.forEach(function (r) {
                             if (r.magnet) {
                                 var hash = get_hash(r.magnet);
                                 r.status = data.statuses[hash] || null;
+                            } else if (r.torrent_link) {
+                                r.status = data.statuses[r.torrent_link] || null;
                             }
                         });
                         self.results = results.slice(); // trigger Vue reactivity

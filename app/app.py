@@ -64,7 +64,8 @@ class FilesResponse(BaseModel):
 
 
 class MagnetStatusRequest(BaseModel):
-    hashes: List[str]
+    hashes: List[str] = []
+    torrent_links: List[str] = []
 
 
 class MagnetStatusResponse(BaseModel):
@@ -262,10 +263,18 @@ def _get_download_status_maps() -> tuple[set[str], set[str]]:
 
 def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     downloading, output = _get_download_status_maps()
+    url_cache = _load_torrent_url_cache()
     for r in results:
         magnet = r.get("magnet")
+        magnet_hash: Optional[str] = None
         if magnet:
             magnet_hash = torrent.get_hash(magnet).lower()
+        elif r.get("torrent_link"):
+            # Check if we have a cached hash for this torrent URL
+            cached_hash = url_cache.get(r["torrent_link"])
+            if cached_hash:
+                magnet_hash = cached_hash.lower()
+        if magnet_hash:
             is_downloading = magnet_hash in downloading
             has_output = magnet_hash in output
             if has_output:
@@ -305,9 +314,11 @@ def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]
 
 @app.post("/api/magnet_status/", response_model=MagnetStatusResponse)
 def get_magnet_status(request: MagnetStatusRequest, _: None = Depends(authorize)) -> Dict[str, Any]:
-    """Get download status for multiple magnet hashes."""
+    """Get download status for multiple magnet hashes and/or torrent links."""
     downloading, output = _get_download_status_maps()
+    url_cache = _load_torrent_url_cache()
     statuses: Dict[str, Optional[str]] = {}
+
     for h in request.hashes:
         h_lower = h.lower()
         if h_lower in output:
@@ -316,7 +327,42 @@ def get_magnet_status(request: MagnetStatusRequest, _: None = Depends(authorize)
             statuses[h] = "downloading"
         else:
             statuses[h] = None
+
+    for link in request.torrent_links:
+        cached_hash = url_cache.get(link)
+        if cached_hash:
+            h_lower = cached_hash.lower()
+            if h_lower in output:
+                statuses[link] = "downloaded"
+            elif h_lower in downloading:
+                statuses[link] = "downloading"
+            else:
+                statuses[link] = None
+        else:
+            statuses[link] = None
+
     return {"statuses": statuses}
+
+
+def _get_torrent_url_cache_path() -> str:
+    return os.path.join(settings.DATA_DIR, "torrent_url_cache.json")
+
+
+def _load_torrent_url_cache() -> Dict[str, str]:
+    cache_path = _get_torrent_url_cache_path()
+    try:
+        with open(cache_path, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_torrent_url_to_cache(url: str, magnet_hash: str) -> None:
+    cache = _load_torrent_url_cache()
+    cache[url] = magnet_hash
+    cache_path = _get_torrent_url_cache_path()
+    with open(cache_path, 'w') as f:
+        json.dump(cache, f)
 
 
 def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
@@ -327,11 +373,14 @@ def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
         if r.status_code == 302:
             location: Optional[str] = r.headers.get("Location")
             if location and location.startswith("magnet"):
+                _save_torrent_url_to_cache(torrent_url, torrent.get_hash(location))
                 return location
         with open(filepath, 'wb') as f:
             f.write(r.content)
         daemon.save_torrent_file(filepath)
         magnet_link = torrent.make_magnet_from_torrent_file(filepath)
+        if magnet_link:
+            _save_torrent_url_to_cache(torrent_url, torrent.get_hash(magnet_link))
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(filepath)

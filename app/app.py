@@ -191,11 +191,11 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
             extension: str = os.path.splitext(fn)[1][1:]
             if extension in settings.VIDEO_EXTENSIONS:
                 season_num, episode_num, year = get_episode_info(fn)
-                if episode_num and season_num:
+                if episode_num is not None and season_num is not None:
                     # S00 (specials) go to bottom, others sort normally
                     is_special = (season_num == 0)
-                    return (1 if is_special else 0, season_num or 0, episode_num or 0, fn)
-                if episode_num:
+                    return (1 if is_special else 0, season_num, episode_num, fn)
+                if episode_num is not None:
                     return (0, 0, episode_num, fn)
             # Files with only year or no episode info go to the very bottom
             return (2, 0, 0, fn)

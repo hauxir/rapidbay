@@ -270,10 +270,10 @@ def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]
         if magnet:
             magnet_hash = torrent.get_hash(magnet).lower()
         elif r.get("torrent_link"):
-            # Check if we have a cached hash for this torrent URL
-            cached_hash = url_cache.get(r["torrent_link"])
-            if cached_hash:
-                magnet_hash = cached_hash.lower()
+            # Check if we have a cached magnet for this torrent URL
+            cached_magnet = url_cache.get(r["torrent_link"])
+            if cached_magnet:
+                magnet_hash = torrent.get_hash(cached_magnet).lower()
         if magnet_hash:
             is_downloading = magnet_hash in downloading
             has_output = magnet_hash in output
@@ -329,9 +329,9 @@ def get_magnet_status(request: MagnetStatusRequest, _: None = Depends(authorize)
             statuses[h] = None
 
     for link in request.torrent_links:
-        cached_hash = url_cache.get(link)
-        if cached_hash:
-            h_lower = cached_hash.lower()
+        cached_magnet = url_cache.get(link)
+        if cached_magnet:
+            h_lower = torrent.get_hash(cached_magnet).lower()
             if h_lower in output:
                 statuses[link] = "downloaded"
             elif h_lower in downloading:
@@ -357,15 +357,26 @@ def _load_torrent_url_cache() -> Dict[str, str]:
         return {}
 
 
-def _save_torrent_url_to_cache(url: str, magnet_hash: str) -> None:
+def _save_torrent_url_to_cache(url: str, magnet_link: str) -> None:
     cache = _load_torrent_url_cache()
-    cache[url] = magnet_hash
+    cache[url] = magnet_link
     cache_path = _get_torrent_url_cache_path()
     with open(cache_path, 'w') as f:
         json.dump(cache, f)
 
 
+def _get_cached_magnet(torrent_url: str) -> Optional[str]:
+    """Get cached magnet link for a torrent URL, if available."""
+    cache = _load_torrent_url_cache()
+    return cache.get(torrent_url)
+
+
 def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
+    # Check cache first
+    cached = _get_cached_magnet(torrent_url)
+    if cached:
+        return cached
+
     filepath: str = os.path.join(settings.DATA_DIR, ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent")
     magnet_link: Optional[str] = None
     try:
@@ -373,14 +384,14 @@ def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
         if r.status_code == 302:
             location: Optional[str] = r.headers.get("Location")
             if location and location.startswith("magnet"):
-                _save_torrent_url_to_cache(torrent_url, torrent.get_hash(location))
+                _save_torrent_url_to_cache(torrent_url, location)
                 return location
         with open(filepath, 'wb') as f:
             f.write(r.content)
         daemon.save_torrent_file(filepath)
         magnet_link = torrent.make_magnet_from_torrent_file(filepath)
         if magnet_link:
-            _save_torrent_url_to_cache(torrent_url, torrent.get_hash(magnet_link))
+            _save_torrent_url_to_cache(torrent_url, magnet_link)
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(filepath)

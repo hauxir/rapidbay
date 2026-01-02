@@ -447,7 +447,13 @@ def magnet_download(
 
 @app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
 def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
-    return daemon.get_file_status(magnet_hash, filename)
+    status = daemon.get_file_status(magnet_hash, filename)
+    # Reset expiration timer when file is accessed
+    if status.get("status") == FileStatus.READY:
+        directory = os.path.join(settings.OUTPUT_DIR, magnet_hash)
+        if os.path.isdir(directory):
+            os.utime(directory, None)
+    return status
 
 
 @app.get("/api/next_file/{magnet_hash}/{filename}", response_model=NextFileResponse)
@@ -571,9 +577,6 @@ def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Respo
         raise HTTPException(status_code=404, detail="File not found")
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="File not found")
-    # Update mtime to reset expiration timer
-    os.utime(filepath, None)
-    os.utime(directory, None)
     response = FileResponse(filepath)
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response

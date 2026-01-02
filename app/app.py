@@ -175,7 +175,10 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
             """Return sort key that puts S00/specials, deleted scenes, and extras at the bottom."""
             fn_lower = fn.lower()
             # Check for bonus content keywords
-            bonus_keywords = ["deleted scene", "deleted-scene", "deletedscene", "bonus", "extra", "behind the scenes", "featurette", "interview", "gag reel", "blooper"]
+            bonus_keywords = ["deleted scene", "deleted-scene", "deletedscene",
+                            "bonus", "behind the scenes", "featurette",
+                            "interview", "gag reel", "blooper", "q&a", "casting",
+                            "preview", "promo", "trailer", "making of", "commentary"]
             is_bonus = any(kw in fn_lower for kw in bonus_keywords)
             if is_bonus:
                 return (2, 0, 0, fn)
@@ -189,9 +192,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
                     return (1 if is_special else 0, season_num or 0, episode_num or 0, fn)
                 if episode_num:
                     return (0, 0, episode_num, fn)
-                if year:
-                    return (0, 0, year, fn)
-            # Files without episode info go to the very bottom
+            # Files with only year or no episode info go to the very bottom
             return (2, 0, 0, fn)
 
         if files:

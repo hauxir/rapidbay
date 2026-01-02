@@ -12,7 +12,7 @@ import settings
 import subtitles
 import torrent
 import video_conversion
-from common import threaded
+from common import normalize_filename, threaded
 from http_downloader import HttpDownloader
 from subtitles import get_subtitle_language
 
@@ -29,7 +29,8 @@ def get_filepaths(magnet_hash: str) -> Optional[List[str]]:
 def _get_download_path(magnet_hash: str, filename: str) -> Optional[str]:
     filepaths = get_filepaths(magnet_hash)
     if filepaths:
-        torrent_path = next(fp for fp in filepaths if fp.endswith(filename))
+        normalized = normalize_filename(filename)
+        torrent_path = next(fp for fp in filepaths if normalize_filename(fp).endswith(normalized))
         return os.path.join(f"{settings.DOWNLOAD_DIR}{magnet_hash}", torrent_path)
     return None
 

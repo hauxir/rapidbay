@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import bencodepy
 import libtorrent
+from common import normalize_filename
 from locking import LockManager
 
 # Performance and session constants
@@ -53,8 +54,9 @@ def get_torrent_info(h: libtorrent.torrent_handle, timeout: int = 30) -> libtorr
 
 def get_index_and_file_from_files(h: libtorrent.torrent_handle, filename: str) -> Tuple[Optional[int], Optional["libtorrent.file_entry"]]:
     files = list(get_torrent_info(h).files())
+    normalized = normalize_filename(filename)
     try:
-        return next((i, f) for (i, f) in enumerate(files) if f.path.endswith(filename))
+        return next((i, f) for (i, f) in enumerate(files) if normalize_filename(f.path).endswith(normalized))
     except StopIteration:
         return (None, None)
 
@@ -199,8 +201,9 @@ class TorrentClient:
             )
             files = get_torrent_info(h).files()
             file_priorities = h.file_priorities()
+            normalized = normalize_filename(filename)
             for i, f in enumerate(files):
-                if f.path.endswith(filename):
+                if normalize_filename(f.path).endswith(normalized):
                     file_priorities[i] = 4
                     break
             prioritize_files(h, file_priorities)

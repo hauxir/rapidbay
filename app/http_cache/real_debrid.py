@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
+import common
 import log
 import requests
 import settings
@@ -76,8 +77,9 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
             else:
                 log.debug(f"Real Debrid: Failed to unrestrict link {link}")
 
+        normalized_filename = common.normalize_filename(filename)
         for _i, link in enumerate(unrestricted_links):
-            if unquote(str(link)).endswith(filename):
+            if common.normalize_filename(unquote(str(link))).endswith(normalized_filename):
                 return str(link)
 
         log.debug(f"Real Debrid: File {filename} not found in torrent {magnet_hash}")

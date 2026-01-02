@@ -31,6 +31,11 @@ def path_hierarchy(path: str) -> Union[Dict[str, List[Any]], List[Any], str]:
     return hierarchy
 
 
+def normalize_filename(s: str) -> str:
+    """Normalize filename to ASCII alphanumerics for matching, preserving path separators and periods."""
+    return "".join(c for c in s if (c.isalnum() and c.isascii()) or c in "/\\.")
+
+
 def memoize(expire: int = 300) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         cache = diskcache.Cache(settings.CACHE_DIR)

@@ -175,7 +175,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
             """Return sort key that puts S00/specials, deleted scenes, and extras at the bottom."""
             fn_lower = fn.lower()
             # Check for bonus content keywords
-            bonus_keywords = ["deleted scene", "deleted-scene", "deletedscene",
+            bonus_keywords = ["deleted scene", "deleted-scene", "deleted.scene", "deletedscene",
                             "bonus", "behind the scenes", "featurette",
                             "interview", "gag reel", "blooper", "q&a", "casting",
                             "preview", "promo", "trailer", "making of", "commentary"]

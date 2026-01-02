@@ -172,7 +172,14 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
             return supported_files
 
         def get_sort_key(fn: str) -> tuple:
-            """Return sort key that puts S00/specials and extras at the bottom."""
+            """Return sort key that puts S00/specials, deleted scenes, and extras at the bottom."""
+            fn_lower = fn.lower()
+            # Check for bonus content keywords
+            bonus_keywords = ["deleted scene", "deleted-scene", "deletedscene", "bonus", "extra", "behind the scenes", "featurette", "interview", "gag reel", "blooper"]
+            is_bonus = any(kw in fn_lower for kw in bonus_keywords)
+            if is_bonus:
+                return (2, 0, 0, fn)
+
             extension: str = os.path.splitext(fn)[1][1:]
             if extension in settings.VIDEO_EXTENSIONS:
                 season_num, episode_num, year = get_episode_info(fn)

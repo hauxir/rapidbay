@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import random
+import re
 import shlex
 import string
 import subprocess
@@ -174,12 +175,16 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
         def get_sort_key(fn: str) -> tuple:
             """Return sort key that puts S00/specials, deleted scenes, and extras at the bottom."""
             fn_lower = fn.lower()
-            # Check for bonus content keywords
-            bonus_keywords = ["deleted scene", "deleted-scene", "deleted.scene", "deletedscene",
-                            "bonus", "behind the scenes", "featurette",
-                            "interview", "gag reel", "blooper", "q&a", "casting",
-                            "preview", "promo", "trailer", "making of", "commentary"]
-            is_bonus = any(kw in fn_lower for kw in bonus_keywords)
+            # Check for bonus content patterns
+            bonus_patterns = [
+                r"deleted[\s.\-_]?scenes?",
+                r"behind[\s.\-_]?the[\s.\-_]?scenes?",
+                r"gag[\s.\-_]?reels?",
+                r"making[\s.\-_]?of",
+                r"bonus", r"featurette", r"interview", r"blooper",
+                r"q&a", r"casting", r"preview", r"promo", r"trailer", r"commentary"
+            ]
+            is_bonus = any(re.search(p, fn_lower) for p in bonus_patterns)
             if is_bonus:
                 return (2, 0, 0, fn)
 

@@ -203,9 +203,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
         if files:
             if not supported_files:
                 return sorted(files)
-            sorted_files = sorted(supported_files, key=get_sort_key)
-            print(f"[DEBUG] Sorted files: {[(get_sort_key(f)[:3], f[:40]) for f in sorted_files[:5]]}")
-            return sorted_files
+            return sorted(supported_files, key=get_sort_key)
     return None
 
 

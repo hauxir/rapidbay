@@ -63,6 +63,14 @@ class FilesResponse(BaseModel):
     files: Optional[List[str]]
 
 
+class MagnetStatusRequest(BaseModel):
+    hashes: List[str]
+
+
+class MagnetStatusResponse(BaseModel):
+    statuses: Dict[str, Optional[str]]
+
+
 class StatusResponse(BaseModel):
     output_dir: Any
     filelist_dir: Any
@@ -293,6 +301,22 @@ def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]
     if searchterm == "":
         return {"results": _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)}
     return {"results": _add_status_to_results(filtered_results + rest)}
+
+
+@app.post("/api/magnet_status/", response_model=MagnetStatusResponse)
+def get_magnet_status(request: MagnetStatusRequest, _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Get download status for multiple magnet hashes."""
+    downloading, output = _get_download_status_maps()
+    statuses: Dict[str, Optional[str]] = {}
+    for h in request.hashes:
+        h_lower = h.lower()
+        if h_lower in output:
+            statuses[h] = "downloaded"
+        elif h_lower in downloading:
+            statuses[h] = "downloading"
+        else:
+            statuses[h] = None
+    return {"statuses": statuses}
 
 
 def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:

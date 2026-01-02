@@ -777,8 +777,31 @@
             var self = this;
             this.searchterm = this.params ? this.params.searchterm : "";
 
+            function fetchAndApplyStatus(results) {
+                var hashes = results.map(function (r) {
+                    return r.magnet ? get_hash(r.magnet) : null;
+                }).filter(function (h) { return h; });
+                if (hashes.length === 0) return;
+                $.ajax({
+                    url: "/api/magnet_status/",
+                    type: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({ hashes: hashes }),
+                    success: function (data) {
+                        results.forEach(function (r) {
+                            if (r.magnet) {
+                                var hash = get_hash(r.magnet);
+                                r.status = data.statuses[hash] || null;
+                            }
+                        });
+                        self.results = results.slice(); // trigger Vue reactivity
+                    }
+                });
+            }
+
             if (this.searchterm === "[history]") {
                 this.results = getHistory();
+                fetchAndApplyStatus(this.results);
                 rbsetTimeout(function () {
                     var firstTr = document.getElementsByTagName("tr")[0];
                     if (firstTr) {
@@ -787,6 +810,7 @@
                 });
             } else if (this.searchterm === "[favorites]") {
                 this.results = getFavorites();
+                fetchAndApplyStatus(this.results);
                 rbsetTimeout(function () {
                     var firstTr = document.getElementsByTagName("tr")[0];
                     if (firstTr) {

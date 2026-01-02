@@ -177,10 +177,10 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
             fn_lower = fn.lower()
             # Check for bonus content patterns
             bonus_patterns = [
-                r"deleted[\s.\-_]?scenes?",
-                r"behind[\s.\-_]?the[\s.\-_]?scenes?",
-                r"gag[\s.\-_]?reels?",
-                r"making[\s.\-_]?of",
+                r"deleted[\s._-]?scenes?",
+                r"behind[\s._-]?the[\s._-]?scenes?",
+                r"gag[\s._-]?reels?",
+                r"making[\s._-]?of",
                 r"bonus", r"featurette", r"interview", r"blooper",
                 r"q&a", r"casting", r"preview", r"promo", r"trailer", r"commentary"
             ]

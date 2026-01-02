@@ -171,22 +171,26 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
         if not any(list(map(is_episode, files))):
             return supported_files
 
-        def get_episode_string(fn: str) -> str:
+        def get_sort_key(fn: str) -> tuple:
+            """Return sort key that puts S00/specials and extras at the bottom."""
             extension: str = os.path.splitext(fn)[1][1:]
             if extension in settings.VIDEO_EXTENSIONS:
                 season_num, episode_num, year = get_episode_info(fn)
                 if episode_num and season_num:
-                    return f"S{season_num:03}E{episode_num:03}"
+                    # S00 (specials) go to bottom, others sort normally
+                    is_special = (season_num == 0)
+                    return (1 if is_special else 0, season_num or 0, episode_num or 0, fn)
                 if episode_num:
-                    return str(episode_num)
+                    return (0, 0, episode_num, fn)
                 if year:
-                    return str(year)
-            return ""
+                    return (0, 0, year, fn)
+            # Files without episode info go to the very bottom
+            return (2, 0, 0, fn)
 
         if files:
             if not supported_files:
                 return sorted(files)
-            return sorted(supported_files, key=get_episode_string)
+            return sorted(supported_files, key=get_sort_key)
     return None
 
 

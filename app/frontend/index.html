@@ -145,7 +145,7 @@
                       tabindex="0"
                       v-for="result in results"
                       @click="navigate('/magnet/' + encodeURIComponent(encodeURIComponent(params.magnet_link)) + '/' + encodeURIComponent(result))">
-                          <td><span v-if="isCompleted(result)">&#x2713; </span>{{ result }}</td>
+                          <td><span v-if="isCompleted(result)">&#x2713; </span><span v-else-if="getFileStatus(result) === 'downloaded'">&#x25CF; </span><span v-else-if="getFileStatus(result) === 'downloading'">&#x25CB; </span>{{ result }}</td>
                       </tr>
                       </tbody>
                   </table>

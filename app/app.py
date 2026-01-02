@@ -61,6 +61,7 @@ class NextFileResponse(BaseModel):
 
 class FilesResponse(BaseModel):
     files: Optional[List[str]]
+    file_statuses: Optional[Dict[str, str]] = None
 
 
 class MagnetStatusRequest(BaseModel):
@@ -272,7 +273,7 @@ def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]
         elif r.get("torrent_link"):
             # Check if we have a cached magnet for this torrent URL
             cached_magnet = url_cache.get(r["torrent_link"])
-            if cached_magnet:
+            if cached_magnet and cached_magnet.startswith("magnet:"):
                 magnet_hash = torrent.get_hash(cached_magnet).lower()
         if magnet_hash:
             is_downloading = magnet_hash in downloading
@@ -330,7 +331,7 @@ def get_magnet_status(request: MagnetStatusRequest, _: None = Depends(authorize)
 
     for link in request.torrent_links:
         cached_magnet = url_cache.get(link)
-        if cached_magnet:
+        if cached_magnet and cached_magnet.startswith("magnet:"):
             h_lower = torrent.get_hash(cached_magnet).lower()
             if h_lower in output:
                 statuses[link] = "downloaded"
@@ -448,11 +449,23 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
 
 
 @app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)
-def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Optional[List[str]]]:
+def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
     files_list: Optional[List[str]] = _get_files(magnet_hash)
 
     if files_list:
-        return {"files": files_list}
+        # Get status for each file
+        file_statuses: Dict[str, str] = {}
+        for filename in files_list:
+            status_info = daemon.get_file_status(magnet_hash, filename)
+            status = status_info.get("status")
+            if status == FileStatus.READY:
+                file_statuses[filename] = "downloaded"
+            elif status in (FileStatus.DOWNLOADING, FileStatus.CONVERTING,
+                          FileStatus.FINISHING_UP, FileStatus.DOWNLOADING_SUBTITLES,
+                          FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT,
+                          FileStatus.DOWNLOAD_FINISHED, FileStatus.WAITING_FOR_CONVERSION):
+                file_statuses[filename] = "downloading"
+        return {"files": files_list, "file_statuses": file_statuses}
     return {"files": None}
 
 

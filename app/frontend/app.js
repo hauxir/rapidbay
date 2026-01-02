@@ -869,7 +869,7 @@
     Vue.component("filelist-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null, isTorrentFavorited: false, completedFiles: [] };
+            return { results: null, isTorrentFavorited: false, completedFiles: [], fileStatuses: {} };
         },
         template: "#filelist-screen-template",
         methods: {
@@ -878,6 +878,9 @@
             },
             isCompleted: function (filename) {
                 return this.completedFiles.indexOf(filename) !== -1;
+            },
+            getFileStatus: function (filename) {
+                return this.fileStatuses[filename] || null;
             },
             checkFavorited: function () {
                 var magnetHash = get_hash(this.params.magnet_link);
@@ -914,6 +917,7 @@
                             return;
                         }
                         self.results = data.files;
+                        self.fileStatuses = data.file_statuses || {};
                         rbsetTimeout(function () {
                             // Find first unwatched file
                             var firstUnwatched = 0;

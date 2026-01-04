@@ -479,10 +479,13 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
                 season: Optional[int] = parsed.get("season")
                 episode: Optional[int] = parsed.get("episode")
                 resolution: Optional[str] = parsed.get("resolution")
+                codec: Optional[str] = parsed.get("codec")
                 if title and season is not None and episode is not None:
                     search_term = f"{title} S{season:02d}E{episode + 1:02d}"
                     if resolution:
                         search_term += f" {resolution}"
+                    if codec:
+                        search_term += f" {codec}"
                     results: List[Dict[str, Any]] = jackett.search(search_term) if settings.JACKETT_HOST else []
                     results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
                     if results:

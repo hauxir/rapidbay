@@ -280,7 +280,7 @@
                     get(
                         "/api/next_file/" + magnet_hash + "/" + filename,
                         function (data) {
-                            resolve(data.next_filename);
+                            resolve(data);
                         }
                     );
                 });
@@ -289,30 +289,26 @@
             var video = document.getElementsByTagName("video")[0];
 
             video.addEventListener("play", function () {
-                getNextFile().then(function (next_file) {
-                    if (next_file) {
+                getNextFile().then(function (data) {
+                    if (data.next_filename) {
+                        var magnet = data.next_magnet || decodeURIComponent(
+                            decodeURIComponent(location.pathname.split("/")[2])
+                        );
                         post("/api/magnet_download/", {
-                            magnet_link: decodeURIComponent(
-                                decodeURIComponent(
-                                    location.pathname.split("/")[2]
-                                )
-                            ),
-                            filename: next_file,
+                            magnet_link: magnet,
+                            filename: data.next_filename,
                         });
                     }
                 });
             });
 
             video.addEventListener("ended", function () {
-                getNextFile().then(function (next_file) {
-                    if (next_file) {
-                        var next_path =
-                            window.location.pathname.substring(
-                                0,
-                                window.location.pathname.lastIndexOf("/")
-                            ) +
-                            "/" +
-                            next_file;
+                getNextFile().then(function (data) {
+                    if (data.next_filename) {
+                        var magnet = data.next_magnet || decodeURIComponent(
+                            decodeURIComponent(location.pathname.split("/")[2])
+                        );
+                        var next_path = "/magnet/" + encodeURIComponent(encodeURIComponent(magnet)) + "/" + encodeURIComponent(data.next_filename);
                         navigate("/", true);
                         rbsetTimeout(function () {
                             navigate(next_path, true);

@@ -57,7 +57,8 @@ class FileStatusResponse(BaseModel):
 
 
 class NextFileResponse(BaseModel):
-    next_filename: Optional[str]
+    next_filename: Optional[str] = None
+    next_magnet: Optional[str] = None
 
 
 class FilesResponse(BaseModel):
@@ -459,6 +460,7 @@ def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -
 @app.get("/api/next_file/{magnet_hash}/{filename}", response_model=NextFileResponse)
 def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Optional[str]]:
     next_filename: Optional[str] = None
+    next_magnet: Optional[str] = None
     if settings.AUTO_PLAY_NEXT_FILE:
         files: Optional[List[str]] = _get_files(magnet_hash)
         if files:
@@ -469,7 +471,33 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
                 pass
             except IndexError:
                 pass
-    return {"next_filename": next_filename}
+        # If no next file in torrent, search for next episode
+        if not next_filename:
+            try:
+                parsed: Any = PTN.parse(filename)
+                title: Optional[str] = parsed.get("title")
+                season: Optional[int] = parsed.get("season")
+                episode: Optional[int] = parsed.get("episode")
+                if title and season is not None and episode is not None:
+                    search_term = f"{title} S{season:02d}E{episode + 1:02d}"
+                    results: List[Dict[str, Any]] = jackett.search(search_term) if settings.JACKETT_HOST else []
+                    results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
+                    if results:
+                        result = results[0]
+                        next_magnet = result.get("magnet")
+                        if not next_magnet and result.get("torrent_link"):
+                            next_magnet = _torrent_url_to_magnet(result["torrent_link"])
+                        if next_magnet:
+                            # Fetch file list and get first file
+                            next_hash = torrent.get_hash(next_magnet)
+                            if not _get_files(next_hash):
+                                daemon.fetch_filelist_from_link(next_magnet)
+                            next_files = _get_files(next_hash)
+                            if next_files:
+                                next_filename = next_files[0]
+            except (TypeError, ValueError):
+                pass
+    return {"next_filename": next_filename, "next_magnet": next_magnet}
 
 
 @app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)

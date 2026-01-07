@@ -21,7 +21,7 @@ dependencies = [
     "python-dateutil==2.9.0.post0",
     "python-opensubtitles @ git+https://github.com/agonzalezro/python-opensubtitles@0143db67df5b80155c258887ca36f62a92455d4e",
     "requests==2.31.0",
-    "urllib3==1.26.16",
+    "urllib3==2.6.3",
     "libtorrent==2.0.11",
     "types-libtorrent==2.0.11.20250816",
 ]

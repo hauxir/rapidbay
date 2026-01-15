@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import fcntl
 import json
 import os
 import random
@@ -8,6 +9,7 @@ import shlex
 import string
 import subprocess
 import urllib.parse
+from collections.abc import Generator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator, Dict, List
 
@@ -368,21 +370,48 @@ def _get_torrent_url_cache_path() -> str:
     return os.path.join(settings.DATA_DIR, "torrent_url_cache.json")
 
 
+def _get_torrent_url_cache_lock_path() -> str:
+    return os.path.join(settings.DATA_DIR, "torrent_url_cache.lock")
+
+
+@contextlib.contextmanager
+def _torrent_url_cache_lock(exclusive: bool = False) -> Generator[None, None, None]:
+    """Acquire a file lock for the torrent URL cache.
+
+    Args:
+        exclusive: If True, acquire exclusive lock for writing. If False, acquire shared lock for reading.
+    """
+    lock_path = _get_torrent_url_cache_lock_path()
+    lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+    with open(lock_path, 'w') as lock_file:
+        fcntl.flock(lock_file.fileno(), lock_type)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def _load_torrent_url_cache() -> Dict[str, str]:
     cache_path = _get_torrent_url_cache_path()
-    try:
-        with open(cache_path) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    with _torrent_url_cache_lock(exclusive=False):
+        try:
+            with open(cache_path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
 
 
 def _save_torrent_url_to_cache(url: str, magnet_link: str) -> None:
-    cache = _load_torrent_url_cache()
-    cache[url] = magnet_link
     cache_path = _get_torrent_url_cache_path()
-    with open(cache_path, 'w') as f:
-        json.dump(cache, f)
+    with _torrent_url_cache_lock(exclusive=True):
+        try:
+            with open(cache_path) as f:
+                cache = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            cache = {}
+        cache[url] = magnet_link
+        with open(cache_path, 'w') as f:
+            json.dump(cache, f)
 
 
 def _get_cached_magnet(torrent_url: str) -> str | None:

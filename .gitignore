@@ -8,3 +8,5 @@ creds.json
 .venv/
 # Dev mode data directory
 data/
+# Local pyright config (for venv path override)
+pyrightconfig.json

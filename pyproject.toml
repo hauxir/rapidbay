@@ -47,8 +47,6 @@ dev = [
 # Python version - matching actual runtime version
 pythonVersion = "3.12"
 pythonPlatform = "All"
-venvPath = "."
-venv = "venv"
 
 # Import discovery
 exclude = ["**/frontend/**"]

@@ -1,6 +1,6 @@
 import os
 import threading
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List
 
 import diskcache
 import settings
@@ -15,7 +15,7 @@ def threaded(fn: Callable[..., Any]) -> Callable[..., threading.Thread]:
     return wrapper
 
 
-def path_hierarchy(path: str) -> Union[Dict[str, List[Any]], List[Any], str]:
+def path_hierarchy(path: str) -> Dict[str, List[Any]] | List[Any] | str:
     hierarchy = os.path.basename(path)
     try:
         return {
@@ -29,6 +29,11 @@ def path_hierarchy(path: str) -> Union[Dict[str, List[Any]], List[Any], str]:
     if hierarchy == "":
         return []
     return hierarchy
+
+
+def normalize_filename(s: str) -> str:
+    """Normalize filename to ASCII alphanumerics for matching, preserving path separators and periods."""
+    return "".join(c for c in s if (c.isalnum() and c.isascii()) or c in "/\\.")
 
 
 def memoize(expire: int = 300) -> Callable[[Callable[..., Any]], Callable[..., Any]]:

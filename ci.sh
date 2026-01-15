@@ -7,7 +7,7 @@ if [ -d "venv" ]; then
 fi
 
 echo "Running basedpyright type checks..."
-basedpyright app/
+basedpyright --pythonpath "$(which python)" app/
 
 echo ""
 echo "Running ruff linting..."

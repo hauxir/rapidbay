@@ -4,7 +4,7 @@ import os
 import shutil
 import time
 from threading import Event, Thread
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import http_cache
 import log
@@ -12,12 +12,12 @@ import settings
 import subtitles
 import torrent
 import video_conversion
-from common import threaded
+from common import normalize_filename, threaded
 from http_downloader import HttpDownloader
 from subtitles import get_subtitle_language
 
 
-def get_filepaths(magnet_hash: str) -> Optional[List[str]]:
+def get_filepaths(magnet_hash: str) -> List[str] | None:
     filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
     if os.path.exists(filename):
         with open(filename) as f:
@@ -26,10 +26,11 @@ def get_filepaths(magnet_hash: str) -> Optional[List[str]]:
     return None
 
 
-def _get_download_path(magnet_hash: str, filename: str) -> Optional[str]:
+def _get_download_path(magnet_hash: str, filename: str) -> str | None:
     filepaths = get_filepaths(magnet_hash)
     if filepaths:
-        torrent_path = next(fp for fp in filepaths if fp.endswith(filename))
+        normalized = normalize_filename(filename)
+        torrent_path = next(fp for fp in filepaths if normalize_filename(fp).endswith(normalized))
         return os.path.join(f"{settings.DOWNLOAD_DIR}{magnet_hash}", torrent_path)
     return None
 
@@ -154,7 +155,7 @@ class RapidBayDaemon:
             result[magnet_hash] = {}
             files = torrent.get_torrent_info(h).files()
             file_priorities = h.file_priorities()
-            for priority, f in zip(list(file_priorities), list(files)):
+            for priority, f in zip(list(file_priorities), list(files), strict=False):
                 if priority == 0:
                     continue
                 filename = os.path.basename(f.path)
@@ -289,7 +290,7 @@ class RapidBayDaemon:
             'peers': h.status().num_peers,
         }
 
-    def _download_external_subtitles(self, filepath: str, skip: Optional[List[str]] = None) -> None:
+    def _download_external_subtitles(self, filepath: str, skip: List[str] | None = None) -> None:
         if skip is None:
             skip = []
         if self.subtitle_downloads.get(filepath):
@@ -305,7 +306,7 @@ class RapidBayDaemon:
         file_priorities = h.file_priorities()
         files = [
             f
-            for priority, f in zip(file_priorities, torrent.get_torrent_info(h).files())
+            for priority, f in zip(file_priorities, torrent.get_torrent_info(h).files(), strict=False)
             if priority != 0
         ]
         filenames = [os.path.basename(f.path) for f in files]

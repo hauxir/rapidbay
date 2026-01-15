@@ -1,9 +1,8 @@
 import traceback
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any
 
 import settings
-
-F = TypeVar('F', bound=Callable[..., Any])
 
 
 def debug(msg: str) -> None:
@@ -16,7 +15,7 @@ def write_log() -> None:
         f.write(traceback.format_exc() + "\n")
 
 
-def catch_and_log_exceptions(fn: F) -> F:
+def catch_and_log_exceptions[F: Callable[..., Any]](fn: F) -> F:
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return fn(*args, **kwargs)

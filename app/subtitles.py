@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List
 from xmlrpc.client import ProtocolError
 
 import log
@@ -17,7 +17,7 @@ def _chunks(items: List[Any], n: int) -> Generator[List[Any], None, None]:
 
 
 @log.catch_and_log_exceptions
-def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> None:
+def download_all_subtitles(filepath: str, skip: List[str] | None = None) -> None:
     if skip is None:
         skip = []
     dirname: str = os.path.dirname(filepath)
@@ -32,9 +32,9 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
     ]
     results_from_hash: List[Any] = (
             [
-            item for sublist in  # type: ignore
+            item for sublist in
             [ost.search_subtitles([{"sublanguageid": langid, "moviehash": h}]) or [] for langid in language_ids]
-            for item in sublist  # type: ignore
+            for item in sublist
         ]
     )
     languages_in_results_from_hash: List[Any] = [
@@ -42,9 +42,9 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
     ]
     results_from_filename: List[Any] = (
             [
-            item for sublist in  # type: ignore
+            item for sublist in
             [ost.search_subtitles([{"sublanguageid": langid, "query": basename_without_ext}]) or [] for langid in language_ids]
-            for item in sublist  # type: ignore
+            for item in sublist
         ]
     )
     results_from_filename_but_not_from_hash: List[Any] = [
@@ -99,7 +99,7 @@ def download_all_subtitles(filepath: str, skip: Optional[List[str]] = None) -> N
         os.system(f"mv '{tmp_path}' '{output_path}'")
 
 
-def get_subtitle_language(subtitle_filename: str) -> Optional[str]:
+def get_subtitle_language(subtitle_filename: str) -> str | None:
     subtitle_filename = subtitle_filename.lower()
     assert subtitle_filename.endswith(".srt")
     filename_without_extension = os.path.splitext(subtitle_filename)[0]

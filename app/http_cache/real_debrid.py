@@ -1,8 +1,9 @@
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import unquote
 
+import common
 import log
 import requests
 import settings
@@ -21,7 +22,7 @@ def _get(path: str) -> Dict[str, Any]:
     return response.json()
 
 
-def _post(path: str, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
+def _post(path: str, data: Dict[str, str]) -> Dict[str, Any] | None:
     try:
         response = requests.post(
             f"https://api.real-debrid.com/rest/1.0{path}",
@@ -42,7 +43,7 @@ def _post(path: str, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
+def get_cached_url(magnet_hash: str, filename: str) -> str | None:
 
     if not RD_TOKEN:
         return None
@@ -76,8 +77,9 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
             else:
                 log.debug(f"Real Debrid: Failed to unrestrict link {link}")
 
+        normalized_filename = common.normalize_filename(filename)
         for _i, link in enumerate(unrestricted_links):
-            if unquote(str(link)).endswith(filename):
+            if common.normalize_filename(unquote(str(link))).endswith(normalized_filename):
                 return str(link)
 
         log.debug(f"Real Debrid: File {filename} not found in torrent {magnet_hash}")
@@ -89,7 +91,7 @@ def get_cached_url(magnet_hash: str, filename: str) -> Optional[str]:
     return None
 
 
-def get_filelist(magnet_hash: str) -> Optional[List[str]]:
+def get_filelist(magnet_hash: str) -> List[str] | None:
     """Get filelist from Real-Debrid for a given magnet hash"""
     if not RD_TOKEN:
         return None

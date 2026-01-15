@@ -36,6 +36,8 @@ body {
     box-shadow: none;
 }
 
+.wrapper form { position: relative; }
+
 .search_icon {
     background-image: url("/lib/icons/search_icon.svg");
 }
@@ -56,7 +58,7 @@ body {
     vertical-align: middle;
     max-height: 50px;
 }
-.table tr:focus {
+.table tr:focus-visible {
     background-color: rgba(255, 255, 255, 0.5);
     color: #060606;
 }
@@ -228,13 +230,13 @@ video::cue {
 }
 
 .topbar button:hover,
-.topbar button:focus {
+.topbar button:focus-visible {
     background-color: #bebebe;
     color: #333333;
 }
 
 .topbar button:hover .icon,
-button:focus .icon {
+.topbar button:focus-visible .icon {
     filter: brightness(10%);
 }
 
@@ -314,3 +316,22 @@ button:focus .icon {
     height: 30px;
     width: 30px;
 }
+
+.history_icon { background-image: url("/lib/icons/history_icon.svg"); }
+.favorites_icon { background-image: url("/lib/icons/favorites_icon.svg"); }
+.favorites_empty_icon { background-image: url("/lib/icons/favorites_empty_icon.svg"); }
+.trending_icon { background-image: url("/lib/icons/trending_icon.svg"); }
+.history_icon, .trending_icon { margin-top: 10px; margin-bottom: 10px; height: 25px; width: 25px; }
+.favorites_icon, .favorites_empty_icon { margin-top: 10px; margin-bottom: 10px; height: 25px; width: 25px; }
+
+.topbar-home { position: absolute; top: 0; left: 0; right: 0; background: transparent; }
+.topbar > .topbar-center-btn { left: 50%; transform: translateX(-50%); }
+
+/* Search history */
+.search-history { position: absolute; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto; margin-top: 10px; }
+.search-history-item { padding: 10px 15px; color: rgba(255,255,255,0.7); cursor: pointer; text-align: left; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-history-item:hover, .search-history-item:focus-visible { background: rgba(255,255,255,0.1); color: white; outline: none; }
+.topbar-flex { display: flex; justify-content: space-between; align-items: center; }
+.topbar-flex > button:first-child { position: relative; left: auto; flex-shrink: 0; }
+.topbar-flex > .filename-truncate { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; position: relative; left: auto; right: auto; max-width: none; }
+.topbar-flex > .buttons { flex-shrink: 0; position: relative; margin-right: 0; }

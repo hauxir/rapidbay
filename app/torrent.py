@@ -6,14 +6,15 @@ import os
 import random
 import shutil
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import bencodepy
 import libtorrent
+from common import normalize_filename
 from locking import LockManager
 
 # Performance and session constants
-DEFAULT_SESSION_SETTINGS: Dict[str, Union[int, bool]] = {
+DEFAULT_SESSION_SETTINGS: Dict[str, int | bool] = {
     'connections_limit': 200,
     'active_downloads': 8,
     'active_seeds': 8,
@@ -51,10 +52,11 @@ def get_torrent_info(h: libtorrent.torrent_handle, timeout: int = 30) -> libtorr
     return h.get_torrent_info()
 
 
-def get_index_and_file_from_files(h: libtorrent.torrent_handle, filename: str) -> Tuple[Optional[int], Optional["libtorrent.file_entry"]]:
+def get_index_and_file_from_files(h: libtorrent.torrent_handle, filename: str) -> Tuple[int | None, Optional["libtorrent.file_entry"]]:
     files = list(get_torrent_info(h).files())
+    normalized = normalize_filename(filename)
     try:
-        return next((i, f) for (i, f) in enumerate(files) if f.path.endswith(filename))
+        return next((i, f) for (i, f) in enumerate(files) if normalize_filename(f.path).endswith(normalized))
     except StopIteration:
         return (None, None)
 
@@ -117,11 +119,11 @@ class TorrentClient:
 
     def __init__(
         self,
-        listening_port: Optional[int] = None,
-        dht_routers: Optional[List[Tuple[str, int]]] = None,
-        filelist_dir: Optional[str] = None,
-        download_dir: Optional[str] = None,
-        torrents_dir: Optional[str] = None,
+        listening_port: int | None = None,
+        dht_routers: List[Tuple[str, int]] | None = None,
+        filelist_dir: str | None = None,
+        download_dir: str | None = None,
+        torrents_dir: str | None = None,
     ) -> None:
         self.locks: LockManager = LockManager()
         if listening_port:
@@ -139,9 +141,9 @@ class TorrentClient:
         for router, port in (dht_routers or DEFAULT_DHT_ROUTERS):
             self.session.add_dht_node((router, port))
         self.session.start_dht()
-        self.filelist_dir: Optional[str] = filelist_dir
-        self.download_dir: Optional[str] = download_dir
-        self.torrents_dir: Optional[str] = torrents_dir
+        self.filelist_dir: str | None = filelist_dir
+        self.download_dir: str | None = download_dir
+        self.torrents_dir: str | None = torrents_dir
 
     def process_alerts(self) -> None:
         """Process session alerts for better torrent monitoring"""
@@ -199,8 +201,9 @@ class TorrentClient:
             )
             files = get_torrent_info(h).files()
             file_priorities = h.file_priorities()
+            normalized = normalize_filename(filename)
             for i, f in enumerate(files):
-                if f.path.endswith(filename):
+                if normalize_filename(f.path).endswith(normalized):
                     file_priorities[i] = 4
                     break
             prioritize_files(h, file_priorities)
@@ -222,7 +225,7 @@ class TorrentClient:
             except OSError:
                 pass
 
-    def _add_torrent_file_to_downloads(self, filepath: str) -> Optional[libtorrent.torrent_handle]:
+    def _add_torrent_file_to_downloads(self, filepath: str) -> libtorrent.torrent_handle | None:
         if not os.path.isfile(filepath):
             return None
         magnet_link = make_magnet_from_torrent_file(filepath)

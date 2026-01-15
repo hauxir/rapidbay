@@ -38,9 +38,11 @@
         selectables.eq(currentIndex - 1).focus();
     }
 
-    document.body.onmouseover = function () {
-        document.activeElement.blur();
-    };
+    document.addEventListener("mousemove", function () {
+        if (document.activeElement && document.activeElement.tagName !== "INPUT") {
+            document.activeElement.blur();
+        }
+    });
 
     window.isSafari =
         navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
@@ -109,6 +111,108 @@
         $.post(url, data, callback);
     }
 
+    function saveToHistory(magnet) {
+        var history = JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+        history = history.filter(function (h) {
+            return h.magnet !== magnet;
+        });
+        var title = get_magnet_name(magnet);
+        history.unshift({ magnet: magnet, title: title, ts: Date.now() });
+        if (history.length > 50) {
+            history = history.slice(0, 50);
+        }
+        localStorage.setItem("downloadHistory", JSON.stringify(history));
+    }
+
+    function getHistory() {
+        return JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+    }
+
+    function clearHistory() {
+        localStorage.removeItem("downloadHistory");
+        localStorage.removeItem("completedFiles");
+        localStorage.removeItem("searchHistory");
+    }
+
+    function saveSearchTerm(term) {
+        if (!term || term.trim() === "") return;
+        var history = JSON.parse(localStorage.getItem("searchHistory") || "[]");
+        history = history.filter(function (t) {
+            return t.toLowerCase() !== term.toLowerCase();
+        });
+        history.unshift(term);
+        if (history.length > 4) {
+            history = history.slice(0, 4);
+        }
+        localStorage.setItem("searchHistory", JSON.stringify(history));
+    }
+
+    function getSearchHistory() {
+        return JSON.parse(localStorage.getItem("searchHistory") || "[]");
+    }
+
+    function markFileCompleted(magnet, filename) {
+        var hash = get_hash(magnet);
+        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        if (!completed[hash]) completed[hash] = [];
+        if (completed[hash].indexOf(filename) === -1) {
+            completed[hash].push(filename);
+        }
+        localStorage.setItem("completedFiles", JSON.stringify(completed));
+    }
+
+    function getCompletedFiles(magnet) {
+        var hash = get_hash(magnet);
+        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        return completed[hash] || [];
+    }
+
+    function getFavorites() {
+        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        return favorites.sort(function (a, b) {
+            return (a.title || "").localeCompare(b.title || "");
+        });
+    }
+
+    function saveFavorite(magnet, filename) {
+        var magnetHash = get_hash(magnet);
+        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        favorites = favorites.filter(function (f) {
+            return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
+        });
+        var title = filename || get_magnet_name(magnet);
+        favorites.unshift({ magnet: magnet, filename: filename, title: title, ts: Date.now() });
+        if (favorites.length > 100) {
+            favorites = favorites.slice(0, 100);
+        }
+        localStorage.setItem("favorites", JSON.stringify(favorites));
+    }
+
+    function removeFavorite(magnet, filename) {
+        var magnetHash = get_hash(magnet);
+        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        favorites = favorites.filter(function (f) {
+            return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
+        });
+        localStorage.setItem("favorites", JSON.stringify(favorites));
+    }
+
+    function getVideoPositionKey(magnet, filename) {
+        return "videoPosition_" + get_hash(magnet) + "_" + filename;
+    }
+
+    function saveVideoPosition(magnet, filename, position) {
+        localStorage.setItem(getVideoPositionKey(magnet, filename), position.toString());
+    }
+
+    function getVideoPosition(magnet, filename) {
+        return parseFloat(localStorage.getItem(getVideoPositionKey(magnet, filename))) || 0;
+    }
+
+    function clearVideoPosition(magnet, filename) {
+        localStorage.removeItem(getVideoPositionKey(magnet, filename));
+    }
+
     function get_hash(magnet_link) {
         var hash_start = magnet_link.indexOf("btih:") + 5;
         var hash_end = magnet_link.indexOf("&");
@@ -116,6 +220,14 @@
         return magnet_link
             .substr(hash_start, hash_end - hash_start)
             .toLowerCase();
+    }
+
+    function get_magnet_name(magnet_link) {
+        var match = magnet_link.match(/dn=([^&]+)/);
+        if (match) {
+            return decodeURIComponent(match[1].replace(/\+/g, " "));
+        }
+        return get_hash(magnet_link);
     }
 
     function navigate(path, replaceState) {
@@ -145,7 +257,7 @@
     });
 
     Vue.component("player", {
-        props: ["supported", "url", "subtitles", "back"],
+        props: ["supported", "url", "subtitles", "back", "magnet", "filename"],
         data: function () {
             return {
                 isDesktop:
@@ -168,7 +280,7 @@
                     get(
                         "/api/next_file/" + magnet_hash + "/" + filename,
                         function (data) {
-                            resolve(data.next_filename);
+                            resolve(data);
                         }
                     );
                 });
@@ -177,30 +289,26 @@
             var video = document.getElementsByTagName("video")[0];
 
             video.addEventListener("play", function () {
-                getNextFile().then(function (next_file) {
-                    if (next_file) {
+                getNextFile().then(function (data) {
+                    if (data.next_filename) {
+                        var magnet = data.next_magnet || decodeURIComponent(
+                            decodeURIComponent(location.pathname.split("/")[2])
+                        );
                         post("/api/magnet_download/", {
-                            magnet_link: decodeURIComponent(
-                                decodeURIComponent(
-                                    location.pathname.split("/")[2]
-                                )
-                            ),
-                            filename: next_file,
+                            magnet_link: magnet,
+                            filename: data.next_filename,
                         });
                     }
                 });
             });
 
             video.addEventListener("ended", function () {
-                getNextFile().then(function (next_file) {
-                    if (next_file) {
-                        var next_path =
-                            window.location.pathname.substring(
-                                0,
-                                window.location.pathname.lastIndexOf("/")
-                            ) +
-                            "/" +
-                            next_file;
+                getNextFile().then(function (data) {
+                    if (data.next_filename) {
+                        var magnet = data.next_magnet || decodeURIComponent(
+                            decodeURIComponent(location.pathname.split("/")[2])
+                        );
+                        var next_path = "/magnet/" + encodeURIComponent(encodeURIComponent(magnet)) + "/" + encodeURIComponent(data.next_filename);
                         navigate("/", true);
                         rbsetTimeout(function () {
                             navigate(next_path, true);
@@ -209,6 +317,30 @@
                 });
             });
             video.play();
+
+            // Restore saved position
+            var savedPosition = getVideoPosition(self.magnet, self.filename);
+            if (savedPosition > 0) {
+                video.currentTime = savedPosition;
+            }
+
+            // Save position periodically
+            self.positionInterval = setInterval(function () {
+                if (!video.paused && video.currentTime > 0) {
+                    saveVideoPosition(self.magnet, self.filename, video.currentTime);
+                }
+            }, 5000);
+
+            // Save position on pause
+            video.addEventListener("pause", function () {
+                saveVideoPosition(self.magnet, self.filename, video.currentTime);
+            });
+
+            // Clear position and mark completed when video ends
+            video.addEventListener("ended", function () {
+                clearVideoPosition(self.magnet, self.filename);
+                markFileCompleted(self.magnet, self.filename);
+            });
 
             var captionLanguage = localStorage.getItem("captionLanguage");
             var tracks = video.textTracks;
@@ -287,8 +419,6 @@
                     videoSelected
                 ) {
                     location.href = document.querySelector("video").src;
-                } else {
-                    self.mousemove_listener();
                 }
             };
 
@@ -299,34 +429,50 @@
             var timeout;
             var duration = 2800;
             var self = this;
+            var lastCall = 0;
             this.mousemove_listener = function () {
+                var now = Date.now();
+                // Debounce: ignore if called within 100ms
+                if (now - lastCall < 100) return;
+                lastCall = now;
                 self.hovering = true;
                 clearTimeout(timeout);
-                timeout = rbsetTimeout(function () {
+                timeout = setTimeout(function () {
                     self.hovering = false;
+                    // Blur video to prevent focus-related events
+                    var video = document.querySelector("video");
+                    if (video) video.blur();
                 }, duration);
             };
             this.mousemove_listener();
             document.addEventListener("mousemove", this.mousemove_listener);
             document.addEventListener("touchstart", this.mousemove_listener);
             document.addEventListener("click", this.mousemove_listener);
+            document.addEventListener("keydown", this.mousemove_listener);
         },
         destroyed: function () {
             document.removeEventListener("mousemove", this.mousemove_listener);
             document.removeEventListener("touchstart", this.mousemove_listener);
             document.removeEventListener("click", this.mousemove_listener);
+            document.removeEventListener("keydown", this.mousemove_listener);
             document.removeEventListener(
                 "keydown",
                 this.videokeylistener,
                 true
             );
             document.removeEventListener("keydown", this.keylistener);
+            if (this.positionInterval) {
+                clearInterval(this.positionInterval);
+            }
             var video = document.getElementsByTagName("video")[0];
             if (video) {
                 video.textTracks.removeEventListener(
                     "change",
                     this.captionChangeListener
                 );
+                if (video.currentTime > 0) {
+                    saveVideoPosition(this.magnet, this.filename, video.currentTime);
+                }
             }
         },
         template: "#player-template",
@@ -471,10 +617,39 @@
         },
     });
 
+    Vue.component("favorite-button", {
+        template: "#favorite-button-template",
+        props: ["magnet", "filename"],
+        data: function () {
+            return { isFavorited: false };
+        },
+        created: function () {
+            this.checkFavorited();
+        },
+        methods: {
+            checkFavorited: function () {
+                var favorites = getFavorites();
+                var magnetHash = get_hash(this.magnet);
+                var filename = this.filename;
+                this.isFavorited = favorites.some(function (f) {
+                    return get_hash(f.magnet) === magnetHash && f.filename === filename;
+                });
+            },
+            toggle: function () {
+                if (this.isFavorited) {
+                    removeFavorite(this.magnet, this.filename);
+                } else {
+                    saveFavorite(this.magnet, this.filename);
+                }
+                this.isFavorited = !this.isFavorited;
+            },
+        },
+    });
+
     Vue.component("search-screen", {
         template: "#search-screen-template",
         data: function () {
-            return { searchterm: "" };
+            return { searchterm: "", searchHistory: [] };
         },
         methods: {
             onSubmit: function (e) {
@@ -487,11 +662,28 @@
                             )
                     );
                 } else {
+                    saveSearchTerm(this.searchterm);
                     navigate("/search/" + this.searchterm);
                 }
             },
+            onHistoryClick: function (term) {
+                this.searchterm = term;
+                saveSearchTerm(term);
+                navigate("/search/" + term);
+            },
+            goHistory: function () {
+                navigate("/search/[history]");
+            },
+            goTrending: function () {
+                navigate("/search/");
+            },
+            goFavorites: function () {
+                navigate("/search/[favorites]");
+            },
         },
         mounted: function () {
+            this.searchHistory = getSearchHistory();
+
             if (
                 router.lastRouteResolved().url.toLowerCase() ===
                 "/registerhandler"
@@ -506,11 +698,43 @@
             this.keylistener = function (e) {
                 var name = e.key;
                 var lowername = name.toLowerCase();
-                var onmouseover = document.body.onmouseover;
-                document.body.onmouseover = null;
-                if (lowername.startsWith("arrow")) {
-                    $("input").focus();
-                    document.body.onmouseover = onmouseover;
+                var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
+                var isHistoryItem = document.activeElement && document.activeElement.closest(".search-history");
+                var isInput = document.activeElement && document.activeElement.tagName === "INPUT";
+                if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
+                    e.preventDefault();
+                    document.activeElement.click();
+                } else if (lowername === "arrowdown") {
+                    e.preventDefault();
+                    if (isInput) {
+                        var firstItem = document.querySelector(".search-history-item");
+                        if (firstItem) {
+                            firstItem.focus();
+                        }
+                    } else if (isHistoryItem) {
+                        focusNextElement();
+                    } else {
+                        $("input").focus().click();
+                    }
+                } else if (lowername === "arrowup") {
+                    e.preventDefault();
+                    if (isHistoryItem) {
+                        var items = document.querySelectorAll(".search-history-item");
+                        var idx = Array.prototype.indexOf.call(items, document.activeElement);
+                        if (idx === 0) {
+                            $("input").focus().click();
+                        } else {
+                            focusPrevElement();
+                        }
+                    } else if (!isTopbarButton) {
+                        $(".topbar-home button:first").focus();
+                    }
+                } else if (lowername === "arrowright" && !isInput) {
+                    e.preventDefault();
+                    focusNextElement();
+                } else if (lowername === "arrowleft" && !isInput) {
+                    e.preventDefault();
+                    focusPrevElement();
                 }
             };
 
@@ -530,20 +754,84 @@
             back: function () {
                 window.history.back();
             },
+            onResultClick: function (result) {
+                if (result.filename) {
+                    navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)) + "/" + encodeURIComponent(result.filename));
+                } else if (result.magnet) {
+                    navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)));
+                } else if (result.torrent_link) {
+                    navigate("/torrent/" + encodeURIComponent(result.torrent_link));
+                }
+            },
+            onClearHistory: function () {
+                clearHistory();
+                this.results = [];
+            },
         },
         template: "#search-results-screen-template",
         created: function () {
-            this.searchterm = this.params ? this.params.searchterm : "";
             var self = this;
-            get("/api/search/" + self.searchterm, function (data) {
-                self.results = data.results;
+            this.searchterm = this.params ? this.params.searchterm : "";
+
+            function fetchAndApplyStatus(results) {
+                var hashes = [];
+                var torrent_links = [];
+                results.forEach(function (r) {
+                    if (r.magnet) {
+                        hashes.push(get_hash(r.magnet));
+                    } else if (r.torrent_link) {
+                        torrent_links.push(r.torrent_link);
+                    }
+                });
+                if (hashes.length === 0 && torrent_links.length === 0) return;
+                $.ajax({
+                    url: "/api/magnet_status/",
+                    type: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({ hashes: hashes, torrent_links: torrent_links }),
+                    success: function (data) {
+                        results.forEach(function (r) {
+                            if (r.magnet) {
+                                var hash = get_hash(r.magnet);
+                                r.status = data.statuses[hash] || null;
+                            } else if (r.torrent_link) {
+                                r.status = data.statuses[r.torrent_link] || null;
+                            }
+                        });
+                        self.results = results.slice(); // trigger Vue reactivity
+                    }
+                });
+            }
+
+            if (this.searchterm === "[history]") {
+                this.results = getHistory();
+                fetchAndApplyStatus(this.results);
                 rbsetTimeout(function () {
                     var firstTr = document.getElementsByTagName("tr")[0];
                     if (firstTr) {
                         firstTr.focus();
                     }
                 });
-            });
+            } else if (this.searchterm === "[favorites]") {
+                this.results = getFavorites();
+                fetchAndApplyStatus(this.results);
+                rbsetTimeout(function () {
+                    var firstTr = document.getElementsByTagName("tr")[0];
+                    if (firstTr) {
+                        firstTr.focus();
+                    }
+                });
+            } else {
+                get("/api/search/" + self.searchterm, function (data) {
+                    self.results = data.results;
+                    rbsetTimeout(function () {
+                        var firstTr = document.getElementsByTagName("tr")[0];
+                        if (firstTr) {
+                            firstTr.focus();
+                        }
+                    });
+                });
+            }
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
         },
@@ -577,15 +865,39 @@
     Vue.component("filelist-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null };
+            return { results: null, isTorrentFavorited: false, completedFiles: [], fileStatuses: {} };
         },
         template: "#filelist-screen-template",
         methods: {
             back: function () {
                 window.history.back();
             },
+            isCompleted: function (filename) {
+                return this.completedFiles.indexOf(filename) !== -1;
+            },
+            getFileStatus: function (filename) {
+                return this.fileStatuses[filename] || null;
+            },
+            checkFavorited: function () {
+                var magnetHash = get_hash(this.params.magnet_link);
+                var favorites = getFavorites();
+                this.isTorrentFavorited = favorites.some(function (f) {
+                    return get_hash(f.magnet) === magnetHash && !f.filename;
+                });
+            },
+            toggleFavorite: function () {
+                var magnet = this.params.magnet_link;
+                if (this.isTorrentFavorited) {
+                    removeFavorite(magnet, "");
+                } else {
+                    saveFavorite(magnet, "");
+                }
+                this.isTorrentFavorited = !this.isTorrentFavorited;
+            },
         },
         created: function () {
+            this.checkFavorited();
+            this.completedFiles = getCompletedFiles(this.params.magnet_link);
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
             post("/api/magnet_files/", {
@@ -601,11 +913,19 @@
                             return;
                         }
                         self.results = data.files;
+                        self.fileStatuses = data.file_statuses || {};
                         rbsetTimeout(function () {
-                            var firstTr =
-                                document.getElementsByTagName("tr")[0];
-                            if (firstTr) {
-                                firstTr.focus();
+                            // Find first unwatched file
+                            var firstUnwatched = 0;
+                            for (var i = 0; i < self.results.length; i++) {
+                                if (self.completedFiles.indexOf(self.results[i]) === -1) {
+                                    firstUnwatched = i;
+                                    break;
+                                }
+                            }
+                            var rows = document.getElementsByTagName("tr");
+                            if (rows[firstUnwatched]) {
+                                rows[firstUnwatched].focus();
                             }
                         });
                     }
@@ -648,6 +968,7 @@
                 magnet_link: this.params.magnet_link,
                 filename: this.params.filename,
             });
+            saveToHistory(this.params.magnet_link);
             var self = this;
             var magnet_hash = get_hash(this.params.magnet_link);
             (function get_file_info() {

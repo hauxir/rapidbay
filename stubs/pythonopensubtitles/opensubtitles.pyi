@@ -1,0 +1,13 @@
+from typing import Any, Dict, List
+
+class OpenSubtitles:
+    def __init__(self) -> None: ...
+    def login(self, username: str | None, password: str | None) -> Any: ...
+    def search_subtitles(self, queries: List[Dict[str, Any]]) -> List[Dict[str, Any]] | None: ...
+    def download_subtitles(
+        self,
+        subtitle_ids: List[str],
+        override_filenames: Dict[str, str] | None = None,
+        output_directory: str | None = None,
+        extension: str | None = None,
+    ) -> Any: ...

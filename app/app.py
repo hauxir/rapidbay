@@ -457,7 +457,8 @@ def torrent_url_to_magnet(url: str | None = Form(default=None), _: None = Depend
 def magnet_info(magnet_link: str | None = Form(default=None), _: None = Depends(authorize)) -> Dict[str, str]:
     magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
     if not _get_files(magnet_hash):
-        daemon.fetch_filelist_from_link(magnet_link)
+        thread = daemon.fetch_filelist_from_link(magnet_link)
+        thread.join(timeout=60)
     return {"magnet_hash": magnet_hash}
 
 
@@ -526,7 +527,8 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
                             # Fetch file list and get first file
                             next_hash = torrent.get_hash(next_magnet)
                             if not _get_files(next_hash):
-                                daemon.fetch_filelist_from_link(next_magnet)
+                                thread = daemon.fetch_filelist_from_link(next_magnet)
+                                thread.join(timeout=60)
                             next_files = _get_files(next_hash)
                             if next_files:
                                 next_filename = next_files[0]

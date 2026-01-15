@@ -1,6 +1,6 @@
 import os
 import threading
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List
 
 import diskcache
 import settings
@@ -15,7 +15,7 @@ def threaded(fn: Callable[..., Any]) -> Callable[..., threading.Thread]:
     return wrapper
 
 
-def path_hierarchy(path: str) -> Union[Dict[str, List[Any]], List[Any], str]:
+def path_hierarchy(path: str) -> Dict[str, List[Any]] | List[Any] | str:
     hierarchy = os.path.basename(path)
     try:
         return {

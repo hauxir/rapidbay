@@ -4,7 +4,7 @@ import os
 import re
 import time
 from subprocess import Popen
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import log
 import settings
@@ -53,7 +53,7 @@ def _extract_subtitles_as_vtt(filepath: str) -> Any:
     )
 
 
-def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: Optional[List[Tuple[Optional[str], str]]] = None) -> Any:
+def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: List[Tuple[str | None, str]] | None = None) -> Any:
     if subtitle_filepaths is None:
         subtitle_filepaths = []
     output_extension: str = os.path.splitext(output_filepath)[1]
@@ -87,7 +87,7 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
     if media_info.tracks:
         try:
             duration: Any = next(t.duration for t in media_info.tracks if t.duration)
-            duration_int: Optional[int] = int(round(float(duration) / 1000))
+            duration_int: int | None = int(round(float(duration) / 1000))
         except StopIteration:
             duration_int = None
         with open(f"{output_filepath}{settings.LOG_POSTFIX}", "w") as f:
@@ -174,7 +174,7 @@ class VideoConverter:
             basename: str = os.path.basename(input_filepath)
             filename_without_extension: str = os.path.splitext(basename)[0]
 
-            subtitle_filepaths: List[Tuple[Optional[str], str]] = [
+            subtitle_filepaths: List[Tuple[str | None, str]] = [
                 (get_subtitle_language(os.path.basename(filepath)), filepath)
                 for filepath in _recursive_filepaths(os.path.dirname(input_filepath))
                 if (os.path.basename(filepath).lower()).startswith(

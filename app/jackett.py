@@ -1,7 +1,7 @@
 import asyncio
 import os
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
 
 import aiohttp
 import log
@@ -35,7 +35,7 @@ async def fetch_json(session: aiohttp.ClientSession, url: str) -> Dict[str, Any]
     try:
         async with session.get(url) as response:
             return await response.json()
-    except (aiohttp.ClientError, asyncio.TimeoutError):
+    except (TimeoutError, aiohttp.ClientError):
         return {}  # Network or timeout error - return empty results
 
 
@@ -50,8 +50,8 @@ async def fetch_all(urls: List[str]) -> List[Dict[str, Any]]:
 
 
 @memoize(300)
-def search(searchterm: str) -> List[Dict[str, Union[int, str, Optional[Any]]]]:
-    magnet_links: List[Dict[str, Union[int, str, Optional[Any]]]] = []
+def search(searchterm: str) -> List[Dict[str, int | str | Any | None]]:
+    magnet_links: List[Dict[str, int | str | Any | None]] = []
     try:
         results: List[Dict[str, Any]] = []
         urls = [

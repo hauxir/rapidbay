@@ -1,11 +1,11 @@
 import contextlib
 import os
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 # RAPIDBAY
-PASSWORD: Optional[str] = None
+PASSWORD: str | None = None
 AUTO_PLAY_NEXT_FILE: bool = True
-OPENAPI_HOST: Optional[str] = None
+OPENAPI_HOST: str | None = None
 
 # PATHS - temp values, final constants computed below
 _data_dir: str = "./data"
@@ -19,11 +19,11 @@ _frontend_dir: str = "./app/frontend"
 _kodi_addon_dir: str = "./app/kodi.addon"
 
 # JACKETT
-JACKETT_HOST: Optional[str] = None
+JACKETT_HOST: str | None = None
 JACKETT_API_KEY: str = ""
 
 # TORRENT
-TORRENT_LISTENING_PORT: Optional[int] = None
+TORRENT_LISTENING_PORT: int | None = None
 DHT_ROUTERS: List[Tuple[str, int]] = [
     ("router.utorrent.com", 6881),
     ("router.bittorrent.com", 6881),
@@ -53,8 +53,8 @@ LOG_POSTFIX: str = ".log"
 MAX_OUTPUT_FILE_AGE: int = 10  # hours
 MAX_PARALLEL_CONVERSIONS: int = 2
 
-OPENSUBTITLES_USERNAME: Optional[str] = None
-OPENSUBTITLES_PASSWORD: Optional[str] = None
+OPENSUBTITLES_USERNAME: str | None = None
+OPENSUBTITLES_PASSWORD: str | None = None
 
 # Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:

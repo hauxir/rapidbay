@@ -9,7 +9,7 @@ import string
 import subprocess
 import urllib.parse
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, AsyncIterator, Dict, List, Optional, Union
+from typing import Annotated, Any, AsyncIterator, Dict, List
 
 import http_cache
 import jackett
@@ -30,9 +30,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 class SearchResult(BaseModel):
     title: str
     seeds: int
-    magnet: Optional[str]
-    torrent_link: Optional[str] = None
-    status: Optional[str] = None  # "downloading", "downloaded", or None
+    magnet: str | None
+    torrent_link: str | None = None
+    status: str | None = None  # "downloading", "downloaded", or None
 
 
 class SearchResponse(BaseModel):
@@ -40,7 +40,7 @@ class SearchResponse(BaseModel):
 
 
 class MagnetLinkResponse(BaseModel):
-    magnet_link: Optional[str]
+    magnet_link: str | None
 
 
 class MagnetHashResponse(BaseModel):
@@ -49,21 +49,21 @@ class MagnetHashResponse(BaseModel):
 
 class FileStatusResponse(BaseModel):
     status: str
-    filename: Optional[str] = None
-    subtitles: Optional[List[str]] = None
-    supported: Optional[bool] = None
-    progress: Optional[float] = None
-    peers: Optional[int] = None
+    filename: str | None = None
+    subtitles: List[str] | None = None
+    supported: bool | None = None
+    progress: float | None = None
+    peers: int | None = None
 
 
 class NextFileResponse(BaseModel):
-    next_filename: Optional[str] = None
-    next_magnet: Optional[str] = None
+    next_filename: str | None = None
+    next_magnet: str | None = None
 
 
 class FilesResponse(BaseModel):
-    files: Optional[List[str]]
-    file_statuses: Optional[Dict[str, str]] = None
+    files: List[str] | None
+    file_statuses: Dict[str, str] | None = None
 
 
 class MagnetStatusRequest(BaseModel):
@@ -72,7 +72,7 @@ class MagnetStatusRequest(BaseModel):
 
 
 class MagnetStatusResponse(BaseModel):
-    statuses: Dict[str, Optional[str]]
+    statuses: Dict[str, str | None]
 
 
 class StatusResponse(BaseModel):
@@ -125,7 +125,7 @@ class HeaderMiddleware(BaseHTTPMiddleware):
         if set_cookie:
             response.headers["x-set-cookie"] = set_cookie
         # Convert X-Sendfile to X-Accel-Redirect for Nginx (harmless if nginx not present)
-        x_sendfile: Optional[str] = response.headers.get("X-Sendfile")
+        x_sendfile: str | None = response.headers.get("X-Sendfile")
         if x_sendfile:
             response.headers["X-Accel-Redirect"] = urllib.parse.quote(f"/nginx/{x_sendfile}")
             del response.headers["X-Sendfile"]
@@ -136,8 +136,8 @@ class HeaderMiddleware(BaseHTTPMiddleware):
 app.add_middleware(HeaderMiddleware)
 
 
-def _get_files(magnet_hash: str) -> Optional[List[str]]:
-    filepaths: Optional[List[str]] = get_filepaths(magnet_hash)
+def _get_files(magnet_hash: str) -> List[str] | None:
+    filepaths: List[str] | None = get_filepaths(magnet_hash)
 
     if not filepaths:
         filepaths = http_cache.real_debrid.get_filelist(magnet_hash)
@@ -153,12 +153,12 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
         if not supported_files:
             return files
 
-        def get_episode_info(fn: str) -> List[Optional[Union[int, str]]]:
+        def get_episode_info(fn: str) -> List[int | str | None]:
             try:
                 parsed: Any = PTN.parse(fn)
-                episode_num: Optional[Union[int, str]] = parsed.get("episode")
-                season_num: Optional[Union[int, str]] = parsed.get("season")
-                year: Optional[Union[int, str]] = parsed.get("year")
+                episode_num: int | str | None = parsed.get("episode")
+                season_num: int | str | None = parsed.get("season")
+                year: int | str | None = parsed.get("year")
                 return [season_num, episode_num, year]
             except TypeError:
                 return [None, None, None]
@@ -173,7 +173,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
         if not any(list(map(is_episode, files))):
             return supported_files
 
-        def get_sort_key(fn: str) -> tuple:
+        def get_sort_key(fn: str) -> tuple[int, int | str, int | str, str]:
             """Return sort key that puts S00/specials, deleted scenes, and extras at the bottom."""
             fn_lower = fn.lower()
             # Check for bonus content patterns
@@ -192,7 +192,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
 
             extension: str = os.path.splitext(fn)[1][1:]
             if extension in settings.VIDEO_EXTENSIONS:
-                season_num, episode_num, year = get_episode_info(fn)
+                season_num, episode_num, _ = get_episode_info(fn)
                 if episode_num is not None and season_num is not None:
                     # S00 (specials) go to bottom, others sort normally
                     is_special = (season_num == 0)
@@ -210,7 +210,7 @@ def _get_files(magnet_hash: str) -> Optional[List[str]]:
 
 
 def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    def getdate(d: Optional[datetime.datetime]) -> datetime.date:
+    def getdate(d: datetime.datetime | None) -> datetime.date:
         return d.date() if d else datetime.datetime.now().date()
     dates: List[datetime.date] = sorted([getdate(r.get("published")) for r in results])
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
@@ -233,8 +233,8 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def authorize(
-    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer_scheme)],
-    password: Annotated[Optional[str], Cookie(include_in_schema=False)] = None,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    password: Annotated[str | None, Cookie(include_in_schema=False)] = None,
 ) -> None:
     if not settings.PASSWORD:
         return
@@ -247,7 +247,7 @@ def authorize(
     raise HTTPException(status_code=404)
 
 
-def _send_from_directory(directory: str, filename: str, last_modified: Optional[datetime.datetime] = None) -> FileResponse:
+def _send_from_directory(directory: str, filename: str, last_modified: datetime.datetime | None = None) -> FileResponse:
     filepath = os.path.join(directory, filename)
     if not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="File not found")
@@ -258,7 +258,7 @@ def _send_from_directory(directory: str, filename: str, last_modified: Optional[
 
 
 @app.post("/api")
-def login(password: Optional[str] = Form(default=None)) -> Response:
+def login(password: str | None = Form(default=None)) -> Response:
     if not password:
         raise HTTPException(status_code=404)
     response = Response(content="{}", media_type="application/json")
@@ -269,7 +269,7 @@ def login(password: Optional[str] = Form(default=None)) -> Response:
 
 def _get_download_status_maps() -> tuple[set[str], set[str]]:
     """Returns (downloading_hashes, output_hashes)"""
-    downloading: set[str] = set(h.lower() for h in daemon.torrent_client.torrents.keys())
+    downloading: set[str] = {h.lower() for h in daemon.torrent_client.torrents}
     output: set[str] = set()
     try:
         for name in os.listdir(settings.OUTPUT_DIR):
@@ -286,7 +286,7 @@ def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]
     url_cache = _load_torrent_url_cache()
     for r in results:
         magnet = r.get("magnet")
-        magnet_hash: Optional[str] = None
+        magnet_hash: str | None = None
         if magnet:
             magnet_hash = torrent.get_hash(magnet).lower()
         elif r.get("torrent_link"):
@@ -337,7 +337,7 @@ def get_magnet_status(request: MagnetStatusRequest, _: None = Depends(authorize)
     """Get download status for multiple magnet hashes and/or torrent links."""
     downloading, output = _get_download_status_maps()
     url_cache = _load_torrent_url_cache()
-    statuses: Dict[str, Optional[str]] = {}
+    statuses: Dict[str, str | None] = {}
 
     for h in request.hashes:
         h_lower = h.lower()
@@ -371,7 +371,7 @@ def _get_torrent_url_cache_path() -> str:
 def _load_torrent_url_cache() -> Dict[str, str]:
     cache_path = _get_torrent_url_cache_path()
     try:
-        with open(cache_path, 'r') as f:
+        with open(cache_path) as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
@@ -385,24 +385,24 @@ def _save_torrent_url_to_cache(url: str, magnet_link: str) -> None:
         json.dump(cache, f)
 
 
-def _get_cached_magnet(torrent_url: str) -> Optional[str]:
+def _get_cached_magnet(torrent_url: str) -> str | None:
     """Get cached magnet link for a torrent URL, if available."""
     cache = _load_torrent_url_cache()
     return cache.get(torrent_url)
 
 
-def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
+def _torrent_url_to_magnet(torrent_url: str) -> str | None:
     # Check cache first
     cached = _get_cached_magnet(torrent_url)
     if cached:
         return cached
 
     filepath: str = os.path.join(settings.DATA_DIR, ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent")
-    magnet_link: Optional[str] = None
+    magnet_link: str | None = None
     try:
         r: requests.Response = requests.get(torrent_url, allow_redirects=False, timeout=30)
         if r.status_code == 302:
-            location: Optional[str] = r.headers.get("Location")
+            location: str | None = r.headers.get("Location")
             if location and location.startswith("magnet"):
                 _save_torrent_url_to_cache(torrent_url, location)
                 return location
@@ -419,13 +419,13 @@ def _torrent_url_to_magnet(torrent_url: str) -> Optional[str]:
 
 
 @app.post("/api/torrent_url_to_magnet/", response_model=MagnetLinkResponse)
-def torrent_url_to_magnet(url: Optional[str] = Form(default=None), _: None = Depends(authorize)) -> Dict[str, Any]:
-    magnet_link: Optional[str] = _torrent_url_to_magnet(url)  # type: ignore
+def torrent_url_to_magnet(url: str | None = Form(default=None), _: None = Depends(authorize)) -> Dict[str, Any]:
+    magnet_link: str | None = _torrent_url_to_magnet(url)  # type: ignore
     return {"magnet_link": magnet_link}
 
 
 @app.post("/api/magnet_files/", response_model=MagnetHashResponse)
-def magnet_info(magnet_link: Optional[str] = Form(default=None), _: None = Depends(authorize)) -> Dict[str, str]:
+def magnet_info(magnet_link: str | None = Form(default=None), _: None = Depends(authorize)) -> Dict[str, str]:
     magnet_hash: str = torrent.get_hash(magnet_link)  # type: ignore
     if not _get_files(magnet_hash):
         daemon.fetch_filelist_from_link(magnet_link)
@@ -434,8 +434,8 @@ def magnet_info(magnet_link: Optional[str] = Form(default=None), _: None = Depen
 
 @app.post("/api/magnet_download/", response_model=MagnetHashResponse)
 def magnet_download(
-    magnet_link: Optional[str] = Form(default=None),
-    filename: Optional[str] = Form(default=None),
+    magnet_link: str | None = Form(default=None),
+    filename: str | None = Form(default=None),
     _: None = Depends(authorize)
 ) -> Dict[str, str]:
     if not magnet_link or not filename:
@@ -458,11 +458,11 @@ def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -
 
 
 @app.get("/api/next_file/{magnet_hash}/{filename}", response_model=NextFileResponse)
-def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Optional[str]]:
-    next_filename: Optional[str] = None
-    next_magnet: Optional[str] = None
+def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, str | None]:
+    next_filename: str | None = None
+    next_magnet: str | None = None
     if settings.AUTO_PLAY_NEXT_FILE:
-        files: Optional[List[str]] = _get_files(magnet_hash)
+        files: List[str] | None = _get_files(magnet_hash)
         if files:
             try:
                 index: int = files.index(filename) + 1
@@ -475,11 +475,11 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
         if not next_filename:
             try:
                 parsed: Any = PTN.parse(filename)
-                title: Optional[str] = parsed.get("title")
-                season: Optional[int] = parsed.get("season")
-                episode: Optional[int] = parsed.get("episode")
-                resolution: Optional[str] = parsed.get("resolution")
-                codec: Optional[str] = parsed.get("codec")
+                title: str | None = parsed.get("title")
+                season: int | None = parsed.get("season")
+                episode: int | None = parsed.get("episode")
+                resolution: str | None = parsed.get("resolution")
+                codec: str | None = parsed.get("codec")
                 if title and season is not None and episode is not None:
                     search_term = f"{title} S{season:02d}E{episode + 1:02d}"
                     if resolution:
@@ -508,7 +508,7 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
 
 @app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)
 def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
-    files_list: Optional[List[str]] = _get_files(magnet_hash)
+    files_list: List[str] | None = _get_files(magnet_hash)
 
     if files_list:
         # Get status for each file
@@ -557,7 +557,7 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
 @app.get("/kodi.repo/{path}")
 def kodi_repo(request: Request, path: str = "") -> Response:
     # Extract basic auth password
-    password: Optional[str] = None
+    password: str | None = None
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Basic "):
         import base64
@@ -571,7 +571,7 @@ def kodi_repo(request: Request, path: str = "") -> Response:
     if not settings.PASSWORD or password == settings.PASSWORD:
         zip_filename: str = "rapidbay.zip"
         if path == zip_filename:
-            creds: Dict[str, Optional[str]] = {"host": str(request.base_url).rstrip("/"), "password": settings.PASSWORD}
+            creds: Dict[str, str | None] = {"host": str(request.base_url).rstrip("/"), "password": settings.PASSWORD}
             creds_file = os.path.join(settings.KODI_ADDON_DIR, "creds.json")
             with open(creds_file, "w") as f:
                 json.dump(creds, f)
@@ -618,7 +618,7 @@ def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Respo
 
 # Catch-all route for frontend - MUST be defined last
 @app.get("/{path:path}", include_in_schema=False)
-def frontend(path: str, password: Optional[str] = Cookie(default=None)) -> Response:
+def frontend(path: str, password: str | None = Cookie(default=None)) -> Response:
     if path == "":
         path = "index.html"
     if not path.startswith("index.html"):

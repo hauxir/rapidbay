@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "Rapidbay"
 version = "1.0.0"
 license = "MIT"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
     "aiohttp==3.9.5",
     "bencodepy==0.9.5",
@@ -44,9 +44,11 @@ dev = [
 ]
 
 [tool.basedpyright]
-# Python version - matching project Python version  
-pythonVersion = "3.9"
+# Python version - matching actual runtime version
+pythonVersion = "3.12"
 pythonPlatform = "All"
+venvPath = "."
+venv = "venv"
 
 # Import discovery
 exclude = ["**/frontend/**"]
@@ -109,7 +111,7 @@ reportMissingImports = "none"  # Matches ignore_missing_imports = True for exter
 
 # Execution environment
 executionEnvironments = [
-    { root = "app", pythonVersion = "3.9", extraPaths = ["."] }
+    { root = "app", pythonVersion = "3.12", extraPaths = ["."] }
 ]
 
 # Additional configuration for handling imports
@@ -120,7 +122,7 @@ useLibraryCodeForTypes = true
 [tool.ruff]
 # Ruff configuration
 line-length = 120
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 # Enable pycodestyle, pyflakes, and more

@@ -353,17 +353,26 @@ class RapidBayDaemon:
             output_filepath = _get_output_filepath(magnet_hash, filepath)
 
             if is_state(filename, FileStatus.DOWNLOAD_FINISHED):
+                if not os.path.isfile(filepath):
+                    log.debug(f"File not found, skipping: {filepath}")
+                    continue
                 subtitle_filenames = _subtitle_filenames(h, filepath)
                 available_subtitle_languages = [lang for lang in [get_subtitle_language(fn) for fn in subtitle_filenames] if lang]
                 embedded_subtitle_languages = [lang for (_, lang) in video_conversion.get_sub_tracks(filepath)]
                 self._download_external_subtitles(filepath, skip=available_subtitle_languages + embedded_subtitle_languages)
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
+                if not os.path.isfile(filepath):
+                    log.debug(f"File not found for conversion, skipping: {filepath}")
+                    continue
                 self.http_downloader.clear(filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
                 self.video_converter.convert_file(filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
                 filename, FileStatus.CONVERSION_FAILED
             ):
+                if not os.path.isfile(filepath):
+                    log.debug(f"File not found for copy, skipping: {filepath}")
+                    continue
                 output_dir = os.path.dirname(output_filepath)
                 os.makedirs(output_dir, exist_ok=True)
                 shutil.copy(filepath, output_filepath)

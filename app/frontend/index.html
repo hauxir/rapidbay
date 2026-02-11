@@ -12,6 +12,7 @@
         <script src="/lib/jquery-ui-focusable-1.13.2.min.js"></script>
         <script src="/lib/vue.2.5.3.min.js"></script>
         <script src="/lib/navigo.6.0.2.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
         <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
         <script src="/lib/chromecastjs.js"></script>
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
@@ -193,7 +194,7 @@
                            </a>
                        </div>
                        <div class="buttons" v-if="supported">
-                           <chromecast-button v-if="url && isDesktop && isChrome"/>
+                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>
             	<caption-button v-if="url"/>
                            <favorite-button :magnet="magnet" :filename="filename"/>
                            <fullscreen-button/>
@@ -203,7 +204,7 @@
                 poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                 disablepictureinpicture
                        controlslist="nodownload noplaybackrate"
-                v-if="supported && url" :src="url" controls autoplay playsinline tabindex="0"
+                v-if="supported && url" controls autoplay playsinline tabindex="0"
             >
                        <track v-for="subtitle in subtitles"
                            :label="subtitle.language" kind="subtitles"

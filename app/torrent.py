@@ -207,6 +207,7 @@ class TorrentClient:
                     file_priorities[i] = 4
                     break
             prioritize_files(h, file_priorities)
+            h.set_flags(libtorrent.torrent_flags.sequential_download)
             self._write_filelist_to_disk(magnet_link)
 
     def remove_torrent(self, magnet_hash: str, remove_files: bool = False) -> None:
@@ -250,6 +251,33 @@ class TorrentClient:
         prioritize_files(h, [0] * len(files))
         self.torrents[magnet_hash] = h
         return h
+
+    def get_sequential_bytes(self, magnet_hash: str, filename: str) -> int:
+        """Returns number of contiguous bytes available from start of file."""
+        h = self.torrents.get(magnet_hash)
+        if not h or not h.has_metadata():
+            return 0
+        ti = h.get_torrent_info()
+        files = ti.files()
+        i, f = get_index_and_file_from_files(h, filename)
+        if i is None or f is None:
+            return 0
+        file_offset = files.file_offset(i)
+        file_size = f.size
+        piece_length = ti.piece_length()
+        first_piece = file_offset // piece_length
+        sequential_bytes = 0
+        piece_idx = first_piece
+        while piece_idx < ti.num_pieces() and h.have_piece(piece_idx):
+            piece_start = piece_idx * piece_length
+            piece_end = piece_start + ti.piece_size(piece_idx)
+            chunk_start = max(piece_start, file_offset)
+            chunk_end = min(piece_end, file_offset + file_size)
+            if chunk_start >= file_offset + file_size:
+                break
+            sequential_bytes = chunk_end - file_offset
+            piece_idx += 1
+        return sequential_bytes
 
     def _write_filelist_to_disk(self, magnet_link: str) -> None:
         magnet_hash = get_hash(magnet_link)

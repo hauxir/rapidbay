@@ -60,6 +60,10 @@ MAX_PARALLEL_CONVERSIONS: int = 2
 OPENSUBTITLES_USERNAME: str | None = None
 OPENSUBTITLES_PASSWORD: str | None = None
 
+# HLS STREAMING
+HLS_SEGMENT_DURATION: int = 6  # seconds per HLS segment
+HLS_START_THRESHOLD: int = 2 * 1024 * 1024  # bytes of sequential data before starting HLS
+
 # Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:
     _NULL = "NULL"

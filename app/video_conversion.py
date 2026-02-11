@@ -1,17 +1,14 @@
 import contextlib
-import datetime
 import os
-import re
-import subprocess
+import threading
 import time
-from subprocess import Popen, TimeoutExpired
-from typing import Any, Dict, List, Tuple
+from subprocess import DEVNULL, PIPE, Popen
+from typing import Any, Callable, Dict, List, Tuple
 
 import log
 import settings
 from common import threaded
 from pymediainfo import MediaInfo
-from subtitles import get_subtitle_language
 
 
 def _recursive_filepaths(dir_name: str) -> List[str]:
@@ -37,8 +34,7 @@ def get_sub_tracks(filepath: str) -> List[Tuple[int, str]]:
     ]
 
 
-def _extract_subtitles_as_vtt(filepath: str) -> Any:
-    output_dir: str = os.path.dirname(filepath)
+def _extract_subtitles_as_vtt(filepath: str, output_dir: str) -> Any:
     basename: str = os.path.basename(filepath)
     filename_without_extension: str = os.path.splitext(basename)[0]
     sub_tracks: List[Tuple[int, str]] = get_sub_tracks(filepath)
@@ -54,193 +50,160 @@ def _extract_subtitles_as_vtt(filepath: str) -> Any:
     )
 
 
-def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> List[str] | None:
-    """Returns ffprobe `codec_name` for every stream of the given type
-    ("a" for audio, "v" for video). Returns `None` when ffprobe fails (timeout,
-    missing binary, non-zero exit) so callers can distinguish probe failure
-    from a file that genuinely has no streams of that type."""
+PIPE_READ_CHUNK = 256 * 1024  # 256KB chunks for pipe feeder
+
+# Containers that support sequential reading from a pipe (no seeking needed)
+PIPE_FRIENDLY_EXTENSIONS = {".mkv", ".avi", ".ts", ".mpg", ".mpeg"}
+
+
+def _is_hevc(filepath: str) -> bool:
     try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-select_streams", stream_type,
-                "-show_entries", "stream=codec_name",
-                "-of", "default=nw=1:nk=1",
-                filepath,
-            ],
-            capture_output=True, text=True, timeout=15, check=False,
-        )
-    except (TimeoutExpired, OSError) as e:
-        log.debug(f"ffprobe failed for {filepath} ({stream_type}): {e}")
-        return None
-    if result.returncode != 0:
-        log.debug(
-            f"ffprobe non-zero exit ({result.returncode}) for {filepath} ({stream_type}): {result.stderr.strip()}"
-        )
-        return None
-    return [c.strip().lower() for c in result.stdout.splitlines() if c.strip()]
+        media_info: Any = MediaInfo.parse(filepath)
+        for t in media_info.tracks:
+            if t.track_type == "Video" and t.format and t.format.upper() == "HEVC":
+                return True
+    except Exception:
+        pass
+    return False
 
 
-def _video_codec_passthrough(codec: str) -> bool:
-    """True when the video codec is browser-compatible inside MP4 and can be
-    stream-copied. Accepts both ffprobe `codec_name` ("h264", "hevc") and
-    MediaInfo `format` ("AVC", "HEVC")."""
-    codec = codec.lower()
-    return any(s in codec for s in ("h264", "h265", "avc", "hevc", "av1"))
-
-
-def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: List[Tuple[str | None, str]] | None = None) -> Any:
-    if subtitle_filepaths is None:
-        subtitle_filepaths = []
-    output_extension: str = os.path.splitext(output_filepath)[1]
-    media_info: Any = MediaInfo.parse(input_filepath)
-    # Codec detection via ffprobe — MediaInfo's `format` strings vary across
-    # containers (e.g. "AAC LC", "MPEG-4 Audio") and miss codecs entirely on
-    # partial/unusual files, which would force a needless transcode. Fall back
-    # to MediaInfo if ffprobe is unavailable or errors out.
-    audio_codecs: List[str] | None = _ffprobe_stream_codecs(input_filepath, "a")
-    video_codecs: List[str] | None = _ffprobe_stream_codecs(input_filepath, "v")
-    if audio_codecs is None:
-        audio_codecs = [
-            t.format.lower() for t in media_info.tracks if t.track_type == "Audio" and t.format
-        ]
-    if video_codecs is None:
-        video_codecs = [
-            t.format.lower() for t in media_info.tracks if t.track_type == "Video" and t.format
-        ]
-    needs_audio_conversion: bool = bool(audio_codecs) and not any("aac" in c for c in audio_codecs)
-    needs_video_conversion: bool = (
-        settings.CONVERT_VIDEO
-        and bool(video_codecs)
-        and not any(_video_codec_passthrough(c) for c in video_codecs)
-    )
-    is_hevc: bool = any(("hevc" in c or "h265" in c) for c in video_codecs)
-    has_picture_subs: bool = (
-        len(
-            [
-                t
-                for t in media_info.tracks
-                if t.track_type == "Text"
-                and "Picture" in (t.codec_id_info or "")
-            ]
-        )
-        > 0
-    )
-    n_sub_tracks: int = (
-        len([t for t in media_info.tracks if t.track_type == "Text"])
-        if not has_picture_subs
-        else 0
-    )
-
-    if media_info.tracks:
-        try:
-            duration: Any = next(t.duration for t in media_info.tracks if t.duration)
-            duration_int: int | None = int(round(float(duration) / 1000))
-        except StopIteration:
-            duration_int = None
-        with open(f"{output_filepath}{settings.LOG_POSTFIX}", "w") as f:
-            f.write(f"{duration_int}\r")
-    return Popen(
-        " ".join(
-            [
-                "ffmpeg -nostdin -threads 0",
-                f'-i "{input_filepath}"',
-                " ".join([f'-f srt -i "{fn}"' for (_, fn) in subtitle_filepaths]),
-                "-map 0:v?",
-                "-map 0:a?",
-                "-map 0:s?" if n_sub_tracks > 0 else "",
-                f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
-                if needs_audio_conversion
-                else "-acodec copy",
-                "-vcodec " + settings.VIDEO_CONVERSION_PARAMS
-                if needs_video_conversion
-                else "-vcodec copy",
-                " ".join([f"-map {i}?" for i in range(1, len(subtitle_filepaths) + 1)]),
-                " ".join(
-                    [
-                        f"-metadata:s:s:{i + n_sub_tracks} language='{subtitle_filepaths[i][0]}'"
-                        for i in range(0, len(subtitle_filepaths))
-                        if subtitle_filepaths[i][0] is not None
-                    ]
-                ),
-                "-c:s mov_text",
-                "-movflags faststart",
-                "-v quiet -stats",
-                "-tag:v hvc1" if is_hevc else "",
-                f'"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" 2>> "{output_filepath}{settings.LOG_POSTFIX}"',
-                "&&",
-                f'mv "{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" "{output_filepath}"',
-            ]
-        ),
-        shell=True,
-    )
-
-
-def get_conversion_progress(filepath: str) -> float:
-    log_filepath: str = f"{filepath}{settings.LOG_POSTFIX}"
-    if os.path.isfile(log_filepath):
-        with open(log_filepath) as f:
-            lines: List[str] = f.readlines()
-            first_line: str = lines[0]
-            last_line: str = lines[-1]
-            duration: int = int(first_line)
-            current_duration_match = re.search(r"time=\s*(\d\d\:\d\d\:\d\d)\s*", last_line)
-            if current_duration_match:
-                current_duration_str: str = current_duration_match.group(1)
-                current_duration_struct = time.strptime(
-                    current_duration_str.split(",")[0], "%H:%M:%S"
-                )
-                current_duration_seconds: float = datetime.timedelta(
-                    hours=current_duration_struct.tm_hour,
-                    minutes=current_duration_struct.tm_min,
-                    seconds=current_duration_struct.tm_sec,
-                ).total_seconds()
-                return current_duration_seconds / duration
-    return 0.0
-
-
-class VideoConverter:
+class HLSStreamer:
     def __init__(self) -> None:
-        self.file_conversions: Dict[str, bool] = {}
+        self.active_streams: Dict[str, bool] = {}
 
     @threaded
     @log.catch_and_log_exceptions
-    def convert_file(self, input_filepath: str, output_filepath: str) -> None:
+    def start_stream(
+        self,
+        input_filepath: str,
+        output_dir: str,
+        get_sequential_bytes: Callable[[], int],
+        total_file_size: int,
+        m3u8_filename: str = "stream.m3u8",
+    ) -> None:
+        m3u8_path = os.path.join(output_dir, m3u8_filename)
         try:
-
-            if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
+            if len(self.active_streams) >= settings.MAX_PARALLEL_CONVERSIONS:
                 return
-            if self.file_conversions.get(output_filepath):
+            if self.active_streams.get(m3u8_path):
                 return
 
-            self.file_conversions[output_filepath] = True
-
-            output_dir: str = os.path.dirname(output_filepath)
+            self.active_streams[m3u8_path] = True
             os.makedirs(output_dir, exist_ok=True)
 
-            # Gather subtitle files
-            basename: str = os.path.basename(input_filepath)
-            filename_without_extension: str = os.path.splitext(basename)[0]
+            segment_prefix = os.path.splitext(m3u8_filename)[0]
+            segment_pattern = os.path.join(output_dir, f"{segment_prefix}_seg_%04d.m4s")
+            init_filename = f"{segment_prefix}_init.mp4"
+            stderr_log_path = os.path.join(output_dir, m3u8_filename + ".log")
 
-            subtitle_filepaths: List[Tuple[str | None, str]] = [
-                (get_subtitle_language(os.path.basename(filepath)), filepath)
-                for filepath in _recursive_filepaths(os.path.dirname(input_filepath))
-                if (os.path.basename(filepath).lower()).startswith(
-                    filename_without_extension.lower()
-                )
-                and filepath.endswith(".srt")
+            ext = os.path.splitext(input_filepath)[1].lower()
+            use_pipe = ext in PIPE_FRIENDLY_EXTENSIONS
+
+            ffmpeg_input = ["pipe:0"] if use_pipe else [input_filepath]
+            ffmpeg_cmd = [
+                "ffmpeg", "-nostdin", "-threads", "0",
+                "-i", *ffmpeg_input,
+                "-map", "0:v?", "-map", "0:a?",
+                "-c:v", "copy",
+                "-acodec", "aac", "-ab", settings.AAC_BITRATE,
+                "-ac", str(settings.AAC_CHANNELS),
+                "-movflags", "+negative_cts_offsets+default_base_moof",
+                "-f", "hls",
+                "-hls_time", str(settings.HLS_SEGMENT_DURATION),
+                "-hls_playlist_type", "event",
+                "-hls_segment_type", "fmp4",
+                "-hls_fmp4_init_filename", init_filename,
+                "-hls_flags", "independent_segments",
+                "-hls_segment_filename", segment_pattern,
+                m3u8_path,
             ]
 
-            conversion: Any = _convert_file_to_mp4(
-                input_filepath, output_filepath, subtitle_filepaths=subtitle_filepaths
-            )
-            conversion.wait()
+            with open(stderr_log_path, "w") as stderr_log:
+                if use_pipe:
+                    proc = Popen(ffmpeg_cmd, stdin=PIPE, stdout=DEVNULL, stderr=stderr_log)
+                    feeder = threading.Thread(
+                        target=self._pipe_feeder,
+                        args=(input_filepath, proc, get_sequential_bytes, total_file_size),
+                    )
+                    feeder.start()
+                    feeder.join()
+                else:
+                    # MP4/MOV need seeking — wait for full file, then use direct input
+                    while get_sequential_bytes() < total_file_size:
+                        time.sleep(1)
+                    proc = Popen(ffmpeg_cmd, stdin=DEVNULL, stdout=DEVNULL, stderr=stderr_log)
+                proc.wait()
 
-            if conversion.returncode != 0:
-                raise Exception(f"Conversion failed for {input_filepath}")
+            if proc.returncode != 0:
+                with open(stderr_log_path) as f:
+                    stderr = f.read()
+                print(f"HLS conversion failed for {input_filepath}: exit code {proc.returncode}: {stderr[-500:]}")
+                # Remove incomplete m3u8 so daemon retries the conversion
+                with contextlib.suppress(OSError):
+                    os.remove(m3u8_path)
+                return
 
-            _extract_subtitles_as_vtt(output_filepath).wait()
+            # Finalize the m3u8: switch EVENT→VOD and append ENDLIST
+            if os.path.isfile(m3u8_path):
+                with open(m3u8_path) as f:
+                    content = f.read()
+                if "#EXT-X-ENDLIST" not in content:
+                    content = content.replace("#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-PLAYLIST-TYPE:VOD")
+                    content += "#EXT-X-ENDLIST\n"
+                    with open(m3u8_path, "w") as f:
+                        f.write(content)
+
+            # Extract embedded subtitles as VTT from the original file
+            if os.path.isfile(input_filepath):
+                with contextlib.suppress(Exception):
+                    _extract_subtitles_as_vtt(input_filepath, output_dir).wait()
 
         finally:
             with contextlib.suppress(KeyError):
-                del self.file_conversions[output_filepath]
+                del self.active_streams[m3u8_path]
+
+    def _pipe_feeder(
+        self,
+        filepath: str,
+        proc: Popen,  # type: ignore[type-arg]
+        get_sequential_bytes: Callable[[], int],
+        total_file_size: int,
+    ) -> None:
+        bytes_written = 0
+        try:
+            while not os.path.isfile(filepath):
+                if proc.poll() is not None:
+                    return
+                time.sleep(0.5)
+
+            with open(filepath, "rb") as f:
+                while True:
+                    if proc.poll() is not None:
+                        break
+
+                    available = get_sequential_bytes()
+
+                    if available <= bytes_written:
+                        time.sleep(0.5)
+                        continue
+
+                    to_read = available - bytes_written
+                    while to_read > 0:
+                        chunk_size = min(to_read, PIPE_READ_CHUNK)
+                        data = f.read(chunk_size)
+                        if not data:
+                            break
+                        try:
+                            proc.stdin.write(data)  # type: ignore[union-attr]
+                            proc.stdin.flush()  # type: ignore[union-attr]
+                        except BrokenPipeError:
+                            return
+                        bytes_written += len(data)
+                        to_read -= len(data)
+
+                    if bytes_written >= total_file_size and available >= total_file_size:
+                        break
+
+        finally:
+            with contextlib.suppress(Exception):
+                proc.stdin.close()  # type: ignore[union-attr]

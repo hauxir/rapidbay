@@ -287,6 +287,33 @@
             }
 
             var video = document.getElementsByTagName("video")[0];
+            var videoUrl = window.location.origin + self.url;
+            var isHLS = self.url.indexOf(".m3u8") !== -1;
+
+            if (isHLS && typeof Hls !== "undefined" && Hls.isSupported()) {
+                self.hls = new Hls({
+                    startPosition: 0,
+                    maxBufferHole: 0.5,
+                    nudgeOffset: 0.2,
+                    nudgeMaxRetry: 10,
+                });
+                self.hls.on(Hls.Events.ERROR, function (event, data) {
+                    console.warn("HLS error:", data.fatal ? "FATAL" : "non-fatal", data.type, data.details, "reason:", data.reason, "err:", data.error, "frag:", data.frag && data.frag.sn);
+                    if (data.fatal) {
+                        self.hls.destroy();
+                        self.hls = null;
+                    }
+                });
+                video.addEventListener("waiting", function () {
+                    console.log("video waiting, buffered:", video.buffered.length ? video.buffered.end(0).toFixed(1) + "s" : "empty", "currentTime:", video.currentTime.toFixed(1));
+                });
+                self.hls.loadSource(videoUrl);
+                self.hls.attachMedia(video);
+            } else if (isHLS && video.canPlayType("application/vnd.apple.mpegurl")) {
+                video.src = videoUrl;
+            } else {
+                video.src = videoUrl;
+            }
 
             video.addEventListener("play", function () {
                 getNextFile().then(function (data) {
@@ -343,12 +370,18 @@
             });
 
             var captionLanguage = localStorage.getItem("captionLanguage");
-            var tracks = video.textTracks;
-            for (var i = 0; i < tracks.length; i++) {
-                var track = tracks[i];
-                track.mode = "disabled";
-            }
-            if (captionLanguage) {
+            function applyCaptionPreference() {
+                var tracks = video.textTracks;
+                var captionLanguage = localStorage.getItem("captionLanguage");
+                if (!captionLanguage) return;
+                var hasShowing = false;
+                for (var i = 0; i < tracks.length; i++) {
+                    if (tracks[i].mode === "showing") {
+                        hasShowing = true;
+                        break;
+                    }
+                }
+                if (hasShowing) return;
                 var currentTrack;
                 for (var i = 0; i < tracks.length; i++) {
                     var track = tracks[i];
@@ -361,6 +394,16 @@
                     currentTrack.mode = "showing";
                 }
             }
+            var tracks = video.textTracks;
+            for (var i = 0; i < tracks.length; i++) {
+                var track = tracks[i];
+                track.mode = "disabled";
+            }
+            applyCaptionPreference();
+            this.addTrackListener = function () {
+                applyCaptionPreference();
+            };
+            video.textTracks.addEventListener("addtrack", this.addTrackListener);
             this.captionChangeListener = function (e) {
                 console.log(e);
                 var tracks = e.currentTarget;
@@ -464,11 +507,19 @@
             if (this.positionInterval) {
                 clearInterval(this.positionInterval);
             }
+            if (this.hls) {
+                this.hls.destroy();
+                this.hls = null;
+            }
             var video = document.getElementsByTagName("video")[0];
             if (video) {
                 video.textTracks.removeEventListener(
                     "change",
                     this.captionChangeListener
+                );
+                video.textTracks.removeEventListener(
+                    "addtrack",
+                    this.addTrackListener
                 );
                 if (video.currentTime > 0) {
                     saveVideoPosition(this.magnet, this.filename, video.currentTime);
@@ -581,6 +632,7 @@
 
     Vue.component("chromecast-button", {
         template: "#chromecast-button-template",
+        props: ["videoUrl"],
         methods: {
             cast: function () {
                 var root = window.location.origin;
@@ -599,8 +651,9 @@
                 var current_subtitle_url = current_subtitle
                     ? root + current_subtitle.id
                     : null;
+                var contentUrl = this.videoUrl ? root + this.videoUrl : video.src;
                 var media = {
-                    content: video.src,
+                    content: contentUrl,
                     title: "RapidBay",
                     subtitles: current_subtitle
                         ? [
@@ -1017,8 +1070,11 @@
                                   })
                                 : [];
                         }
-                        if (self.status !== "ready") {
+                        if (self.status !== "ready" && self.status !== "streaming") {
                             rbsetTimeout(get_file_info, 1000);
+                        } else if (self.status === "streaming") {
+                            // Continue polling for subtitle updates and stream completion
+                            rbsetTimeout(get_file_info, 3000);
                         }
                     }
                 );

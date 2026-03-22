@@ -57,6 +57,9 @@ class FileStatusResponse(BaseModel):
     supported: bool | None = None
     progress: float | None = None
     peers: int | None = None
+    hls_filename: str | None = None
+    hls_subtitles: List[str] | None = None
+    hls_pending: bool | None = None
 
 
 class NextFileResponse(BaseModel):
@@ -87,6 +90,7 @@ class StatusResponse(BaseModel):
     torrent_downloads: Any
     session_torrents: List[str]
     conversions: Any
+    hls_streams: Any
     http_downloads: Any
 
 # Global daemon instance
@@ -507,17 +511,22 @@ def magnet_download(
     if not magnet_link or not filename:
         raise HTTPException(status_code=400, detail="magnet_link and filename required")
     magnet_hash: str = torrent.get_hash(magnet_link)
-    status = daemon.get_file_status(magnet_hash, filename)["status"]
-    if status not in (FileStatus.READY, FileStatus.STREAMING):
+    if daemon.get_file_status(magnet_hash, filename)["status"] not in (FileStatus.READY, FileStatus.CONVERTING):
         daemon.download_file(magnet_link, filename)
     return {"magnet_hash": magnet_hash}
+
+
+@app.post("/api/magnet/{magnet_hash}/{filename}/stream")
+def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    started = daemon.start_hls_stream(magnet_hash, filename)
+    return {"started": started}
 
 
 @app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
 def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
     status = daemon.get_file_status(magnet_hash, filename)
     # Reset expiration timer when file is accessed
-    if status.get("status") in (FileStatus.READY, FileStatus.STREAMING):
+    if status.get("status") == FileStatus.READY:
         directory = os.path.join(settings.OUTPUT_DIR, magnet_hash)
         if os.path.isdir(directory):
             os.utime(directory, None)
@@ -584,7 +593,7 @@ def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
             status = status_info.get("status")
             if status == FileStatus.READY:
                 file_statuses[filename] = "downloaded"
-            elif status in (FileStatus.DOWNLOADING, FileStatus.STREAMING,
+            elif status in (FileStatus.DOWNLOADING, FileStatus.CONVERTING,
                           FileStatus.FINISHING_UP, FileStatus.DOWNLOADING_SUBTITLES,
                           FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT,
                           FileStatus.DOWNLOAD_FINISHED, FileStatus.WAITING_FOR_CONVERSION):
@@ -613,7 +622,8 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "subtitle_downloads": daemon.subtitle_downloads,
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
-        "conversions": daemon.hls_streamer.active_streams,
+        "conversions": daemon.video_converter.file_conversions,
+        "hls_streams": daemon.hls_streamer.active_streams,
         "http_downloads": daemon.http_downloader.downloads,
     }
 

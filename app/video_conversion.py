@@ -1,5 +1,7 @@
 import contextlib
+import datetime
 import os
+import re
 import threading
 import time
 from subprocess import DEVNULL, PIPE, Popen
@@ -9,6 +11,7 @@ import log
 import settings
 from common import threaded
 from pymediainfo import MediaInfo
+from subtitles import get_subtitle_language
 
 
 def _recursive_filepaths(dir_name: str) -> List[str]:
@@ -50,21 +53,155 @@ def _extract_subtitles_as_vtt(filepath: str, output_dir: str) -> Any:
     )
 
 
+def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: List[Tuple[str | None, str]] | None = None) -> Any:
+    if subtitle_filepaths is None:
+        subtitle_filepaths = []
+    output_extension: str = os.path.splitext(output_filepath)[1]
+    media_info: Any = MediaInfo.parse(input_filepath)
+    audio_codecs: List[str] = [
+        t.format.lower() for t in media_info.tracks if t.track_type == "Audio"
+    ]
+    video_codecs: List[str] = [
+        t.format.lower() for t in media_info.tracks if t.track_type == "Video"
+    ]
+    needs_audio_conversion: bool = not any("aac" in c for c in audio_codecs)
+    needs_video_conversion: bool = settings.CONVERT_VIDEO and not any(("avc" in c or "hevc" in c or "av1" in c) for c in video_codecs)
+    is_hevc: bool = any(("hevc" in c) for c in video_codecs)
+    has_picture_subs: bool = (
+        len(
+            [
+                t
+                for t in media_info.tracks
+                if t.track_type == "Text"
+                and "Picture" in (t.codec_id_info or "")
+            ]
+        )
+        > 0
+    )
+    n_sub_tracks: int = (
+        len([t for t in media_info.tracks if t.track_type == "Text"])
+        if not has_picture_subs
+        else 0
+    )
+
+    if media_info.tracks:
+        try:
+            duration: Any = next(t.duration for t in media_info.tracks if t.duration)
+            duration_int: int | None = int(round(float(duration) / 1000))
+        except StopIteration:
+            duration_int = None
+        with open(f"{output_filepath}{settings.LOG_POSTFIX}", "w") as f:
+            f.write(f"{duration_int}\r")
+    return Popen(
+        " ".join(
+            [
+                "ffmpeg -nostdin -threads 0",
+                f'-i "{input_filepath}"',
+                " ".join([f'-f srt -i "{fn}"' for (_, fn) in subtitle_filepaths]),
+                "-map 0:v?",
+                "-map 0:a?",
+                "-map 0:s?" if n_sub_tracks > 0 else "",
+                f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
+                if needs_audio_conversion
+                else "-acodec copy",
+                "-vcodec " + settings.VIDEO_CONVERSION_PARAMS
+                if needs_video_conversion
+                else "-vcodec copy",
+                " ".join([f"-map {i}?" for i in range(1, len(subtitle_filepaths) + 1)]),
+                " ".join(
+                    [
+                        f"-metadata:s:s:{i + n_sub_tracks} language='{subtitle_filepaths[i][0]}'"
+                        for i in range(0, len(subtitle_filepaths))
+                        if subtitle_filepaths[i][0] is not None
+                    ]
+                ),
+                "-c:s mov_text",
+                "-movflags faststart",
+                "-v quiet -stats",
+                "-tag:v hvc1" if is_hevc else "",
+                f'"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" 2>> "{output_filepath}{settings.LOG_POSTFIX}"',
+                "&&",
+                f'mv "{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" "{output_filepath}"',
+            ]
+        ),
+        shell=True,
+    )
+
+
+def get_conversion_progress(filepath: str) -> float:
+    log_filepath: str = f"{filepath}{settings.LOG_POSTFIX}"
+    if os.path.isfile(log_filepath):
+        with open(log_filepath) as f:
+            lines: List[str] = f.readlines()
+            first_line: str = lines[0]
+            last_line: str = lines[-1]
+            duration: int = int(first_line)
+            current_duration_match = re.search(r"time=\s*(\d\d\:\d\d\:\d\d)\s*", last_line)
+            if current_duration_match:
+                current_duration_str: str = current_duration_match.group(1)
+                current_duration_struct = time.strptime(
+                    current_duration_str.split(",")[0], "%H:%M:%S"
+                )
+                current_duration_seconds: float = datetime.timedelta(
+                    hours=current_duration_struct.tm_hour,
+                    minutes=current_duration_struct.tm_min,
+                    seconds=current_duration_struct.tm_sec,
+                ).total_seconds()
+                return current_duration_seconds / duration
+    return 0.0
+
+
 PIPE_READ_CHUNK = 256 * 1024  # 256KB chunks for pipe feeder
 
 # Containers that support sequential reading from a pipe (no seeking needed)
 PIPE_FRIENDLY_EXTENSIONS = {".mkv", ".avi", ".ts", ".mpg", ".mpeg"}
 
 
-def _is_hevc(filepath: str) -> bool:
-    try:
-        media_info: Any = MediaInfo.parse(filepath)
-        for t in media_info.tracks:
-            if t.track_type == "Video" and t.format and t.format.upper() == "HEVC":
-                return True
-    except Exception:
-        pass
-    return False
+class VideoConverter:
+    def __init__(self) -> None:
+        self.file_conversions: Dict[str, bool] = {}
+
+    @threaded
+    @log.catch_and_log_exceptions
+    def convert_file(self, input_filepath: str, output_filepath: str) -> None:
+        try:
+
+            if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
+                return
+            if self.file_conversions.get(output_filepath):
+                return
+
+            self.file_conversions[output_filepath] = True
+
+            output_dir: str = os.path.dirname(output_filepath)
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Gather subtitle files
+            basename: str = os.path.basename(input_filepath)
+            filename_without_extension: str = os.path.splitext(basename)[0]
+
+            subtitle_filepaths: List[Tuple[str | None, str]] = [
+                (get_subtitle_language(os.path.basename(filepath)), filepath)
+                for filepath in _recursive_filepaths(os.path.dirname(input_filepath))
+                if (os.path.basename(filepath).lower()).startswith(
+                    filename_without_extension.lower()
+                )
+                and filepath.endswith(".srt")
+            ]
+
+            conversion: Any = _convert_file_to_mp4(
+                input_filepath, output_filepath, subtitle_filepaths=subtitle_filepaths
+            )
+            conversion.wait()
+
+            if conversion.returncode != 0:
+                raise Exception(f"Conversion failed for {input_filepath}")
+
+            _extract_subtitles_as_vtt(output_filepath, output_dir).wait()
+
+        finally:
+            with contextlib.suppress(KeyError):
+                del self.file_conversions[output_filepath]
 
 
 class HLSStreamer:

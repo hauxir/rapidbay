@@ -257,7 +257,7 @@
     });
 
     Vue.component("player", {
-        props: ["supported", "url", "subtitles", "back", "magnet", "filename"],
+        props: ["supported", "url", "subtitles", "back", "magnet", "filename", "downloadProgress"],
         data: function () {
             return {
                 isDesktop:
@@ -1002,7 +1002,10 @@
                 subheading: null,
                 play_link: null,
                 subtitles: [],
-		supported: null
+		supported: null,
+		downloadProgress: null,
+		canStream: false,
+		streamRequested: false
             };
         },
         methods: {
@@ -1012,6 +1015,12 @@
             },
             back: function () {
                 window.history.back();
+            },
+            startStream: function () {
+                var self = this;
+                var magnet_hash = get_hash(this.params.magnet_link);
+                self.streamRequested = true;
+                post("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function () {});
             },
         },
         created: function () {
@@ -1045,36 +1054,49 @@
                             data.peers === 0 || data.peers
                                 ? data.peers + " Peers"
                                 : null;
-                        self.play_link = data.filename
-                            ? "/play/" +
-                              magnet_hash +
-                              "/" +
-                              encodeURIComponent(data.filename)
-                            : null;
-			self.supported = !!data.supported
-                        if (!window.isSafari) {
-                            self.subtitles = data.subtitles
-                                ? data.subtitles.map(function (sub) {
-                                      return {
-                                          language: sub
-                                              .substring(
-                                                  sub.lastIndexOf("_") + 1
-                                              )
-                                              .replace(".vtt", ""),
-                                          url:
-                                              "/play/" +
-                                              magnet_hash +
-                                              "/" +
-                                              sub,
-                                      };
-                                  })
-                                : [];
+                        // Set play link: prefer MP4 (ready state), fall back to HLS for early playback
+                        if (!self.play_link) {
+                            if (data.status === "ready" && data.filename) {
+                                self.play_link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename);
+                                self.supported = !!data.supported;
+                            } else if (data.hls_filename) {
+                                self.play_link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename);
+                                self.supported = true;
+                            }
+                        } else if (data.status === "ready" && data.filename) {
+                            // MP4 is ready - don't switch mid-playback, but update supported flag
+                            self.supported = !!data.supported;
                         }
-                        if (self.status !== "ready" && self.status !== "streaming") {
-                            rbsetTimeout(get_file_info, 1000);
-                        } else if (self.status === "streaming") {
-                            // Continue polling for subtitle updates and stream completion
-                            rbsetTimeout(get_file_info, 3000);
+                        // Track download progress for display in player header
+                        self.downloadProgress = data.status !== "ready" ? (data.progress || null) : null;
+                        // Update subtitles from HLS or ready state
+                        if (!window.isSafari) {
+                            var subs = data.hls_subtitles || data.subtitles || [];
+                            self.subtitles = subs.map(function (sub) {
+                                return {
+                                    language: sub
+                                        .substring(
+                                            sub.lastIndexOf("_") + 1
+                                        )
+                                        .replace(".vtt", ""),
+                                    url:
+                                        "/play/" +
+                                        magnet_hash +
+                                        "/" +
+                                        sub,
+                                };
+                            });
+                        }
+                        // Show stream button when downloading and no HLS yet
+                        // MP4 files can't be streamed while downloading (need seeking)
+                        var ext = self.params.filename.split(".").pop().toLowerCase();
+                        var canPipeStream = ext !== "mp4";
+                        var isDownloading = data.status === "downloading" || data.status === "download_finished" ||
+                            data.status === "downloading_subtitles" || data.status === "downloading_subtitles_from_torrent" ||
+                            data.status === "waiting_for_conversion" || data.status === "converting";
+                        self.canStream = canPipeStream && isDownloading && !data.hls_filename && !data.hls_pending && data.progress > 0;
+                        if (self.status !== "ready") {
+                            rbsetTimeout(get_file_info, self.play_link ? 3000 : 1000);
                         }
                     }
                 );

@@ -156,7 +156,7 @@
 
         <script type="text/x-template" id="download-screen-template">
             <div class="player_wrapper" v-if="play_link">
-	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename"/>
+	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename" :download-progress="downloadProgress"/>
             </div>
             <div v-else class="root">
               <div class="topbar topbar-flex">
@@ -167,6 +167,7 @@
                   {{params.filename}}
                   </div>
                   <div class="buttons">
+                      <button v-if="canStream && !streamRequested" @click="startStream()" class="btn btn-dark" title="Stream while downloading">&#9654;</button>
                       <favorite-button :magnet="params.magnet_link" :filename="params.filename"/>
                       <fullscreen-button/>
                   </div>
@@ -192,6 +193,9 @@
                            <a tabindex="-1" :href="window.location.origin + url" class="video_url">
                                {{decodeURIComponent(url.split("/").pop())}}
                            </a>
+                           <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
+                               {{Math.round(downloadProgress * 100)}}%
+                           </span>
                        </div>
                        <div class="buttons" v-if="supported">
                            <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>

@@ -122,14 +122,6 @@ def _m3u8_path(magnet_hash: str, video_filename: str) -> str:
     return os.path.join(_get_output_dir(magnet_hash), _m3u8_filename(video_filename))
 
 
-def _m3u8_is_complete(magnet_hash: str, video_filename: str) -> bool:
-    path = _m3u8_path(magnet_hash, video_filename)
-    if not os.path.isfile(path):
-        return False
-    with open(path) as f:
-        return "#EXT-X-ENDLIST" in f.read()
-
-
 def _get_vtt_subtitles(output_dir: str) -> List[str]:
     if not os.path.isdir(output_dir):
         return []
@@ -141,7 +133,6 @@ def _get_vtt_subtitles(output_dir: str) -> List[str]:
 
 class FileStatus:
     READY: str = "ready"
-    STREAMING: str = "streaming"
     FINISHING_UP: str = "finishing_up"
     CONVERTING: str = "converting"
     CONVERSION_FAILED: str = "conversion_failed"
@@ -171,6 +162,7 @@ class RapidBayDaemon:
             download_dir=settings.DOWNLOAD_DIR,
             torrents_dir=settings.TORRENTS_DIR,
         )
+        self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
         self.hls_streamer: video_conversion.HLSStreamer = video_conversion.HLSStreamer()
         # Files we're fetching via HTTP (Real-Debrid). Tracked separately from
         # libtorrent's `file_priorities`, because we set those files to
@@ -228,7 +220,7 @@ class RapidBayDaemon:
         magnet_hash = torrent.get_hash(magnet_link)
         if self.get_file_status(magnet_hash, filename)["status"] in [
             FileStatus.READY,
-            FileStatus.STREAMING,
+            FileStatus.CONVERTING,
         ]:
             return
 
@@ -288,57 +280,25 @@ class RapidBayDaemon:
         is_video = filename_extension[1:] in settings.VIDEO_EXTENSIONS
         output_dir = _get_output_dir(magnet_hash)
         output_filepath = _get_output_filepath(magnet_hash, filename)
-        m3u8_name = _m3u8_filename(filename)
-        m3u8 = _m3u8_path(magnet_hash, filename)
+        output_extension = os.path.splitext(output_filepath)[1]
 
-        # Check if HLS stream is complete (READY state)
-        if is_video and os.path.isfile(m3u8) and _m3u8_is_complete(magnet_hash, filename):
-            return {
-                'status': FileStatus.READY,
-                'filename': m3u8_name,
-                'subtitles': _get_vtt_subtitles(output_dir),
-                'supported': True,
-            }
-
-        # Check if HLS stream is active (STREAMING state)
-        if is_video and os.path.isfile(m3u8):
-            # Self-healing: if streamer is no longer active but ENDLIST is missing, finalize
-            if not self.hls_streamer.active_streams.get(m3u8):
-                with open(m3u8) as f:
-                    content = f.read()
-                content = content.replace("#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-PLAYLIST-TYPE:VOD")
-                content += "#EXT-X-ENDLIST\n"
-                with open(m3u8, "w") as f:
-                    f.write(content)
-                return {
-                    'status': FileStatus.READY,
-                    'filename': m3u8_name,
-                    'subtitles': _get_vtt_subtitles(output_dir),
-                    'supported': True,
+        # Determine if HLS stream is available for early playback
+        hls_info: Dict[str, Any] = {}
+        if is_video:
+            m3u8 = _m3u8_path(magnet_hash, filename)
+            if os.path.isfile(m3u8):
+                hls_info = {
+                    'hls_filename': _m3u8_filename(filename),
+                    'hls_subtitles': _get_vtt_subtitles(output_dir),
                 }
-            h = self.torrent_client.torrents.get(magnet_hash)
-            download_progress = 0.0
-            num_peers = 0
-            if h and h.has_metadata():
-                i, f = torrent.get_index_and_file_from_files(h, filename)
-                if f is not None and i is not None:
-                    download_progress = h.file_progress()[i] / f.size
-                    num_peers = h.status().num_peers
-                    download_path = _get_download_path(magnet_hash, filename)
-                    if download_path:
-                        http_progress = self.http_downloader.downloads.get(download_path, 0)
-                        download_progress = 1 if http_progress == 1 else max(http_progress, download_progress)
-            return {
-                'status': FileStatus.STREAMING,
-                'filename': m3u8_name,
-                'subtitles': _get_vtt_subtitles(output_dir),
-                'supported': True,
-                'progress': download_progress,
-                'peers': num_peers,
-            }
+            elif self.hls_streamer.active_streams.get(m3u8):
+                # Stream is starting but m3u8 not written yet
+                hls_info = {'hls_pending': True}
 
-        # Legacy: check for old-style mp4 output file (from previous conversions)
+        # Check if MP4 output file exists (READY - primary output)
         if os.path.isfile(output_filepath):
+            if self.video_converter.file_conversions.get(output_filepath):
+                return {'status': FileStatus.FINISHING_UP, **hls_info}
             base_filename = os.path.basename(output_filepath)
             base_filename_without_extension = os.path.splitext(base_filename)[0]
             return {
@@ -353,17 +313,29 @@ class RapidBayDaemon:
                     ],
                     key=lambda fn: fn.split("_")[-1],
                 ),
-                'supported': any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS)
+                'supported': any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS),
+                **hls_info,
             }
 
+        # Check if MP4 conversion is in progress
+        if os.path.isfile(
+            f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
+        ):
+            progress = video_conversion.get_conversion_progress(output_filepath)
+            if not self.video_converter.file_conversions.get(output_filepath):
+                return {'status': FileStatus.CONVERSION_FAILED, **hls_info}
+            return {'status': FileStatus.CONVERTING, 'progress': progress, **hls_info}
+
+        # Torrent-based states
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h:
-            return {'status': FileStatus.WAITING_FOR_TORRENT}
+            return {'status': FileStatus.WAITING_FOR_TORRENT, **hls_info}
         if not h.has_metadata():
-            return {'status': FileStatus.WAITING_FOR_METADATA}
+            return {'status': FileStatus.WAITING_FOR_METADATA, **hls_info}
+        files = list(h.get_torrent_info().files())
         i, f = torrent.get_index_and_file_from_files(h, filename)
         if f is None or i is None:
-            return {'status': FileStatus.FILE_NOT_FOUND}
+            return {'status': FileStatus.FILE_NOT_FOUND, **hls_info}
         download_progress = h.file_progress()[i] / f.size
 
         download_path = _get_download_path(magnet_hash, filename)
@@ -376,14 +348,57 @@ class RapidBayDaemon:
             download_progress = 1 if http_progress == 1 else max(http_progress, download_progress)
 
         if download_progress == 1:
-            if not is_video:
-                return {'status': FileStatus.READY_TO_COPY}
-            return {'status': FileStatus.DOWNLOAD_FINISHED}
+            if filename_extension[1:] in settings.VIDEO_EXTENSIONS:
+                all_torrent_subtitles_downloaded = all(
+                    h.file_progress()[i] == files[i].size
+                    for i in _subtitle_indexes(h, filename)
+                )
+                if not all_torrent_subtitles_downloaded:
+                    return {'status': FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT, **hls_info}
+                filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+                subtitle_download_status = self.subtitle_downloads.get(filepath)
+                if subtitle_download_status == SubtitleDownloadStatus.DOWNLOADING:
+                    return {'status': FileStatus.DOWNLOADING_SUBTITLES, **hls_info}
+                if subtitle_download_status == SubtitleDownloadStatus.FINISHED:
+                    return {'status': FileStatus.WAITING_FOR_CONVERSION, **hls_info}
+            else:
+                return {'status': FileStatus.READY_TO_COPY, **hls_info}
+            return {'status': FileStatus.DOWNLOAD_FINISHED, **hls_info}
         return {
             'status': FileStatus.DOWNLOADING,
             'progress': download_progress,
             'peers': h.status().num_peers,
+            **hls_info,
         }
+
+    def start_hls_stream(self, magnet_hash: str, filename: str) -> bool:
+        """Start HLS streaming for a file. Returns True if stream was started or already active."""
+        is_video = os.path.splitext(filename)[1][1:] in settings.VIDEO_EXTENSIONS
+        if not is_video:
+            return False
+        m3u8 = _m3u8_path(magnet_hash, filename)
+        if os.path.isfile(m3u8) or self.hls_streamer.active_streams.get(m3u8):
+            return True  # Already streaming or complete
+        h = self.torrent_client.torrents.get(magnet_hash)
+        if not h or not h.has_metadata():
+            return False
+        i, f = torrent.get_index_and_file_from_files(h, filename)
+        if i is None or f is None:
+            return False
+        available_bytes = self._get_available_bytes(magnet_hash, filename)
+        if available_bytes < settings.HLS_START_THRESHOLD:
+            return False
+        filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+        output_dir = _get_output_dir(magnet_hash)
+        os.makedirs(output_dir, exist_ok=True)
+        self.hls_streamer.start_stream(
+            filepath,
+            output_dir,
+            lambda _mh=magnet_hash, _fn=filename: self._get_available_bytes(_mh, _fn),
+            total_file_size=f.size,
+            m3u8_filename=_m3u8_filename(filename),
+        )
+        return True
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
         """Get bytes available for reading from start of file, using best available source."""
@@ -413,17 +428,15 @@ class RapidBayDaemon:
             return
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.DOWNLOADING
         subtitles.download_all_subtitles(filepath, skip=skip)
-        # Copy downloaded .srt files to output dir as .vtt
+        # Copy downloaded .srt files to output dir as .vtt for HLS playback
         dirname = os.path.dirname(filepath)
         basename = os.path.basename(filepath)
         basename_without_ext = os.path.splitext(basename)[0]
         for srt_file in os.listdir(dirname):
             if srt_file.endswith(".srt") and srt_file.startswith(basename_without_ext):
                 srt_path = os.path.join(dirname, srt_file)
-                # Extract language from srt name (e.g. "Movie.Name.en.srt" → "en")
                 srt_stem = os.path.splitext(srt_file)[0]
                 lang = srt_stem[len(basename_without_ext):].lstrip(".")
-                # Use _ separator so frontend can parse it (expects lastIndexOf("_") + lang)
                 vtt_name = f"{basename_without_ext}_{lang}.vtt" if lang else srt_stem + ".vtt"
                 vtt_path = os.path.join(output_dir, vtt_name)
                 if not os.path.isfile(vtt_path):
@@ -490,52 +503,31 @@ class RapidBayDaemon:
         for f in files:
             filename = os.path.basename(f.path)
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+            output_filepath = _get_output_filepath(magnet_hash, filepath)
             is_video = os.path.splitext(filename)[1][1:] in settings.VIDEO_EXTENSIONS
 
-            status = self.get_file_status(magnet_hash, filename)["status"]
-
-            if is_video and status == FileStatus.DOWNLOADING:
-                # Start HLS streaming as soon as we have enough data
-                available_bytes = self._get_available_bytes(magnet_hash, filename)
-                if available_bytes >= settings.HLS_START_THRESHOLD and not self.hls_streamer.active_streams.get(_m3u8_path(magnet_hash, filename)):
-                    os.makedirs(output_dir, exist_ok=True)
-                    self.hls_streamer.start_stream(
-                        filepath,
-                        output_dir,
-                        lambda _mh=magnet_hash, _fn=filename: self._get_available_bytes(_mh, _fn),
-                        total_file_size=f.size,
-                        m3u8_filename=_m3u8_filename(filename),
-                    )
-
-            elif is_video and status in (FileStatus.DOWNLOAD_FINISHED, FileStatus.STREAMING, FileStatus.READY):
-                # File fully downloaded or streaming — start HLS if needed, download subtitles
-                if status == FileStatus.DOWNLOAD_FINISHED and not os.path.isfile(_m3u8_path(magnet_hash, filename)) and not self.hls_streamer.active_streams.get(_m3u8_path(magnet_hash, filename)):
-                    os.makedirs(output_dir, exist_ok=True)
-                    self.hls_streamer.start_stream(
-                        filepath,
-                        output_dir,
-                        lambda _mh=magnet_hash, _fn=filename: self._get_available_bytes(_mh, _fn),
-                        total_file_size=f.size,
-                        m3u8_filename=_m3u8_filename(filename),
-                    )
-                # Start subtitle download once file is fully downloaded (needs full file for hash)
-                file_status = self.get_file_status(magnet_hash, filename)
-                download_complete = file_status.get("progress", 0) == 1 or status == FileStatus.READY
-                if download_complete and os.path.isfile(filepath) and not self.subtitle_downloads.get(filepath):
-                    sub_filenames = _subtitle_filenames(h, filepath)
-                    available_subtitle_languages = [lang for lang in [get_subtitle_language(fn) for fn in sub_filenames] if lang]
-                    embedded_subtitle_languages = [lang for (_, lang) in video_conversion.get_sub_tracks(filepath)]
-                    self._download_external_subtitles(
-                        filepath,
-                        output_dir,
-                        skip=available_subtitle_languages + embedded_subtitle_languages,
-                    )
-
-            elif not is_video and (status == FileStatus.READY_TO_COPY):
+            # MP4 conversion pipeline
+            if is_state(filename, FileStatus.DOWNLOAD_FINISHED):
+                if not os.path.isfile(filepath):
+                    log.debug(f"File not found, skipping: {filepath}")
+                    continue
+                subtitle_filenames = _subtitle_filenames(h, filepath)
+                available_subtitle_languages = [lang for lang in [get_subtitle_language(fn) for fn in subtitle_filenames] if lang]
+                embedded_subtitle_languages = [lang for (_, lang) in video_conversion.get_sub_tracks(filepath)]
+                self._download_external_subtitles(filepath, output_dir, skip=available_subtitle_languages + embedded_subtitle_languages)
+            elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
+                if not os.path.isfile(filepath):
+                    log.debug(f"File not found for conversion, skipping: {filepath}")
+                    continue
+                self.http_downloader.clear(filepath)
+                os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+                self.video_converter.convert_file(filepath, output_filepath)
+            elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
+                filename, FileStatus.CONVERSION_FAILED
+            ):
                 if not os.path.isfile(filepath):
                     log.debug(f"File not found for copy, skipping: {filepath}")
                     continue
-                output_filepath = _get_output_filepath(magnet_hash, filepath)
                 output_file_dir = os.path.dirname(output_filepath)
                 os.makedirs(output_file_dir, exist_ok=True)
                 shutil.copy(filepath, output_filepath)

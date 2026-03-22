@@ -291,6 +291,7 @@
             var isHLS = self.url.indexOf(".m3u8") !== -1;
 
             if (isHLS && typeof Hls !== "undefined" && Hls.isSupported()) {
+                var mediaErrorRecoveries = 0;
                 self.hls = new Hls({
                     startPosition: 0,
                     maxBufferHole: 0.5,
@@ -298,14 +299,20 @@
                     nudgeMaxRetry: 10,
                 });
                 self.hls.on(Hls.Events.ERROR, function (event, data) {
-                    console.warn("HLS error:", data.fatal ? "FATAL" : "non-fatal", data.type, data.details, "reason:", data.reason, "err:", data.error, "frag:", data.frag && data.frag.sn);
+                    if (!self.hls) return;
                     if (data.fatal) {
-                        self.hls.destroy();
-                        self.hls = null;
+                        console.warn("HLS fatal error:", data.type, data.details);
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaErrorRecoveries < 2) {
+                            mediaErrorRecoveries++;
+                            self.hls.recoverMediaError();
+                        } else {
+                            self.hls.destroy();
+                            self.hls = null;
+                            // Fall back to direct URL
+                            video.src = videoUrl;
+                        }
                     }
-                });
-                video.addEventListener("waiting", function () {
-                    console.log("video waiting, buffered:", video.buffered.length ? video.buffered.end(0).toFixed(1) + "s" : "empty", "currentTime:", video.currentTime.toFixed(1));
+                    // Non-fatal errors are silently ignored — hls.js handles retry internally
                 });
                 self.hls.loadSource(videoUrl);
                 self.hls.attachMedia(video);

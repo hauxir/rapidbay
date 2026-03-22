@@ -258,19 +258,20 @@ class HLSStreamer:
             video_tag = "hvc1" if video_codec == "hevc" else "avc1"
 
             ffmpeg_input = ["pipe:0"] if use_pipe else [input_filepath]
+            hls_time = str(settings.HLS_SEGMENT_DURATION)
             ffmpeg_cmd = [
-                "ffmpeg", "-nostdin", "-threads", "0",
-                "-fflags", "+genpts",
+                "ffmpeg", "-nostdin",
                 "-i", *ffmpeg_input,
-                "-map", "0:v?", "-map", "0:a?",
-                "-c:v", "copy",
-                "-tag:v", video_tag,
+                "-vcodec", "copy",
                 "-acodec", "aac", "-ab", settings.AAC_BITRATE,
                 "-ac", str(settings.AAC_CHANNELS),
-                "-f", "hls",
-                "-hls_time", str(settings.HLS_SEGMENT_DURATION),
+                "-bsf:a", "aac_adtstoasc",
+                "-tag:v", video_tag,
                 "-hls_playlist_type", "event",
+                "-f", "hls",
                 "-hls_segment_type", "fmp4",
+                "-hls_time", hls_time,
+                "-hls_init_time", hls_time,
                 "-hls_fmp4_init_filename", init_filename,
                 "-hls_segment_filename", segment_pattern,
                 m3u8_path,

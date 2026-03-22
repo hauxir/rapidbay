@@ -535,6 +535,26 @@
                 }
             }
         },
+        watch: {
+            url: function (newUrl, oldUrl) {
+                if (!newUrl || newUrl === oldUrl) return;
+                var video = document.getElementsByTagName("video")[0];
+                if (!video) return;
+                var isNewHLS = newUrl.indexOf(".m3u8") !== -1;
+                // Only switch if going from HLS to MP4 (not the other way)
+                if (isNewHLS) return;
+                var currentTime = video.currentTime;
+                // Tear down HLS
+                if (this.hls) {
+                    this.hls.destroy();
+                    this.hls = null;
+                }
+                // Switch to MP4
+                video.src = window.location.origin + newUrl;
+                video.currentTime = currentTime;
+                video.play();
+            },
+        },
         template: "#player-template",
     });
 
@@ -1070,17 +1090,15 @@
                                 ? data.peers + " Peers"
                                 : null;
                         // Set play link: prefer MP4 (ready state), fall back to HLS for early playback
-                        if (!self.play_link) {
-                            if (data.status === "ready" && data.filename) {
-                                self.play_link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename);
-                                self.supported = !!data.supported;
-                            } else if (data.hls_filename) {
-                                self.play_link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename);
-                                self.supported = true;
+                        if (data.status === "ready" && data.filename) {
+                            var mp4Link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename);
+                            if (self.play_link !== mp4Link) {
+                                self.play_link = mp4Link;
                             }
-                        } else if (data.status === "ready" && data.filename) {
-                            // MP4 is ready - don't switch mid-playback, but update supported flag
                             self.supported = !!data.supported;
+                        } else if (!self.play_link && data.hls_filename) {
+                            self.play_link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename);
+                            self.supported = true;
                         }
                         // Track download progress for display in player header
                         self.downloadProgress = data.status !== "ready" ? (data.progress || null) : null;

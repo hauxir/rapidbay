@@ -335,4 +335,4 @@ video::cue {
 .topbar-flex > button:first-child { position: relative; left: auto; flex-shrink: 0; }
 .topbar-flex > .filename-truncate { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; position: relative; left: auto; right: auto; max-width: none; }
 .topbar-flex > .buttons { flex-shrink: 0; position: relative; margin-right: 0; }
-.download-progress-badge { display: inline-block; margin-left: 8px; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.15); font-size: 0.8em; color: rgba(255,255,255,0.8); vertical-align: middle; }
+.download-progress-badge { flex-shrink: 0; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.15); font-size: 0.8em; color: rgba(255,255,255,0.8); }

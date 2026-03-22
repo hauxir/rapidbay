@@ -551,7 +551,18 @@
                 }
                 // Switch to MP4
                 video.src = window.location.origin + newUrl;
-                video.currentTime = currentTime;
+                video.addEventListener("loadedmetadata", function onLoaded() {
+                    video.removeEventListener("loadedmetadata", onLoaded);
+                    video.currentTime = currentTime;
+                    // Re-apply subtitle preference after source switch
+                    var captionLanguage = localStorage.getItem("captionLanguage");
+                    if (captionLanguage) {
+                        for (var i = 0; i < video.textTracks.length; i++) {
+                            var track = video.textTracks[i];
+                            track.mode = track.language === captionLanguage ? "showing" : "hidden";
+                        }
+                    }
+                });
                 video.play();
             },
         },

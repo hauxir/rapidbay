@@ -157,6 +157,23 @@ PIPE_READ_CHUNK = 256 * 1024  # 256KB chunks for pipe feeder
 PIPE_FRIENDLY_EXTENSIONS = {".mkv", ".avi", ".ts", ".mpg", ".mpeg"}
 
 
+def _detect_video_codec(filepath: str) -> str:
+    """Detect video codec from file. Returns 'hevc', 'h264', etc."""
+    try:
+        media_info: Any = MediaInfo.parse(filepath)
+        for t in media_info.tracks:
+            if t.track_type == "Video" and t.format:
+                fmt = t.format.lower()
+                if "hevc" in fmt or "h265" in fmt:
+                    return "hevc"
+                if "avc" in fmt or "h264" in fmt:
+                    return "h264"
+                return fmt
+    except Exception:
+        pass
+    return "h264"
+
+
 class VideoConverter:
     def __init__(self) -> None:
         self.file_conversions: Dict[str, bool] = {}
@@ -236,6 +253,10 @@ class HLSStreamer:
             ext = os.path.splitext(input_filepath)[1].lower()
             use_pipe = ext in PIPE_FRIENDLY_EXTENSIONS
 
+            # Detect video codec for proper tagging
+            video_codec = _detect_video_codec(input_filepath)
+            video_tag = "hvc1" if video_codec == "hevc" else "avc1"
+
             ffmpeg_input = ["pipe:0"] if use_pipe else [input_filepath]
             ffmpeg_cmd = [
                 "ffmpeg", "-nostdin", "-threads", "0",
@@ -243,10 +264,9 @@ class HLSStreamer:
                 "-i", *ffmpeg_input,
                 "-map", "0:v?", "-map", "0:a?",
                 "-c:v", "copy",
+                "-tag:v", video_tag,
                 "-acodec", "aac", "-ab", settings.AAC_BITRATE,
                 "-ac", str(settings.AAC_CHANNELS),
-                "-movflags", "+default_base_moof+frag_keyframe",
-                "-reset_timestamps", "1",
                 "-f", "hls",
                 "-hls_time", str(settings.HLS_SEGMENT_DURATION),
                 "-hls_playlist_type", "event",

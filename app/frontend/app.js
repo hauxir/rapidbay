@@ -1045,7 +1045,8 @@
                 supported: null,
                 downloadProgress: null,
                 canStream: false,
-                streamRequested: false
+                streamRequested: false,
+                hlsFailed: false
             };
         },
         methods: {
@@ -1067,6 +1068,7 @@
                 this.play_link = null;
                 this.streamRequested = false;
                 this.canStream = false;
+                this.hlsFailed = true;
             },
         },
         created: function () {
@@ -1107,7 +1109,7 @@
                                 self.play_link = mp4Link;
                             }
                             self.supported = !!data.supported;
-                        } else if (!self.play_link && data.hls_filename) {
+                        } else if (!self.play_link && data.hls_filename && !self.hlsFailed) {
                             self.play_link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename);
                             self.supported = true;
                         }

@@ -193,10 +193,10 @@
                            <a tabindex="-1" :href="window.location.origin + url" class="video_url">
                                {{decodeURIComponent(url.split("/").pop())}}
                            </a>
-                           <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
-                               {{Math.round(downloadProgress * 100)}}%
-                           </span>
                        </div>
+                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
+                           {{Math.round(downloadProgress * 100)}}%
+                       </span>
                        <div class="buttons" v-if="supported">
                            <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>
             	<caption-button v-if="url"/>

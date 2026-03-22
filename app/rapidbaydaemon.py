@@ -408,17 +408,15 @@ class RapidBayDaemon:
         return True
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
-        """Get bytes available for reading from start of file, using best available source."""
+        """Get contiguous bytes available from start of file for pipe feeding."""
         best = 0
-        # Piece-based sequential bytes (most accurate for verified torrent data)
+        # Piece-based sequential bytes — only counts verified contiguous pieces from file start
         best = max(best, self.torrent_client.get_sequential_bytes(magnet_hash, filename))
+        # HTTP download progress — HTTP writes sequentially to file, so this is truly sequential
         h = self.torrent_client.torrents.get(magnet_hash)
         if h and h.has_metadata():
             i, f = torrent.get_index_and_file_from_files(h, filename)
             if i is not None and f is not None:
-                # file_progress: total bytes libtorrent has for this file (approx sequential with sequential_download)
-                best = max(best, h.file_progress()[i])
-                # HTTP download progress (writes sequentially to file)
                 download_path = _get_download_path(magnet_hash, filename)
                 if download_path:
                     http_progress = self.http_downloader.downloads.get(download_path, 0)

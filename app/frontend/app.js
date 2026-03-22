@@ -291,7 +291,8 @@
             var isHLS = self.url.indexOf(".m3u8") !== -1;
 
             if (isHLS && typeof Hls !== "undefined" && Hls.isSupported()) {
-                var mediaErrorRecoveries = 0;
+                var errorRecoveries = 0;
+                var maxRecoveries = 5;
                 self.hls = new Hls({
                     startPosition: 0,
                     maxBufferHole: 0.5,
@@ -302,19 +303,27 @@
                     if (!self.hls) return;
                     if (data.fatal) {
                         console.warn("HLS fatal error:", data.type, data.details);
-                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaErrorRecoveries < 2) {
-                            mediaErrorRecoveries++;
+                        errorRecoveries++;
+                        if (errorRecoveries > maxRecoveries) {
+                            self.hls.destroy();
+                            self.hls = null;
+                            if (self.onStreamError) {
+                                self.onStreamError();
+                            }
+                            return;
+                        }
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             self.hls.recoverMediaError();
+                        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            self.hls.startLoad();
                         } else {
                             self.hls.destroy();
                             self.hls = null;
-                            // Signal parent to drop back to loading screen
                             if (self.onStreamError) {
                                 self.onStreamError();
                             }
                         }
                     }
-                    // Non-fatal errors are silently ignored — hls.js handles retry internally
                 });
                 self.hls.loadSource(videoUrl);
                 self.hls.attachMedia(video);

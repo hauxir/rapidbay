@@ -239,18 +239,19 @@ class HLSStreamer:
             ffmpeg_input = ["pipe:0"] if use_pipe else [input_filepath]
             ffmpeg_cmd = [
                 "ffmpeg", "-nostdin", "-threads", "0",
+                "-fflags", "+genpts",
                 "-i", *ffmpeg_input,
                 "-map", "0:v?", "-map", "0:a?",
                 "-c:v", "copy",
                 "-acodec", "aac", "-ab", settings.AAC_BITRATE,
                 "-ac", str(settings.AAC_CHANNELS),
-                "-movflags", "+default_base_moof",
+                "-movflags", "+default_base_moof+frag_keyframe",
+                "-reset_timestamps", "1",
                 "-f", "hls",
                 "-hls_time", str(settings.HLS_SEGMENT_DURATION),
                 "-hls_playlist_type", "event",
                 "-hls_segment_type", "fmp4",
                 "-hls_fmp4_init_filename", init_filename,
-                "-hls_flags", "independent_segments",
                 "-hls_segment_filename", segment_pattern,
                 m3u8_path,
             ]

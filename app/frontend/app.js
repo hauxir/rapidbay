@@ -1002,10 +1002,10 @@
                 subheading: null,
                 play_link: null,
                 subtitles: [],
-		supported: null,
-		downloadProgress: null,
-		canStream: false,
-		streamRequested: false
+                supported: null,
+                downloadProgress: null,
+                canStream: false,
+                streamRequested: false
             };
         },
         methods: {

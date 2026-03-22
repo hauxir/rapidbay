@@ -257,7 +257,7 @@
     });
 
     Vue.component("player", {
-        props: ["supported", "url", "subtitles", "back", "magnet", "filename", "downloadProgress"],
+        props: ["supported", "url", "subtitles", "back", "magnet", "filename", "downloadProgress", "onStreamError"],
         data: function () {
             return {
                 isDesktop:
@@ -308,8 +308,10 @@
                         } else {
                             self.hls.destroy();
                             self.hls = null;
-                            // Fall back to direct URL
-                            video.src = videoUrl;
+                            // Signal parent to drop back to loading screen
+                            if (self.onStreamError) {
+                                self.onStreamError();
+                            }
                         }
                     }
                     // Non-fatal errors are silently ignored — hls.js handles retry internally
@@ -1028,6 +1030,12 @@
                 var magnet_hash = get_hash(this.params.magnet_link);
                 self.streamRequested = true;
                 post("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function () {});
+            },
+            onStreamError: function () {
+                // HLS playback failed (e.g. unsupported codec) — drop back to loading screen
+                this.play_link = null;
+                this.streamRequested = false;
+                this.canStream = false;
             },
         },
         created: function () {

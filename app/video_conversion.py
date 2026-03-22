@@ -229,8 +229,7 @@ class HLSStreamer:
             os.makedirs(output_dir, exist_ok=True)
 
             segment_prefix = os.path.splitext(m3u8_filename)[0]
-            segment_pattern = os.path.join(output_dir, f"{segment_prefix}_seg_%04d.m4s")
-            init_filename = f"{segment_prefix}_init.mp4"
+            segment_pattern = os.path.join(output_dir, f"{segment_prefix}_seg_%04d.ts")
             stderr_log_path = os.path.join(output_dir, m3u8_filename + ".log")
 
             ext = os.path.splitext(input_filepath)[1].lower()
@@ -244,12 +243,9 @@ class HLSStreamer:
                 "-c:v", "copy",
                 "-acodec", "aac", "-ab", settings.AAC_BITRATE,
                 "-ac", str(settings.AAC_CHANNELS),
-                "-movflags", "+negative_cts_offsets+default_base_moof",
                 "-f", "hls",
                 "-hls_time", str(settings.HLS_SEGMENT_DURATION),
                 "-hls_playlist_type", "event",
-                "-hls_segment_type", "fmp4",
-                "-hls_fmp4_init_filename", init_filename,
                 "-hls_flags", "independent_segments",
                 "-hls_segment_filename", segment_pattern,
                 m3u8_path,

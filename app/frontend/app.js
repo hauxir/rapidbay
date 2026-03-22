@@ -1133,14 +1133,8 @@
                                 };
                             });
                         }
-                        // Show stream button when downloading and no HLS yet
-                        // MP4 files can't be streamed while downloading (need seeking)
-                        var ext = self.params.filename.split(".").pop().toLowerCase();
-                        var canPipeStream = ext !== "mp4";
-                        var isDownloading = data.status === "downloading" || data.status === "download_finished" ||
-                            data.status === "downloading_subtitles" || data.status === "downloading_subtitles_from_torrent" ||
-                            data.status === "waiting_for_conversion" || data.status === "converting";
-                        self.canStream = canPipeStream && isDownloading && !data.hls_filename && !data.hls_pending && data.progress > 0;
+                        // Show stream button when backend confirms enough data is available
+                        self.canStream = !!data.can_stream;
                         if (self.status !== "ready") {
                             rbsetTimeout(get_file_info, self.play_link ? 3000 : 1000);
                         }

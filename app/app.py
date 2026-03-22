@@ -60,6 +60,7 @@ class FileStatusResponse(BaseModel):
     hls_filename: str | None = None
     hls_subtitles: List[str] | None = None
     hls_pending: bool | None = None
+    can_stream: bool | None = None
 
 
 class NextFileResponse(BaseModel):

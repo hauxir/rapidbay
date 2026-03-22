@@ -294,6 +294,13 @@ class RapidBayDaemon:
             elif self.hls_streamer.active_streams.get(m3u8):
                 # Stream is starting but m3u8 not written yet
                 hls_info = {'hls_pending': True}
+            else:
+                # Check if enough data to start streaming
+                available = self._get_available_bytes(magnet_hash, filename)
+                ext = os.path.splitext(filename)[1].lower()
+                can_pipe = ext in (".mkv", ".avi", ".ts", ".mpg", ".mpeg")
+                if can_pipe and available >= settings.HLS_START_THRESHOLD:
+                    hls_info = {'can_stream': True}
 
         # Check if MP4 output file exists (READY - primary output)
         if os.path.isfile(output_filepath):

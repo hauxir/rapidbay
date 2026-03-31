@@ -423,7 +423,9 @@
             };
             video.textTracks.addEventListener("addtrack", this.addTrackListener);
             this.captionChangeListener = function (e) {
-                console.log(e);
+                // During source switch, tracks get reset to disabled —
+                // don't clear the saved preference in that case
+                if (self.switchingSource) return;
                 var tracks = e.currentTarget;
                 var captionLanguage;
                 for (var i = 0; i < tracks.length; i++) {
@@ -559,10 +561,13 @@
                     this.hls = null;
                 }
                 // Switch to MP4
+                this.switchingSource = true;
+                var self = this;
                 video.src = window.location.origin + newUrl;
                 video.addEventListener("loadedmetadata", function onLoaded() {
                     video.removeEventListener("loadedmetadata", onLoaded);
                     video.currentTime = currentTime;
+                    self.switchingSource = false;
                     // Re-apply subtitle preference after source switch
                     var captionLanguage = localStorage.getItem("captionLanguage");
                     if (captionLanguage) {
@@ -622,10 +627,13 @@
                 var video = document.getElementsByTagName("video")[0];
                 var currentIndex = null;
                 var tracks = video.textTracks;
+                // Ensure all tracks are at least "hidden" so they load content
                 for (var i = 0; i < tracks.length; i++) {
                     var track = tracks[i];
                     if (track.mode === "showing") {
                         currentIndex = i;
+                    } else if (track.mode === "disabled") {
+                        track.mode = "hidden";
                     }
                 }
                 if (currentIndex !== null) {
@@ -638,6 +646,7 @@
                     }
                 } else if (tracks.length > 0) {
                     tracks[0].mode = "showing";
+                    this.currentCaption = tracks[0].language;
                 }
             },
         },

@@ -57,6 +57,7 @@ EXPOSE 5000
 
 COPY app /app
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default
 RUN chmod +x /app/run.sh
 WORKDIR /app
 

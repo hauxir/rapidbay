@@ -156,7 +156,7 @@
 
         <script type="text/x-template" id="download-screen-template">
             <div class="player_wrapper" v-if="play_link">
-	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename" :download-progress="downloadProgress" :on-stream-error="onStreamError"/>
+	      <player :key="play_link" :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename" :download-progress="downloadProgress" :on-stream-error="onStreamError"/>
             </div>
             <div v-else class="root">
               <div class="topbar topbar-flex">

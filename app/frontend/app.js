@@ -423,9 +423,6 @@
             };
             video.textTracks.addEventListener("addtrack", this.addTrackListener);
             this.captionChangeListener = function (e) {
-                // During source switch, tracks get reset to disabled —
-                // don't clear the saved preference in that case
-                if (self.switchingSource) return;
                 var tracks = e.currentTarget;
                 var captionLanguage;
                 for (var i = 0; i < tracks.length; i++) {
@@ -545,40 +542,6 @@
                     saveVideoPosition(this.magnet, this.filename, video.currentTime);
                 }
             }
-        },
-        watch: {
-            url: function (newUrl, oldUrl) {
-                if (!newUrl || newUrl === oldUrl) return;
-                var video = document.getElementsByTagName("video")[0];
-                if (!video) return;
-                var isNewHLS = newUrl.indexOf(".m3u8") !== -1;
-                // Only switch if going from HLS to MP4 (not the other way)
-                if (isNewHLS) return;
-                var currentTime = video.currentTime;
-                // Tear down HLS
-                if (this.hls) {
-                    this.hls.destroy();
-                    this.hls = null;
-                }
-                // Switch to MP4
-                this.switchingSource = true;
-                var self = this;
-                video.src = window.location.origin + newUrl;
-                video.addEventListener("loadedmetadata", function onLoaded() {
-                    video.removeEventListener("loadedmetadata", onLoaded);
-                    video.currentTime = currentTime;
-                    self.switchingSource = false;
-                    // Re-apply subtitle preference after source switch
-                    var captionLanguage = localStorage.getItem("captionLanguage");
-                    if (captionLanguage) {
-                        for (var i = 0; i < video.textTracks.length; i++) {
-                            var track = video.textTracks[i];
-                            track.mode = track.language === captionLanguage ? "showing" : "hidden";
-                        }
-                    }
-                });
-                video.play();
-            },
         },
         template: "#player-template",
     });

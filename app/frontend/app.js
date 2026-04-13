@@ -387,10 +387,13 @@
                 markFileCompleted(self.magnet, self.filename);
             });
 
+            function normalizeLanguage(lang) {
+                return lang ? lang.split("-")[0].toLowerCase() : lang;
+            }
             var captionLanguage = localStorage.getItem("captionLanguage");
             function applyCaptionPreference() {
                 var tracks = video.textTracks;
-                var captionLanguage = localStorage.getItem("captionLanguage");
+                var captionLanguage = normalizeLanguage(localStorage.getItem("captionLanguage"));
                 if (!captionLanguage) return;
                 var hasShowing = false;
                 for (var i = 0; i < tracks.length; i++) {
@@ -404,7 +407,7 @@
                 for (var i = 0; i < tracks.length; i++) {
                     var track = tracks[i];
                     track.mode = "hidden";
-                    if (!currentTrack && track.language === captionLanguage) {
+                    if (!currentTrack && normalizeLanguage(track.language) === captionLanguage) {
                         currentTrack = track;
                     }
                 }
@@ -434,7 +437,7 @@
                 if (captionLanguage) {
                     window.localStorage.setItem(
                         "captionLanguage",
-                        captionLanguage
+                        normalizeLanguage(captionLanguage)
                     );
                 } else {
                     window.localStorage.removeItem("captionLanguage");

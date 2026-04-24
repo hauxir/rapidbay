@@ -298,6 +298,10 @@
                     maxBufferHole: 0.5,
                     nudgeOffset: 0.2,
                     nudgeMaxRetry: 10,
+                    // Subtitles are exposed via EXT-X-MEDIA in the master
+                    // playlist; suppress hls.js's CEA-608/708 auto-extraction
+                    // so embedded closed captions don't render alongside.
+                    enableCEA708Captions: false,
                 });
                 self.hls.on(Hls.Events.ERROR, function (event, data) {
                     if (!self.hls) return;

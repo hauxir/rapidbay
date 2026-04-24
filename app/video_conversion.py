@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import math
 import os
 import re
 import threading
@@ -366,3 +367,72 @@ class HLSStreamer:
         finally:
             with contextlib.suppress(Exception):
                 proc.stdin.close()  # type: ignore[union-attr]
+
+
+def _atomic_write(path: str, content: str) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(content)
+    os.replace(tmp, path)
+
+
+def write_hls_master_playlist(
+    output_dir: str,
+    video_m3u8_filename: str,
+    vtt_filenames: List[str],
+) -> str:
+    """Generate an HLS master playlist that wraps the video media playlist and
+    one subtitle media playlist per VTT file, so hls.js (and native HLS clients)
+    can manage subtitle selection through EXT-X-MEDIA:TYPE=SUBTITLES tracks.
+
+    Returns the master playlist filename.
+    """
+    base = os.path.splitext(video_m3u8_filename)[0]
+    master_filename = f"{base}_master.m3u8"
+    master_path = os.path.join(output_dir, master_filename)
+
+    # Use a generous fixed segment duration so hls.js never tries to fetch a
+    # "next" subtitle segment; the VTT's own cue timestamps determine when each
+    # cue is displayed, independent of EXTINF.
+    duration = 86400.0
+    target_duration = int(math.ceil(duration))
+
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
+    has_default = False
+    for vtt in vtt_filenames:
+        vtt_stem = os.path.splitext(vtt)[0]
+        lang = vtt_stem.rsplit("_", 1)[-1] if "_" in vtt_stem else "und"
+        lang_safe = lang.replace('"', "")
+        sub_playlist_filename = f"{vtt}.m3u8"
+        sub_playlist_path = os.path.join(output_dir, sub_playlist_filename)
+        _atomic_write(
+            sub_playlist_path,
+            (
+                "#EXTM3U\n"
+                "#EXT-X-VERSION:3\n"
+                "#EXT-X-PLAYLIST-TYPE:VOD\n"
+                f"#EXT-X-TARGETDURATION:{target_duration}\n"
+                "#EXT-X-MEDIA-SEQUENCE:0\n"
+                f"#EXTINF:{duration:.3f},\n"
+                f"{vtt}\n"
+                "#EXT-X-ENDLIST\n"
+            ),
+        )
+        default = "YES" if not has_default else "NO"
+        has_default = True
+        lines.append(
+            f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",'
+            f'NAME="{lang_safe.upper()}",LANGUAGE="{lang_safe}",'
+            f'DEFAULT={default},AUTOSELECT=YES,FORCED=NO,'
+            f'URI="{sub_playlist_filename}"'
+        )
+
+    bandwidth = 2000000
+    if vtt_filenames:
+        lines.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},SUBTITLES="subs"')
+    else:
+        lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}")
+    lines.append(video_m3u8_filename)
+
+    _atomic_write(master_path, "\n".join(lines) + "\n")
+    return master_filename

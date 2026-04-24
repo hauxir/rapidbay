@@ -1086,22 +1086,36 @@
                             data.peers === 0 || data.peers
                                 ? data.peers + " Peers"
                                 : null;
-                        // Set play link: prefer MP4 (ready state), fall back to HLS for early playback
+                        // Set play link: prefer MP4 (ready state), fall back to HLS for early playback.
+                        // For HLS we tag the URL with the current subtitle count so that when new
+                        // VTTs become available, the regenerated master playlist is refetched
+                        // (Vue remounts the player when play_link changes).
                         if (data.status === "ready" && data.filename) {
                             var mp4Link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename);
                             if (self.play_link !== mp4Link) {
                                 self.play_link = mp4Link;
                             }
                             self.supported = !!data.supported;
-                        } else if (!self.play_link && data.hls_filename && !self.hlsFailed) {
-                            self.play_link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename);
-                            self.supported = true;
+                        } else if (data.hls_filename && !self.hlsFailed) {
+                            var hlsSubCount = (data.hls_subtitles || []).length;
+                            var hlsLink = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename) + "?subs=" + hlsSubCount;
+                            var alreadyHls = self.play_link && self.play_link.indexOf(".m3u8") !== -1;
+                            if (!self.play_link || alreadyHls) {
+                                if (self.play_link !== hlsLink) {
+                                    self.play_link = hlsLink;
+                                }
+                                self.supported = true;
+                            }
                         }
                         // Track download progress for display in player header
                         self.downloadProgress = data.status !== "ready" ? (data.progress || null) : null;
-                        // Update subtitles from HLS or ready state
-                        if (!window.isSafari) {
-                            var subs = data.hls_subtitles || data.subtitles || [];
+                        // Pass <track>-style subtitles only for MP4 playback. For HLS, subtitles
+                        // are declared in the master playlist via EXT-X-MEDIA so hls.js (and
+                        // native HLS clients) manage them — adding <track> elements alongside
+                        // confuses the native track selection.
+                        var playingHls = self.play_link && self.play_link.indexOf(".m3u8") !== -1;
+                        if (!window.isSafari && !playingHls) {
+                            var subs = data.subtitles || [];
                             self.subtitles = subs.map(function (sub) {
                                 return {
                                     language: sub
@@ -1116,6 +1130,8 @@
                                         sub,
                                 };
                             });
+                        } else if (playingHls) {
+                            self.subtitles = [];
                         }
                         // Show stream button when backend confirms enough data is available
                         self.canStream = !!data.can_stream;

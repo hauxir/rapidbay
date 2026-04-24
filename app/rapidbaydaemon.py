@@ -287,9 +287,21 @@ class RapidBayDaemon:
         if is_video:
             m3u8 = _m3u8_path(magnet_hash, filename)
             if os.path.isfile(m3u8):
+                vtt_subtitles = _get_vtt_subtitles(output_dir)
+                # Wrap the media playlist in a master playlist that exposes any
+                # available VTTs as EXT-X-MEDIA:TYPE=SUBTITLES tracks. hls.js
+                # will only render <track>-style subtitles when they're declared
+                # in the manifest; serving a bare media playlist breaks subtitle
+                # rendering even when text tracks exist on the <video> element.
+                try:
+                    master_filename = video_conversion.write_hls_master_playlist(
+                        output_dir, _m3u8_filename(filename), vtt_subtitles
+                    )
+                except OSError:
+                    master_filename = _m3u8_filename(filename)
                 hls_info = {
-                    'hls_filename': _m3u8_filename(filename),
-                    'hls_subtitles': _get_vtt_subtitles(output_dir),
+                    'hls_filename': master_filename,
+                    'hls_subtitles': vtt_subtitles,
                 }
             elif self.hls_streamer.active_streams.get(m3u8):
                 # Stream is starting but m3u8 not written yet

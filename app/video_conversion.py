@@ -3,6 +3,7 @@ import datetime
 import math
 import os
 import re
+import struct
 import threading
 import time
 from subprocess import DEVNULL, PIPE, Popen
@@ -36,6 +37,110 @@ def get_sub_tracks(filepath: str) -> List[Tuple[int, str]]:
         ]
         if t.streamorder
     ]
+
+
+def _fix_subtitle_track_dimensions(mp4_path: str) -> None:
+    # FFmpeg's MP4 muxer writes tkhd width=0/height=0 and a degenerate tx3g
+    # default-text-box for subtitle tracks. Safari then has no overlay area
+    # for embedded mov_text and renders cues clipped at a corner. Patch each
+    # subtitle track's tkhd dimensions and tx3g BoxRecord to span the video.
+    def walk(buf: "bytes | bytearray", start: int, end: int) -> List[Tuple[bytes, int, int, int]]:
+        out: List[Tuple[bytes, int, int, int]] = []
+        o = start
+        while o + 8 <= end:
+            size = struct.unpack(">I", buf[o:o + 4])[0]
+            bt = bytes(buf[o + 4:o + 8])
+            hs = 8
+            if size == 1:
+                size = struct.unpack(">Q", buf[o + 8:o + 16])[0]
+                hs = 16
+            elif size == 0:
+                size = end - o
+            if size < 8 or o + size > end:
+                break
+            out.append((bt, o, hs, size))
+            o += size
+        return out
+
+    def find_one(boxes: List[Tuple[bytes, int, int, int]], name: bytes) -> Tuple[bytes, int, int, int] | None:
+        for b in boxes:
+            if b[0] == name:
+                return b
+        return None
+
+    def tkhd_wh_offset(payload_start: int, version: int) -> int:
+        if version == 1:
+            return payload_start + 4 + 8 + 8 + 4 + 4 + 8 + 16 + 36
+        return payload_start + 4 + 4 + 4 + 4 + 4 + 4 + 16 + 36
+
+    with open(mp4_path, "rb") as f:
+        data = bytearray(f.read())
+
+    moov = find_one(walk(data, 0, len(data)), b"moov")
+    if moov is None:
+        return
+    moov_inner = walk(data, moov[1] + moov[2], moov[1] + moov[3])
+    traks = [b for b in moov_inner if b[0] == b"trak"]
+
+    video_w = video_h = 0
+    sub_traks: List[Tuple[bytes, int, int, int]] = []
+    for trak in traks:
+        inner = walk(data, trak[1] + trak[2], trak[1] + trak[3])
+        mdia = find_one(inner, b"mdia")
+        if mdia is None:
+            continue
+        mdia_inner = walk(data, mdia[1] + mdia[2], mdia[1] + mdia[3])
+        hdlr = find_one(mdia_inner, b"hdlr")
+        if hdlr is None:
+            continue
+        htype = bytes(data[hdlr[1] + hdlr[2] + 8:hdlr[1] + hdlr[2] + 12])
+        tkhd = find_one(inner, b"tkhd")
+        if tkhd is None:
+            continue
+        if htype == b"vide":
+            ph = tkhd[1] + tkhd[2]
+            wh = tkhd_wh_offset(ph, data[ph])
+            video_w = struct.unpack(">I", data[wh:wh + 4])[0]
+            video_h = struct.unpack(">I", data[wh + 4:wh + 8])[0]
+        elif htype in (b"sbtl", b"text", b"subt"):
+            sub_traks.append(trak)
+
+    if not video_w or not video_h or not sub_traks:
+        return
+
+    h_px = min(video_h // 65536, 65535)
+    w_px = min(video_w // 65536, 65535)
+    for trak in sub_traks:
+        inner = walk(data, trak[1] + trak[2], trak[1] + trak[3])
+        tkhd = find_one(inner, b"tkhd")
+        if tkhd is not None:
+            ph = tkhd[1] + tkhd[2]
+            wh = tkhd_wh_offset(ph, data[ph])
+            data[wh:wh + 4] = struct.pack(">I", video_w)
+            data[wh + 4:wh + 8] = struct.pack(">I", video_h)
+        mdia = find_one(inner, b"mdia")
+        if mdia is None:
+            continue
+        minf = find_one(walk(data, mdia[1] + mdia[2], mdia[1] + mdia[3]), b"minf")
+        if minf is None:
+            continue
+        stbl = find_one(walk(data, minf[1] + minf[2], minf[1] + minf[3]), b"stbl")
+        if stbl is None:
+            continue
+        stsd = find_one(walk(data, stbl[1] + stbl[2], stbl[1] + stbl[3]), b"stsd")
+        if stsd is None:
+            continue
+        # stsd payload: 4 (ver/flags) + 4 (entry_count) then entries
+        for entry in walk(data, stsd[1] + stsd[2] + 8, stsd[1] + stsd[3]):
+            if entry[0] != b"tx3g":
+                continue
+            # SampleEntry header: 8 (size+type) + 6 reserved + 2 data_ref_index = 16
+            # tx3g body: 4 displayFlags + 1 horiz + 1 vert + 4 bgcolor + 8 BoxRecord
+            dtb = entry[1] + 16 + 4 + 1 + 1 + 4
+            data[dtb:dtb + 8] = struct.pack(">HHHH", 0, 0, h_px, w_px)
+
+    with open(mp4_path, "wb") as f:
+        f.write(bytes(data))
 
 
 def _extract_subtitles_as_vtt(filepath: str, output_dir: str) -> Any:
@@ -215,6 +320,7 @@ class VideoConverter:
             if conversion.returncode != 0:
                 raise Exception(f"Conversion failed for {input_filepath}")
 
+            _fix_subtitle_track_dimensions(output_filepath)
             _extract_subtitles_as_vtt(output_filepath, output_dir).wait()
 
         finally:

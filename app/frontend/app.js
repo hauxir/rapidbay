@@ -394,30 +394,26 @@
             function normalizeLanguage(lang) {
                 return lang ? lang.split("-")[0].toLowerCase() : lang;
             }
-            var captionLanguage = localStorage.getItem("captionLanguage");
             function applyCaptionPreference() {
                 var tracks = video.textTracks;
                 var captionLanguage = normalizeLanguage(localStorage.getItem("captionLanguage"));
                 if (!captionLanguage) return;
+                // Don't mutate modes unless we're actually selecting one — hls.js's
+                // text-track poll treats any non-"disabled" track as the active
+                // subtitle, so blanket-hiding tracks would auto-select whichever
+                // happens to be last in the list.
                 var hasShowing = false;
+                var currentTrack;
                 for (var i = 0; i < tracks.length; i++) {
                     if (tracks[i].mode === "showing") {
                         hasShowing = true;
-                        break;
+                    }
+                    if (!currentTrack && normalizeLanguage(tracks[i].language) === captionLanguage) {
+                        currentTrack = tracks[i];
                     }
                 }
-                if (hasShowing) return;
-                var currentTrack;
-                for (var i = 0; i < tracks.length; i++) {
-                    var track = tracks[i];
-                    track.mode = "hidden";
-                    if (!currentTrack && normalizeLanguage(track.language) === captionLanguage) {
-                        currentTrack = track;
-                    }
-                }
-                if (currentTrack) {
-                    currentTrack.mode = "showing";
-                }
+                if (hasShowing || !currentTrack) return;
+                currentTrack.mode = "showing";
             }
             var tracks = video.textTracks;
             for (var i = 0; i < tracks.length; i++) {

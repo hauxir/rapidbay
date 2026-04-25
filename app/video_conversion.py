@@ -397,12 +397,27 @@ def write_hls_master_playlist(
     duration = 86400.0
     target_duration = int(math.ceil(duration))
 
-    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
-    has_default = False
+    # Compute language for each VTT, then assign unique NAMEs when a language
+    # has multiple tracks. hls.js's subtitleTrackMatchesTextTrack matches by
+    # label+lang, so two manifest tracks sharing both end up rendered
+    # concurrently when one is selected.
+    langs = []
     for vtt in vtt_filenames:
         vtt_stem = os.path.splitext(vtt)[0]
         lang = vtt_stem.rsplit("_", 1)[-1] if "_" in vtt_stem else "und"
-        lang_safe = lang.replace('"', "")
+        langs.append(lang.replace('"', ""))
+    lang_totals: Dict[str, int] = {}
+    for lang in langs:
+        lang_totals[lang] = lang_totals.get(lang, 0) + 1
+
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
+    lang_seen: Dict[str, int] = {}
+    for vtt, lang_safe in zip(vtt_filenames, langs):
+        lang_seen[lang_safe] = lang_seen.get(lang_safe, 0) + 1
+        if lang_totals[lang_safe] > 1:
+            name = f"{lang_safe.upper()} {lang_seen[lang_safe]}"
+        else:
+            name = lang_safe.upper()
         sub_playlist_filename = f"{vtt}.m3u8"
         sub_playlist_path = os.path.join(output_dir, sub_playlist_filename)
         _atomic_write(
@@ -418,12 +433,10 @@ def write_hls_master_playlist(
                 "#EXT-X-ENDLIST\n"
             ),
         )
-        default = "YES" if not has_default else "NO"
-        has_default = True
         lines.append(
             f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",'
-            f'NAME="{lang_safe.upper()}",LANGUAGE="{lang_safe}",'
-            f'DEFAULT={default},AUTOSELECT=YES,FORCED=NO,'
+            f'NAME="{name}",LANGUAGE="{lang_safe}",'
+            f'DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,'
             f'URI="{sub_playlist_filename}"'
         )
 

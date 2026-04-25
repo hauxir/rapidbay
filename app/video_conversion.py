@@ -102,10 +102,7 @@ def _fix_subtitle_track_dimensions(mp4_path: str) -> None:
             wh = tkhd_wh_offset(ph, data[ph])
             video_w = struct.unpack(">I", data[wh:wh + 4])[0]
             video_h = struct.unpack(">I", data[wh + 4:wh + 8])[0]
-        elif htype in (b"sbtl", b"subt"):
-            # Skip handler 'text' on purpose: that's the legacy QuickTime text
-            # format used for chapters, not mov_text — patching its tkhd would
-            # let Safari render chapter labels as if they were subtitles.
+        elif htype in (b"sbtl", b"text", b"subt"):
             sub_traks.append(trak)
 
     if not video_w or not video_h or not sub_traks:
@@ -210,9 +207,6 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
                 "-map 0:v?",
                 "-map 0:a?",
                 "-map 0:s?" if n_sub_tracks > 0 else "",
-                # Drop legacy QuickTime 'text' chapter tracks; Safari renders
-                # them as misplaced overlays alongside real subtitles.
-                "-map_chapters -1",
                 f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
                 if needs_audio_conversion
                 else "-acodec copy",

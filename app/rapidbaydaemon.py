@@ -520,7 +520,6 @@ class RapidBayDaemon:
             filename = os.path.basename(f.path)
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             output_filepath = _get_output_filepath(magnet_hash, filepath)
-            is_video = os.path.splitext(filename)[1][1:] in settings.VIDEO_EXTENSIONS
 
             # MP4 conversion pipeline
             if is_state(filename, FileStatus.DOWNLOAD_FINISHED):

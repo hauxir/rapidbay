@@ -429,7 +429,7 @@ def write_hls_master_playlist(
     # has multiple tracks. hls.js's subtitleTrackMatchesTextTrack matches by
     # label+lang, so two manifest tracks sharing both end up rendered
     # concurrently when one is selected.
-    langs = []
+    langs: List[str] = []
     for vtt in vtt_filenames:
         vtt_stem = os.path.splitext(vtt)[0]
         lang = vtt_stem.rsplit("_", 1)[-1] if "_" in vtt_stem else "und"
@@ -462,10 +462,9 @@ def write_hls_master_playlist(
             ),
         )
         lines.append(
-            f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",'
-            f'NAME="{name}",LANGUAGE="{lang_safe}",'
-            f'DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,'
-            f'URI="{sub_playlist_filename}"'
+            f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="{name}",'
+            + f'LANGUAGE="{lang_safe}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,'
+            + f'URI="{sub_playlist_filename}"'
         )
 
     bandwidth = 2000000

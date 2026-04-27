@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 import time
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Any, Dict, List, Set
 
 import http_cache
@@ -172,6 +172,7 @@ class RapidBayDaemon:
         # "user-selected", which would otherwise drop these files from
         # `active_filenames` and remove the torrent (with files) mid-download.
         self._http_served: Dict[str, Set[str]] = {}
+        self._subtitle_gate: Lock = Lock()
         self._stop_event: Event = Event()
         self.thread: Thread = Thread(target=self._loop_wrapper, args=())
         self.thread.daemon = True
@@ -285,7 +286,7 @@ class RapidBayDaemon:
 
         # Determine if HLS stream is available for early playback
         hls_info: Dict[str, Any] = {}
-        if is_video:
+        if is_video and settings.HLS_STREAMING:
             m3u8 = _m3u8_path(magnet_hash, filename)
             if os.path.isfile(m3u8):
                 vtt_subtitles = _get_vtt_subtitles(output_dir)
@@ -307,7 +308,7 @@ class RapidBayDaemon:
             elif self.hls_streamer.active_streams.get(m3u8):
                 # Stream is starting but m3u8 not written yet
                 hls_info = {'hls_pending': True}
-            else:
+            elif m3u8 not in self.hls_streamer.failed_streams:
                 # Check if enough data to start streaming
                 available = self._get_available_bytes(magnet_hash, filename)
                 ext = os.path.splitext(filename)[1].lower()
@@ -393,6 +394,8 @@ class RapidBayDaemon:
 
     def start_hls_stream(self, magnet_hash: str, filename: str) -> bool:
         """Start HLS streaming for a file. Returns True if stream was started or already active."""
+        if not settings.HLS_STREAMING:
+            return False
         ext = os.path.splitext(filename)[1].lower()
         if ext not in video_conversion.PIPE_FRIENDLY_EXTENSIONS:
             return False
@@ -436,14 +439,19 @@ class RapidBayDaemon:
                         best = max(best, int(http_progress * f.size))
         return best
 
+    def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:
+        # Test-and-set the dedup marker synchronously so racing callers (heartbeats
+        # spawning while a prior download is in flight) can't both pass the check
+        # and trigger duplicate OpenSubtitles fetches.
+        with self._subtitle_gate:
+            if self.subtitle_downloads.get(filepath):
+                return
+            self.subtitle_downloads[filepath] = SubtitleDownloadStatus.DOWNLOADING
+        self._run_subtitle_download(filepath, output_dir, skip or [])
+
     @threaded
     @log.catch_and_log_exceptions
-    def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:
-        if skip is None:
-            skip = []
-        if self.subtitle_downloads.get(filepath):
-            return
-        self.subtitle_downloads[filepath] = SubtitleDownloadStatus.DOWNLOADING
+    def _run_subtitle_download(self, filepath: str, output_dir: str, skip: List[str]) -> None:
         subtitles.download_all_subtitles(filepath, skip=skip)
         # Copy downloaded .srt files to output dir as .vtt for HLS playback
         dirname = os.path.dirname(filepath)
@@ -495,6 +503,8 @@ class RapidBayDaemon:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                 self.subtitle_downloads.pop(filepath, None)
                 self.http_downloader.clear(filepath)
+                m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
+                self.hls_streamer.failed_streams.discard(m3u8)
             return
 
         # Iterate over the unfiltered torrent files so `file_progress` indexing

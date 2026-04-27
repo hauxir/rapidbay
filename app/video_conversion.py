@@ -3,6 +3,7 @@ import datetime
 import math
 import os
 import re
+import tempfile
 import threading
 import time
 from subprocess import DEVNULL, PIPE, Popen
@@ -225,6 +226,10 @@ class VideoConverter:
 class HLSStreamer:
     def __init__(self) -> None:
         self.active_streams: Dict[str, bool] = {}
+        # m3u8 paths whose ffmpeg invocation failed (e.g. unsupported codec).
+        # Once a file is here, get_file_status stops surfacing can_stream so the
+        # user can't keep re-clicking ▶ into the same backend failure.
+        self.failed_streams: set[str] = set()
         self._reservation_lock = threading.Lock()
 
     def start_stream(
@@ -242,9 +247,11 @@ class HLSStreamer:
         """
         m3u8_path = os.path.join(output_dir, m3u8_filename)
         with self._reservation_lock:
+            if m3u8_path in self.failed_streams:
+                return False
             if self.active_streams.get(m3u8_path):
                 return True
-            if len(self.active_streams) >= settings.MAX_PARALLEL_CONVERSIONS:
+            if len(self.active_streams) >= settings.MAX_PARALLEL_HLS_STREAMS:
                 return False
             self.active_streams[m3u8_path] = True
         self._run_stream(
@@ -313,9 +320,11 @@ class HLSStreamer:
                 with open(stderr_log_path) as f:
                     stderr = f.read()
                 print(f"HLS conversion failed for {input_filepath}: exit code {proc.returncode}: {stderr[-500:]}")
-                # Remove incomplete m3u8 so daemon retries the conversion
+                # Remove incomplete m3u8 and mark this stream as permanently
+                # failed so the frontend stops surfacing the ▶ button for it.
                 with contextlib.suppress(OSError):
                     os.remove(m3u8_path)
+                self.failed_streams.add(m3u8_path)
                 return
 
             # Finalize the m3u8: switch EVENT→VOD and append ENDLIST
@@ -396,10 +405,23 @@ class HLSStreamer:
 
 
 def _atomic_write(path: str, content: str) -> None:
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        f.write(content)
-    os.replace(tmp, path)
+    # Use a unique tmp file so concurrent writers can't clobber each other's
+    # in-flight tmp before the rename.
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
+# Cache of master-playlist signatures so we don't rewrite identical content on
+# every status poll (frontend polls every 1-3s per active viewer).
+_master_playlist_cache: Dict[str, Tuple[str, ...]] = {}
+_master_playlist_cache_lock = threading.Lock()
 
 
 def write_hls_master_playlist(
@@ -416,6 +438,14 @@ def write_hls_master_playlist(
     base = os.path.splitext(video_m3u8_filename)[0]
     master_filename = f"{base}_master.m3u8"
     master_path = os.path.join(output_dir, master_filename)
+
+    # Skip rewrite if the inputs are unchanged since last call. Frontend polls
+    # the status endpoint every 1-3s; without this, the master + every subtitle
+    # sub-playlist is rewritten on every poll for every viewer.
+    signature: Tuple[str, ...] = (video_m3u8_filename, *vtt_filenames)
+    with _master_playlist_cache_lock:
+        if _master_playlist_cache.get(master_path) == signature and os.path.isfile(master_path):
+            return master_filename
 
     # Use a generous fixed segment duration so hls.js never tries to fetch a
     # "next" subtitle segment; the VTT's own cue timestamps determine when each
@@ -474,4 +504,6 @@ def write_hls_master_playlist(
     lines.append(video_m3u8_filename)
 
     _atomic_write(master_path, "\n".join(lines) + "\n")
+    with _master_playlist_cache_lock:
+        _master_playlist_cache[master_path] = signature
     return master_filename

@@ -61,8 +61,10 @@ OPENSUBTITLES_USERNAME: str | None = None
 OPENSUBTITLES_PASSWORD: str | None = None
 
 # HLS STREAMING
+HLS_STREAMING: bool = False  # enable early HLS playback while downloading; forces sequential_download
 HLS_SEGMENT_DURATION: int = 6  # seconds per HLS segment
 HLS_START_THRESHOLD: int = 50 * 1024 * 1024  # bytes of sequential data before starting HLS
+MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent HLS ffmpeg processes (independent of MAX_PARALLEL_CONVERSIONS)
 
 # Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:

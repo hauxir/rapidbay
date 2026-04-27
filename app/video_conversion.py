@@ -3,11 +3,12 @@ import datetime
 import math
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import time
 import urllib.parse
-from subprocess import DEVNULL, PIPE, Popen
+from subprocess import DEVNULL, PIPE, Popen, TimeoutExpired
 from typing import Any, Callable, Dict, List, Tuple
 
 import log
@@ -161,7 +162,33 @@ PIPE_FRIENDLY_EXTENSIONS = {".mkv", ".avi", ".ts", ".mpg", ".mpeg"}
 
 
 def _detect_video_codec(filepath: str) -> str:
-    """Detect video codec from file. Returns 'hevc', 'h264', etc."""
+    """Detect video codec from file. Returns 'hevc', 'h264', etc.
+
+    Uses ffprobe as the primary detector — it parses MKV/Matroska partial
+    files more reliably than MediaInfo, which can miss the codec when the
+    Tracks element hasn't fully landed yet at the start-of-stream threshold.
+    Falls back to MediaInfo, then to "h264" as a last resort.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=nw=1:nk=1",
+                filepath,
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        codec = result.stdout.strip().lower()
+        if codec:
+            if "hevc" in codec or "h265" in codec:
+                return "hevc"
+            if "h264" in codec or "avc" in codec:
+                return "h264"
+            return codec
+    except (TimeoutExpired, OSError):
+        pass
     try:
         media_info: Any = MediaInfo.parse(filepath)
         for t in media_info.tracks:
@@ -394,7 +421,27 @@ class HLSStreamer:
                 )
                 feeder.start()
                 feeder.join()
-                proc.wait()
+                # Bounded wait: once the feeder closes stdin, ffmpeg should
+                # flush and exit within seconds. If it hangs (broken stream,
+                # internal deadlock) the slot would otherwise be held forever
+                # — only stop_under from torrent removal could free it. Mark
+                # intentional before terminating so a forced kill isn't
+                # recorded as an unrecoverable codec failure.
+                try:
+                    proc.wait(timeout=30)
+                except TimeoutExpired:
+                    log.debug(f"HLS ffmpeg did not exit 30s after stdin close, terminating: {m3u8_path}")
+                    with self._reservation_lock:
+                        self._stopping.add(m3u8_path)
+                    with contextlib.suppress(Exception):
+                        proc.terminate()
+                    try:
+                        proc.wait(timeout=10)
+                    except TimeoutExpired:
+                        with contextlib.suppress(Exception):
+                            proc.kill()
+                        with contextlib.suppress(Exception):
+                            proc.wait(timeout=5)
 
             if proc.returncode != 0:
                 with self._reservation_lock:

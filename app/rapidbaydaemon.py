@@ -566,6 +566,7 @@ class RapidBayDaemon:
                 self.http_downloader.clear(filepath)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
+            video_conversion.clear_master_playlist_cache_under(output_dir)
             # Leave completed HLS artifacts (segments, playlists) on disk:
             # viewers may still be streaming from them. They'll age out via
             # _remove_old_files_and_directories like any other output file.

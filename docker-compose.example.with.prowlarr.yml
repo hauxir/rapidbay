@@ -1,0 +1,19 @@
+version: "3"
+
+services:
+    prowlarr:
+        image: linuxserver/prowlarr
+        ports:
+            - 9696:9696
+        volumes:
+            - ./.prowlarr:/config
+
+    rapidbay:
+        image: hauxir/rapidbay:latest
+        environment:
+            - PROWLARR_HOST=http://prowlarr:9696
+            - PROWLARR_API_KEY=YOUR_API_KEY
+        ports:
+            - 5000:5000
+        links:
+            - prowlarr

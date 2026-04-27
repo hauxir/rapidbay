@@ -360,10 +360,8 @@ class HLSStreamer:
                     # Cap by current on-disk size: the piece estimator can run
                     # ahead of bytes flushed to the file, and reading past EOF
                     # would otherwise spin in a tight retry loop.
-                    try:
+                    with contextlib.suppress(OSError):
                         available = min(available, os.path.getsize(filepath))
-                    except OSError:
-                        pass
 
                     if available <= bytes_written:
                         time.sleep(0.5)
@@ -440,12 +438,13 @@ def write_hls_master_playlist(
 
     lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
     lang_seen: Dict[str, int] = {}
-    for vtt, lang_safe in zip(vtt_filenames, langs):
+    for vtt, lang_safe in zip(vtt_filenames, langs, strict=False):
         lang_seen[lang_safe] = lang_seen.get(lang_safe, 0) + 1
-        if lang_totals[lang_safe] > 1:
-            name = f"{lang_safe.upper()} {lang_seen[lang_safe]}"
-        else:
-            name = lang_safe.upper()
+        name = (
+            f"{lang_safe.upper()} {lang_seen[lang_safe]}"
+            if lang_totals[lang_safe] > 1
+            else lang_safe.upper()
+        )
         sub_playlist_filename = f"{vtt}.m3u8"
         sub_playlist_path = os.path.join(output_dir, sub_playlist_filename)
         _atomic_write(

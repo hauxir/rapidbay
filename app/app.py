@@ -519,8 +519,7 @@ def magnet_download(
 
 @app.post("/api/magnet/{magnet_hash}/{filename}/stream")
 def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
-    started = daemon.start_hls_stream(magnet_hash, filename)
-    return {"started": started}
+    return daemon.start_hls_stream(magnet_hash, filename)
 
 
 @app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)

@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import json
 import os
@@ -116,11 +117,21 @@ def _torrent_is_stale(h: Any) -> bool:
 
 
 def _m3u8_filename(video_filename: str) -> str:
-    return os.path.splitext(video_filename)[0] + ".m3u8"
+    return os.path.splitext(os.path.basename(video_filename))[0] + ".m3u8"
 
 
 def _m3u8_path(magnet_hash: str, video_filename: str) -> str:
     return os.path.join(_get_output_dir(magnet_hash), _m3u8_filename(video_filename))
+
+
+def _is_safe_subpath(parent: str, child: str) -> bool:
+    """True iff `child` resolves to a path inside `parent` (no traversal)."""
+    try:
+        parent_abs = os.path.realpath(parent)
+        child_abs = os.path.realpath(child)
+    except (OSError, ValueError):
+        return False
+    return os.path.commonpath([parent_abs, child_abs]) == parent_abs
 
 
 def _hls_effective_threshold(file_size: int) -> int:
@@ -398,35 +409,54 @@ class RapidBayDaemon:
             **hls_info,
         }
 
-    def start_hls_stream(self, magnet_hash: str, filename: str) -> bool:
-        """Start HLS streaming for a file. Returns True if stream was started or already active."""
+    def start_hls_stream(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
+        """Start HLS streaming for a file.
+
+        Returns a dict with:
+          - started: bool — True iff a stream is now active for this file
+          - reason: str (only when started=False) — one of disabled,
+            unsupported_format, invalid_path, no_torrent, file_not_found,
+            not_ready, capacity, codec_failed
+        """
         if not settings.HLS_STREAMING:
-            return False
+            return {"started": False, "reason": "disabled"}
         ext = os.path.splitext(filename)[1].lower()
         if ext not in video_conversion.PIPE_FRIENDLY_EXTENSIONS:
-            return False
+            return {"started": False, "reason": "unsupported_format"}
+        output_dir = _get_output_dir(magnet_hash)
         m3u8 = _m3u8_path(magnet_hash, filename)
-        if os.path.isfile(m3u8) or self.hls_streamer.active_streams.get(m3u8):
-            return True  # Already streaming or complete
+        # Path-traversal guard: filename comes from URL; reject if the
+        # constructed m3u8 path escapes the magnet-hash output dir.
+        if not _is_safe_subpath(_get_output_dir(magnet_hash), m3u8):
+            return {"started": False, "reason": "invalid_path"}
+        if os.path.isfile(m3u8) or m3u8 in self.hls_streamer.active_streams:
+            return {"started": True}  # Already streaming or complete
+        if self.hls_streamer.is_failed(m3u8):
+            return {"started": False, "reason": "codec_failed"}
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h or not h.has_metadata():
-            return False
+            return {"started": False, "reason": "no_torrent"}
         i, f = torrent.get_index_and_file_from_files(h, filename)
         if i is None or f is None:
-            return False
+            return {"started": False, "reason": "file_not_found"}
+        download_root = os.path.join(settings.DOWNLOAD_DIR, magnet_hash)
+        filepath = os.path.join(download_root, f.path)
+        # Same guard for the input filepath — defense against pathological
+        # libtorrent file paths (libtorrent normalizes, but be paranoid).
+        if not _is_safe_subpath(download_root, filepath):
+            return {"started": False, "reason": "invalid_path"}
         available_bytes = self._get_available_bytes(magnet_hash, filename)
         if available_bytes < _hls_effective_threshold(f.size):
-            return False
-        filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-        output_dir = _get_output_dir(magnet_hash)
+            return {"started": False, "reason": "not_ready"}
         os.makedirs(output_dir, exist_ok=True)
-        return self.hls_streamer.start_stream(
+        started = self.hls_streamer.start_stream(
             filepath,
             output_dir,
             lambda _mh=magnet_hash, _fn=filename: self._get_available_bytes(_mh, _fn),
             total_file_size=f.size,
             m3u8_filename=_m3u8_filename(filename),
         )
+        return {"started": True} if started else {"started": False, "reason": "capacity"}
 
     def _hls_can_stream(self, magnet_hash: str, filename: str) -> bool:
         h = self.torrent_client.torrents.get(magnet_hash)
@@ -483,10 +513,18 @@ class RapidBayDaemon:
                 vtt_name = f"{basename_without_ext}_{lang}.vtt" if lang else srt_stem + ".vtt"
                 vtt_path = os.path.join(output_dir, vtt_name)
                 if not os.path.isfile(vtt_path):
-                    subprocess.run(
-                        ["ffmpeg", "-nostdin", "-v", "quiet", "-i", srt_path, vtt_path],
-                        check=False,
-                    )
+                    # Bound runtime so a malformed SRT can't wedge the
+                    # subtitle-download thread indefinitely.
+                    try:
+                        subprocess.run(
+                            ["ffmpeg", "-nostdin", "-v", "quiet", "-i", srt_path, vtt_path],
+                            check=False,
+                            timeout=60,
+                        )
+                    except subprocess.TimeoutExpired:
+                        log.debug(f"ffmpeg SRT→VTT timed out for {srt_path}")
+                        with contextlib.suppress(OSError):
+                            os.remove(vtt_path)
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
 
     def _handle_torrent(self, magnet_hash: str) -> None:
@@ -528,6 +566,9 @@ class RapidBayDaemon:
                 self.http_downloader.clear(filepath)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
+            # Leave completed HLS artifacts (segments, playlists) on disk:
+            # viewers may still be streaming from them. They'll age out via
+            # _remove_old_files_and_directories like any other output file.
             return
 
         # Iterate over the unfiltered torrent files so `file_progress` indexing
@@ -625,10 +666,11 @@ class RapidBayDaemon:
                 continue
             try:
                 if _torrent_is_stale(h):
+                    output_dir = _get_output_dir(magnet_hash)
                     # Kill any active HLS stream first; otherwise its ffmpeg +
                     # pipe-feeder threads outlive remove_files=True and spin
                     # forever waiting on bytes that will never arrive.
-                    self.hls_streamer.stop_under(_get_output_dir(magnet_hash))
+                    self.hls_streamer.stop_under(output_dir)
                     # Clear any HTTP downloads for this torrent before removing
                     for f in torrent.get_torrent_info(h).files():
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
@@ -636,6 +678,7 @@ class RapidBayDaemon:
                         self.http_downloader.clear(filepath)
                     self._http_served.pop(magnet_hash, None)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
+                    video_conversion.clear_master_playlist_cache_under(output_dir)
                 elif h.has_metadata():
                     with self.torrent_client.locks.lock(magnet_hash):
                         self._handle_torrent(magnet_hash)

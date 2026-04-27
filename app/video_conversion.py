@@ -302,7 +302,10 @@ class HLSStreamer:
         if self.is_failed(m3u8_path):
             return False
         with self._reservation_lock:
-            if self.active_streams.get(m3u8_path):
+            # Use `in` (not truthiness) — placeholder reservations sit in the
+            # dict as None between start_stream and Popen creation, and a
+            # truthy check would let a duplicate caller re-enter that window.
+            if m3u8_path in self.active_streams:
                 return True
             if len(self.active_streams) >= settings.MAX_PARALLEL_HLS_STREAMS:
                 return False
@@ -507,6 +510,19 @@ def _atomic_write(path: str, content: str) -> None:
 # every status poll (frontend polls every 1-3s per active viewer).
 _master_playlist_cache: Dict[str, Tuple[str, ...]] = {}
 _master_playlist_cache_lock = threading.Lock()
+
+
+def clear_master_playlist_cache_under(output_dir: str) -> None:
+    """Drop master-playlist cache entries rooted under `output_dir`.
+
+    Called on torrent removal so the cache doesn't grow unbounded across the
+    daemon's lifetime; entries are scoped to per-torrent output dirs that
+    disappear when the torrent does.
+    """
+    norm = os.path.normpath(output_dir) + os.sep
+    with _master_playlist_cache_lock:
+        for key in [k for k in _master_playlist_cache if os.path.normpath(k).startswith(norm)]:
+            _master_playlist_cache.pop(key, None)
 
 
 def write_hls_master_playlist(

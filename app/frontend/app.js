@@ -268,6 +268,51 @@
                 hovering: false,
             };
         },
+        watch: {
+            // url changes within the same playback session when subs become
+            // available (cache-buster increments). Reload hls.js's source in
+            // place — the parent's :key strips the query string so we don't
+            // remount the <video> here. Playback time and play/pause state
+            // are preserved across the reload.
+            url: function (newUrl, oldUrl) {
+                if (!newUrl || newUrl === oldUrl) return;
+                if (newUrl.split("?")[0] !== oldUrl.split("?")[0]) return;
+                var video = document.getElementsByTagName("video")[0];
+                if (!video) return;
+                var fullUrl = window.location.origin + newUrl;
+                var resumeAt = video.currentTime;
+                var wasPlaying = !video.paused && !video.ended;
+                if (this.hls) {
+                    var hls = this.hls;
+                    var seeked = false;
+                    var resume = function () {
+                        if (seeked) return;
+                        seeked = true;
+                        hls.off(Hls.Events.MANIFEST_PARSED, resume);
+                        if (resumeAt > 0) {
+                            video.currentTime = resumeAt;
+                        }
+                        if (wasPlaying) {
+                            video.play().catch(function () {});
+                        }
+                    };
+                    hls.once(Hls.Events.MANIFEST_PARSED, resume);
+                    hls.loadSource(fullUrl);
+                } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+                    var onLoaded = function () {
+                        video.removeEventListener("loadedmetadata", onLoaded);
+                        if (resumeAt > 0) {
+                            video.currentTime = resumeAt;
+                        }
+                        if (wasPlaying) {
+                            video.play().catch(function () {});
+                        }
+                    };
+                    video.addEventListener("loadedmetadata", onLoaded);
+                    video.src = fullUrl;
+                }
+            },
+        },
         mounted: function () {
             var magnet_hash = this.url.split("/")[2];
             var filename = (function (l) {
@@ -1030,7 +1075,8 @@
                 downloadProgress: null,
                 canStream: false,
                 streamRequested: false,
-                hlsFailed: false
+                hlsFailed: false,
+                streamMessage: null
             };
         },
         methods: {
@@ -1045,13 +1091,23 @@
                 var self = this;
                 var magnet_hash = get_hash(this.params.magnet_link);
                 self.streamRequested = true;
+                self.streamMessage = null;
                 post("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function (data) {
-                    // Backend may decline (capacity exhausted, etc). Re-show
-                    // the ▶ button so the user can retry instead of being
-                    // stuck on the loading screen forever.
-                    if (!data || data.started === false) {
-                        self.streamRequested = false;
-                    }
+                    if (data && data.started) return;
+                    // Backend declined — re-show ▶ and surface the reason so
+                    // the user knows whether to retry, give up, or wait.
+                    self.streamRequested = false;
+                    var reasons = {
+                        disabled: "Streaming is disabled.",
+                        unsupported_format: "This file format can't be streamed live.",
+                        codec_failed: "Streaming failed for this file's codec.",
+                        capacity: "Server is at streaming capacity. Try again shortly.",
+                        not_ready: "Not enough data buffered yet — wait a moment.",
+                        no_torrent: "Torrent isn't ready yet.",
+                        file_not_found: "File not found in torrent.",
+                        invalid_path: "Invalid filename.",
+                    };
+                    self.streamMessage = (data && reasons[data.reason]) || "Couldn't start the stream.";
                 });
             },
             onStreamError: function () {
@@ -1094,9 +1150,11 @@
                                 ? data.peers + " Peers"
                                 : null;
                         // Set play link: prefer MP4 (ready state), fall back to HLS for early playback.
-                        // For HLS we tag the URL with the current subtitle count so that when new
-                        // VTTs become available, the regenerated master playlist is refetched
-                        // (Vue remounts the player when play_link changes).
+                        // For HLS, we tag the URL with the current subtitle count so that
+                        // when new VTTs arrive the regenerated master playlist gets refetched
+                        // by hls.js (cache-bust). The player's `:key` ignores the query
+                        // string so subs-count changes only swap the source internally
+                        // (preserving playback position) instead of remounting the video.
                         if (data.status === "ready" && data.filename) {
                             var mp4Link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename);
                             if (self.play_link !== mp4Link) {

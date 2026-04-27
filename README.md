@@ -10,7 +10,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 
 ## Features:
 
--   Uses [Jackett](https://github.com/Jackett/Jackett) as a search backend.
+-   Uses [Jackett](https://github.com/Jackett/Jackett) and/or [Prowlarr](https://github.com/Prowlarr/Prowlarr) as a search backend.
 -   Pick individual video files you want to play and the system takes care of the rest to make it streamable.
 -   Automatic download of Closed Captions/Subtitles
 -   Automatically converts the video file and subtitles to be playable on all browsers/chromecast/appletv
@@ -23,19 +23,28 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 
 ![](https://user-images.githubusercontent.com/2439255/48429861-44b60b00-e76e-11e8-8bdb-042f125357ce.gif)
 
-## Setting up Jackett as a search backend:
+## Setting up a search backend:
 
-Rapidbay requires the torrent indexer [Jackett](https://github.com/Jackett/Jackett) for searching.
-Have a look [here](https://github.com/Jackett/Jackett#installation-using-docker) on how to set it up using Docker.
+Rapidbay requires a torrent indexer for searching. You can use [Jackett](https://github.com/Jackett/Jackett), [Prowlarr](https://github.com/Prowlarr/Prowlarr), or both at the same time (results are merged and deduplicated).
 
-There's also a [docker-compose example](https://github.com/hauxir/rapidbay/blob/master/docker-compose.example.with.jackett.yml) file to show how you can connect rapidbay and jackett together.
+### Jackett
+
+Have a look [here](https://github.com/Jackett/Jackett#installation-using-docker) on how to set Jackett up using Docker. There's also a [docker-compose example](https://github.com/hauxir/rapidbay/blob/master/docker-compose.example.with.jackett.yml) showing how to connect rapidbay and Jackett together.
+
+### Prowlarr
+
+See the [Prowlarr docs](https://wiki.servarr.com/prowlarr/installation) for installation instructions. There's a [docker-compose example](https://github.com/hauxir/rapidbay/blob/master/docker-compose.example.with.prowlarr.yml) showing how to connect rapidbay and Prowlarr together.
 
 ## Running:
 
 ### With Docker (recommended)
 
 ```
-docker run -p 5000:5000 -e JACKETT_HOST="http://your.jacket.host" -e JACKETT_API_KEY="YourAPIKey" hauxir/rapidbay
+# Using Jackett
+docker run -p 5000:5000 -e JACKETT_HOST="http://your.jackett.host" -e JACKETT_API_KEY="YourAPIKey" hauxir/rapidbay
+
+# Using Prowlarr
+docker run -p 5000:5000 -e PROWLARR_HOST="http://your.prowlarr.host" -e PROWLARR_API_KEY="YourAPIKey" hauxir/rapidbay
 ```
 
 ### Without Docker
@@ -67,9 +76,11 @@ pip install .
 **Run the app:**
 
 ```bash
-# Set environment variables
-export JACKETT_HOST="http://your.jacket.host"
+# Set environment variables (Jackett, Prowlarr, or both)
+export JACKETT_HOST="http://your.jackett.host"
 export JACKETT_API_KEY="YourAPIKey"
+# export PROWLARR_HOST="http://your.prowlarr.host"
+# export PROWLARR_API_KEY="YourAPIKey"
 
 # Run directly (without nginx)
 cd app

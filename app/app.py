@@ -15,6 +15,7 @@ from typing import Annotated, Any, AsyncIterator, Dict, List
 
 import http_cache
 import jackett
+import prowlarr
 import PTN
 import requests
 import settings
@@ -218,6 +219,44 @@ def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
 
+def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
+    """Search configured indexer backends (Jackett and/or Prowlarr) and merge results."""
+    results: List[Dict[str, Any]] = []
+    if settings.JACKETT_HOST:
+        results.extend(jackett.search(searchterm))
+    if settings.PROWLARR_HOST:
+        results.extend(prowlarr.search(searchterm))
+
+    # Filter out results without magnet or torrent_link
+    results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
+
+    # Sort by seeds before dedup so the highest-seed entry wins for any duplicate
+    # hash/link encountered across backends.
+    results = sorted(results, key=lambda x: x.get("seeds", 0) or 0, reverse=True)
+
+    seen_hashes: set[str] = set()
+    seen_links: set[str] = set()
+    deduped: List[Dict[str, Any]] = []
+    for r in results:
+        magnet = r.get("magnet")
+        link = r.get("torrent_link")
+        key_hash: str | None = None
+        if magnet:
+            with contextlib.suppress(Exception):
+                key_hash = torrent.get_hash(magnet).lower()
+        if key_hash:
+            if key_hash in seen_hashes:
+                continue
+            seen_hashes.add(key_hash)
+        elif link:
+            if link in seen_links:
+                continue
+            seen_links.add(link)
+        deduped.append(r)
+
+    return deduped
+
+
 @app.get("/health")
 def health() -> Dict[str, bool]:
     return {"ok": daemon.thread.is_alive()}
@@ -309,19 +348,17 @@ def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]
 @app.get("/api/search/", response_model=SearchResponse)
 @app.get("/api/search/{searchterm}", response_model=SearchResponse)
 def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
-    if settings.JACKETT_HOST:
-        results: List[Dict[str, Any]] = jackett.search(searchterm)
-        # Filter out results without magnet or torrent_link
-        results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
+    if settings.JACKETT_HOST or settings.PROWLARR_HOST:
+        results: List[Dict[str, Any]] = _indexer_search(searchterm)
     else:
         results = [
             {
-                "title": "NO JACKETT SERVER CONFIGURED",
+                "title": "NO SEARCH BACKEND CONFIGURED",
                 "seeds": 1337,
                 "magnet": "N/A"
             },
             {
-                "title": "Please connect Jackett using the config variables JACKETT_HOST and JACKETT_API_KEY",
+                "title": "Please connect Jackett (JACKETT_HOST/JACKETT_API_KEY) or Prowlarr (PROWLARR_HOST/PROWLARR_API_KEY)",
                 "seeds": 1337,
                 "magnet": "N/A"
             }
@@ -430,7 +467,7 @@ def _torrent_url_to_magnet(torrent_url: str) -> str | None:
     magnet_link: str | None = None
     try:
         r: requests.Response = requests.get(torrent_url, allow_redirects=False, timeout=30)
-        if r.status_code == 302:
+        if r.status_code in (301, 302, 303, 307, 308):
             location: str | None = r.headers.get("Location")
             if location and location.startswith("magnet"):
                 _save_torrent_url_to_cache(torrent_url, location)
@@ -515,8 +552,7 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
                         search_term += f" {resolution}"
                     if codec:
                         search_term += f" {codec}"
-                    results: List[Dict[str, Any]] = jackett.search(search_term) if settings.JACKETT_HOST else []
-                    results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
+                    results: List[Dict[str, Any]] = _indexer_search(search_term)
                     if results:
                         result = results[0]
                         next_magnet = result.get("magnet")

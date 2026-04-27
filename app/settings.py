@@ -22,6 +22,10 @@ _kodi_addon_dir: str = "./app/kodi.addon"
 JACKETT_HOST: str | None = None
 JACKETT_API_KEY: str = ""
 
+# PROWLARR
+PROWLARR_HOST: str | None = None
+PROWLARR_API_KEY: str = ""
+
 # TORRENT
 TORRENT_LISTENING_PORT: int | None = None
 DHT_ROUTERS: List[Tuple[str, int]] = [

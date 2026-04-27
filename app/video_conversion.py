@@ -3,6 +3,7 @@ import datetime
 import math
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -45,22 +46,23 @@ def _extract_subtitles_as_vtt(filepath: str, output_dir: str) -> Any:
     basename: str = os.path.basename(filepath)
     filename_without_extension: str = os.path.splitext(basename)[0]
     sub_tracks: List[Tuple[int, str]] = get_sub_tracks(filepath)
-    return Popen(
-        f'ffmpeg -nostdin -v quiet -i "{filepath}" '
-        + " ".join(
-            [
-                f'-map 0:{i} "{output_dir}/{filename_without_extension}.{i}_{lang}.vtt"'
-                for (i, lang) in sub_tracks
-            ]
-        ),
-        shell=True,
-    )
+    args: List[str] = ["ffmpeg", "-nostdin", "-v", "quiet", "-i", filepath]
+    for (i, lang) in sub_tracks:
+        args += [
+            "-map", f"0:{i}",
+            os.path.join(output_dir, f"{filename_without_extension}.{i}_{lang}.vtt"),
+        ]
+    return Popen(args)
+
+
+def _incomplete_path(output_filepath: str) -> str:
+    output_extension: str = os.path.splitext(output_filepath)[1]
+    return f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
 
 
 def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: List[Tuple[str | None, str]] | None = None) -> Any:
     if subtitle_filepaths is None:
         subtitle_filepaths = []
-    output_extension: str = os.path.splitext(output_filepath)[1]
     media_info: Any = MediaInfo.parse(input_filepath)
     audio_codecs: List[str] = [
         t.format.lower() for t in media_info.tracks if t.track_type == "Audio"
@@ -88,48 +90,50 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
         else 0
     )
 
+    log_path = f"{output_filepath}{settings.LOG_POSTFIX}"
     if media_info.tracks:
         try:
             duration: Any = next(t.duration for t in media_info.tracks if t.duration)
             duration_int: int | None = int(round(float(duration) / 1000))
         except StopIteration:
             duration_int = None
-        with open(f"{output_filepath}{settings.LOG_POSTFIX}", "w") as f:
+        with open(log_path, "w") as f:
             f.write(f"{duration_int}\r")
-    return Popen(
-        " ".join(
-            [
-                "ffmpeg -nostdin -threads 0",
-                f'-i "{input_filepath}"',
-                " ".join([f'-f srt -i "{fn}"' for (_, fn) in subtitle_filepaths]),
-                "-map 0:v?",
-                "-map 0:a?",
-                "-map 0:s?" if n_sub_tracks > 0 else "",
-                f"-acodec aac -ab {settings.AAC_BITRATE} -ac {settings.AAC_CHANNELS}"
-                if needs_audio_conversion
-                else "-acodec copy",
-                "-vcodec " + settings.VIDEO_CONVERSION_PARAMS
-                if needs_video_conversion
-                else "-vcodec copy",
-                " ".join([f"-map {i}?" for i in range(1, len(subtitle_filepaths) + 1)]),
-                " ".join(
-                    [
-                        f"-metadata:s:s:{i + n_sub_tracks} language='{subtitle_filepaths[i][0]}'"
-                        for i in range(0, len(subtitle_filepaths))
-                        if subtitle_filepaths[i][0] is not None
-                    ]
-                ),
-                "-c:s mov_text",
-                "-movflags faststart",
-                "-v quiet -stats",
-                "-tag:v hvc1" if is_hevc else "",
-                f'"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" 2>> "{output_filepath}{settings.LOG_POSTFIX}"',
-                "&&",
-                f'mv "{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}" "{output_filepath}"',
-            ]
-        ),
-        shell=True,
-    )
+
+    args: List[str] = ["ffmpeg", "-nostdin", "-threads", "0", "-i", input_filepath]
+    for (_, fn) in subtitle_filepaths:
+        args += ["-f", "srt", "-i", fn]
+    args += ["-map", "0:v?", "-map", "0:a?"]
+    if n_sub_tracks > 0:
+        args += ["-map", "0:s?"]
+    if needs_audio_conversion:
+        args += ["-acodec", "aac", "-ab", settings.AAC_BITRATE, "-ac", str(settings.AAC_CHANNELS)]
+    else:
+        args += ["-acodec", "copy"]
+    if needs_video_conversion:
+        # VIDEO_CONVERSION_PARAMS is operator-supplied (not user-controlled);
+        # split with shlex so multi-token params like "libx264 -preset ultrafast"
+        # become separate argv entries.
+        args += ["-vcodec", *shlex.split(settings.VIDEO_CONVERSION_PARAMS)]
+    else:
+        args += ["-vcodec", "copy"]
+    for i in range(1, len(subtitle_filepaths) + 1):
+        args += ["-map", f"{i}?"]
+    for i, (lang, _) in enumerate(subtitle_filepaths):
+        if lang is not None:
+            args += [f"-metadata:s:s:{i + n_sub_tracks}", f"language={lang}"]
+    args += ["-c:s", "mov_text", "-movflags", "faststart", "-v", "quiet", "-stats"]
+    if is_hevc:
+        args += ["-tag:v", "hvc1"]
+    args.append(_incomplete_path(output_filepath))
+
+    # Append ffmpeg's stderr to the same log file the duration was written to.
+    # Popen dups the fd, so the parent can close immediately after spawn.
+    log_f = open(log_path, "a")
+    try:
+        return Popen(args, stderr=log_f, stdout=DEVNULL)
+    finally:
+        log_f.close()
 
 
 def get_conversion_progress(filepath: str) -> float:
@@ -255,6 +259,11 @@ class VideoConverter:
 
             if conversion.returncode != 0:
                 raise Exception(f"Conversion failed for {input_filepath}")
+
+            # Atomic publish: ffmpeg wrote to the .incomplete path; rename now
+            # that we know the encode succeeded. Replaces the previous shell
+            # `&&` chain with mv.
+            os.replace(_incomplete_path(output_filepath), output_filepath)
 
             _extract_subtitles_as_vtt(output_filepath, output_dir).wait()
 

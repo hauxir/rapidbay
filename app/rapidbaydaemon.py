@@ -2,6 +2,7 @@ import contextlib
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -122,6 +123,17 @@ def _m3u8_filename(video_filename: str) -> str:
 
 def _m3u8_path(magnet_hash: str, video_filename: str) -> str:
     return os.path.join(_get_output_dir(magnet_hash), _m3u8_filename(video_filename))
+
+
+# BitTorrent infohash: 40 hex (sha-1, v1), 32 base32 (v1), or 64 hex (sha-256, v2).
+# Anchors to lowercase only — torrent.get_hash() lower-cases its return value, and
+# this makes `..` / path separators / other shell-relevant chars structurally
+# unrepresentable here, which is the property we rely on for path safety.
+_VALID_MAGNET_HASH = re.compile(r"^[a-z0-9]{32}$|^[a-z0-9]{40}$|^[a-z0-9]{64}$")
+
+
+def _is_valid_magnet_hash(s: str) -> bool:
+    return isinstance(s, str) and bool(_VALID_MAGNET_HASH.fullmatch(s))
 
 
 def _is_safe_subpath(parent: str, child: str) -> bool:
@@ -420,14 +432,22 @@ class RapidBayDaemon:
         """
         if not settings.HLS_STREAMING:
             return {"started": False, "reason": "disabled"}
+        # Reject malformed magnet hashes upfront. The hash is interpolated into
+        # filesystem paths (output_dir, download_root); restricting to the
+        # bittorrent infohash alphabet+lengths makes traversal sequences like
+        # ".." structurally unrepresentable.
+        if not _is_valid_magnet_hash(magnet_hash):
+            return {"started": False, "reason": "invalid_path"}
         ext = os.path.splitext(filename)[1].lower()
         if ext not in video_conversion.PIPE_FRIENDLY_EXTENSIONS:
             return {"started": False, "reason": "unsupported_format"}
         output_dir = _get_output_dir(magnet_hash)
         m3u8 = _m3u8_path(magnet_hash, filename)
-        # Path-traversal guard: filename comes from URL; reject if the
-        # constructed m3u8 path escapes the magnet-hash output dir.
-        if not _is_safe_subpath(_get_output_dir(magnet_hash), m3u8):
+        # Defense in depth: anchor the traversal check on the trusted root
+        # (settings.OUTPUT_DIR), not the magnet-hash-derived output_dir which
+        # would itself be the traversal target. _m3u8_filename uses basename()
+        # so filename can't traverse — this is the catch-all.
+        if not _is_safe_subpath(settings.OUTPUT_DIR, m3u8):
             return {"started": False, "reason": "invalid_path"}
         if os.path.isfile(m3u8) or m3u8 in self.hls_streamer.active_streams:
             return {"started": True}  # Already streaming or complete
@@ -441,9 +461,8 @@ class RapidBayDaemon:
             return {"started": False, "reason": "file_not_found"}
         download_root = os.path.join(settings.DOWNLOAD_DIR, magnet_hash)
         filepath = os.path.join(download_root, f.path)
-        # Same guard for the input filepath — defense against pathological
-        # libtorrent file paths (libtorrent normalizes, but be paranoid).
-        if not _is_safe_subpath(download_root, filepath):
+        # Same anchoring as above — settings.DOWNLOAD_DIR is the trusted root.
+        if not _is_safe_subpath(settings.DOWNLOAD_DIR, filepath):
             return {"started": False, "reason": "invalid_path"}
         available_bytes = self._get_available_bytes(magnet_hash, filename)
         if available_bytes < _hls_effective_threshold(f.size):

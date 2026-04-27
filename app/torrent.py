@@ -127,6 +127,11 @@ class TorrentClient:
         torrents_dir: str | None = None,
     ) -> None:
         self.locks: LockManager = LockManager()
+        # Short-TTL cache for get_sequential_bytes — the piece-walk is O(num_pieces)
+        # and is hit by the HLS pipe-feeder (~2 Hz) plus every status poll. New
+        # pieces arrive on the order of seconds, so a sub-second cache is safe.
+        self._seq_bytes_cache: Dict[Tuple[str, str], Tuple[float, int]] = {}
+        self._seq_bytes_ttl: float = 0.5
         if listening_port:
             listen_interfaces = f'0.0.0.0:{listening_port},[::]:{listening_port}'
         else:
@@ -220,6 +225,8 @@ class TorrentClient:
         with contextlib.suppress(Exception):
             self.session.remove_torrent(h)
         del self.torrents[magnet_hash]
+        for key in [k for k in self._seq_bytes_cache if k[0] == magnet_hash]:
+            self._seq_bytes_cache.pop(key, None)
         if remove_files:
             try:
                 shutil.rmtree(os.path.join(self.download_dir, magnet_hash))  # type: ignore
@@ -256,6 +263,11 @@ class TorrentClient:
 
     def get_sequential_bytes(self, magnet_hash: str, filename: str) -> int:
         """Returns number of contiguous bytes available from start of file."""
+        cache_key = (magnet_hash, filename)
+        cached = self._seq_bytes_cache.get(cache_key)
+        now = time.time()
+        if cached is not None and now - cached[0] < self._seq_bytes_ttl:
+            return cached[1]
         h = self.torrents.get(magnet_hash)
         if not h or not h.has_metadata():
             return 0
@@ -279,6 +291,7 @@ class TorrentClient:
                 break
             sequential_bytes = chunk_end - file_offset
             piece_idx += 1
+        self._seq_bytes_cache[cache_key] = (now, sequential_bytes)
         return sequential_bytes
 
     def _write_filelist_to_disk(self, magnet_link: str) -> None:

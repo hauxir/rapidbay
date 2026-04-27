@@ -176,6 +176,18 @@ def _detect_video_codec(filepath: str) -> str:
     return "h264"
 
 
+def _detect_audio_codec(filepath: str) -> str:
+    """Detect audio codec from file. Returns 'aac', 'ac3', etc."""
+    try:
+        media_info: Any = MediaInfo.parse(filepath)
+        for t in media_info.tracks:
+            if t.track_type == "Audio" and t.format:
+                return t.format.lower()
+    except Exception:
+        pass
+    return ""
+
+
 class VideoConverter:
     def __init__(self) -> None:
         self.file_conversions: Dict[str, bool] = {}
@@ -225,12 +237,53 @@ class VideoConverter:
 
 class HLSStreamer:
     def __init__(self) -> None:
-        self.active_streams: Dict[str, bool] = {}
-        # m3u8 paths whose ffmpeg invocation failed (e.g. unsupported codec).
-        # Once a file is here, get_file_status stops surfacing can_stream so the
-        # user can't keep re-clicking ▶ into the same backend failure.
-        self.failed_streams: set[str] = set()
+        # Maps m3u8 path → live ffmpeg Popen, so streams can be terminated when
+        # the underlying torrent goes away (orphan-prevention).
+        self.active_streams: Dict[str, Popen[bytes]] = {}
+        # Paths currently being deliberately stopped (torrent removed, etc).
+        # Used to suppress the failure-marking branch in _run_stream so a
+        # forced shutdown isn't recorded as an unrecoverable codec failure.
+        self._stopping: set[str] = set()
         self._reservation_lock = threading.Lock()
+
+    @staticmethod
+    def _failed_marker(m3u8_path: str) -> str:
+        return m3u8_path + ".failed"
+
+    @classmethod
+    def is_failed(cls, m3u8_path: str) -> bool:
+        # Marker is on disk so the verdict survives daemon restarts — otherwise
+        # a known-bad-codec file would re-prompt ▶ every time the daemon comes up.
+        return os.path.isfile(cls._failed_marker(m3u8_path))
+
+    @classmethod
+    def mark_failed(cls, m3u8_path: str) -> None:
+        with contextlib.suppress(OSError), open(cls._failed_marker(m3u8_path), "w"):
+            pass
+
+    @classmethod
+    def clear_failed(cls, m3u8_path: str) -> None:
+        with contextlib.suppress(OSError):
+            os.remove(cls._failed_marker(m3u8_path))
+
+    def stop(self, m3u8_path: str) -> None:
+        with self._reservation_lock:
+            if m3u8_path not in self.active_streams:
+                return
+            # Record the request even if the Popen hasn't been registered yet,
+            # so the start path (below) can honor it as soon as proc is created.
+            self._stopping.add(m3u8_path)
+            proc = self.active_streams.get(m3u8_path)
+        if proc:
+            with contextlib.suppress(Exception):
+                proc.terminate()
+
+    def stop_under(self, output_dir: str) -> None:
+        norm = os.path.normpath(output_dir) + os.sep
+        with self._reservation_lock:
+            paths = [p for p in self.active_streams if os.path.normpath(p).startswith(norm)]
+        for p in paths:
+            self.stop(p)
 
     def start_stream(
         self,
@@ -246,14 +299,15 @@ class HLSStreamer:
         False if capacity is exhausted.
         """
         m3u8_path = os.path.join(output_dir, m3u8_filename)
+        if self.is_failed(m3u8_path):
+            return False
         with self._reservation_lock:
-            if m3u8_path in self.failed_streams:
-                return False
             if self.active_streams.get(m3u8_path):
                 return True
             if len(self.active_streams) >= settings.MAX_PARALLEL_HLS_STREAMS:
                 return False
-            self.active_streams[m3u8_path] = True
+            # Placeholder reservation; replaced with real Popen inside _run_stream.
+            self.active_streams[m3u8_path] = None  # type: ignore[assignment]
         self._run_stream(
             input_filepath,
             output_dir,
@@ -287,14 +341,27 @@ class HLSStreamer:
             video_codec = _detect_video_codec(input_filepath)
             video_tag = "hvc1" if video_codec == "hevc" else "avc1"
 
+            # Copy audio when source is already AAC; otherwise transcode. The
+            # aac_adtstoasc bitstream filter is needed when feeding ADTS-AAC
+            # (typical of .ts) into an fMP4 segment, but is harmless on
+            # transcode output too.
+            audio_codec = _detect_audio_codec(input_filepath)
+            if "aac" in audio_codec:
+                audio_args = ["-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
+            else:
+                audio_args = [
+                    "-acodec", "aac",
+                    "-ab", settings.AAC_BITRATE,
+                    "-ac", str(settings.AAC_CHANNELS),
+                    "-bsf:a", "aac_adtstoasc",
+                ]
+
             hls_time = str(settings.HLS_SEGMENT_DURATION)
             ffmpeg_cmd = [
                 "ffmpeg", "-nostdin",
                 "-i", "pipe:0",
                 "-vcodec", "copy",
-                "-acodec", "aac", "-ab", settings.AAC_BITRATE,
-                "-ac", str(settings.AAC_CHANNELS),
-                "-bsf:a", "aac_adtstoasc",
+                *audio_args,
                 "-tag:v", video_tag,
                 "-hls_playlist_type", "event",
                 "-f", "hls",
@@ -308,6 +375,15 @@ class HLSStreamer:
 
             with open(stderr_log_path, "w") as stderr_log:
                 proc = Popen(ffmpeg_cmd, stdin=PIPE, stdout=DEVNULL, stderr=stderr_log)
+                # Register the live process and honor any stop request that
+                # arrived before Popen was created (start_stream reserves the
+                # slot synchronously, the Popen itself is created here).
+                with self._reservation_lock:
+                    self.active_streams[m3u8_path] = proc
+                    pending_stop = m3u8_path in self._stopping
+                if pending_stop:
+                    with contextlib.suppress(Exception):
+                        proc.terminate()
                 feeder = threading.Thread(
                     target=self._pipe_feeder,
                     args=(input_filepath, proc, get_sequential_bytes, total_file_size),
@@ -317,14 +393,18 @@ class HLSStreamer:
                 proc.wait()
 
             if proc.returncode != 0:
-                with open(stderr_log_path) as f:
-                    stderr = f.read()
-                print(f"HLS conversion failed for {input_filepath}: exit code {proc.returncode}: {stderr[-500:]}")
-                # Remove incomplete m3u8 and mark this stream as permanently
-                # failed so the frontend stops surfacing the ▶ button for it.
+                intentional = m3u8_path in self._stopping
+                if not intentional:
+                    with open(stderr_log_path) as f:
+                        stderr = f.read()
+                    print(f"HLS conversion failed for {input_filepath}: exit code {proc.returncode}: {stderr[-500:]}")
+                    # Persist a failure marker so the frontend stops surfacing
+                    # the ▶ button — even across restarts.
+                    self.mark_failed(m3u8_path)
+                # Drop the partial m3u8 either way: an event playlist without
+                # ENDLIST will hang players that try to play it later.
                 with contextlib.suppress(OSError):
                     os.remove(m3u8_path)
-                self.failed_streams.add(m3u8_path)
                 return
 
             # Finalize the m3u8: switch EVENT→VOD and append ENDLIST
@@ -337,14 +417,19 @@ class HLSStreamer:
                     with open(m3u8_path, "w") as f:
                         f.write(content)
 
+            # Stream finished cleanly — drop the now-uninteresting stderr log.
+            with contextlib.suppress(OSError):
+                os.remove(stderr_log_path)
+
             # Extract embedded subtitles as VTT from the original file
             if os.path.isfile(input_filepath):
                 with contextlib.suppress(Exception):
                     _extract_subtitles_as_vtt(input_filepath, output_dir).wait()
 
         finally:
-            with contextlib.suppress(KeyError):
-                del self.active_streams[m3u8_path]
+            with self._reservation_lock:
+                self.active_streams.pop(m3u8_path, None)
+                self._stopping.discard(m3u8_path)
 
     def _pipe_feeder(
         self,

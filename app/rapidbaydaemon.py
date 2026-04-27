@@ -123,6 +123,13 @@ def _m3u8_path(magnet_hash: str, video_filename: str) -> str:
     return os.path.join(_get_output_dir(magnet_hash), _m3u8_filename(video_filename))
 
 
+def _hls_effective_threshold(file_size: int) -> int:
+    # Cap the configured threshold at a fraction of the file size so small
+    # files (e.g. 30 MB) aren't permanently locked out of HLS by a 50 MB floor.
+    # Floor at 1 MiB so very tiny files still see a meaningful warm-up window.
+    return min(settings.HLS_START_THRESHOLD, max(file_size // 4, 1024 * 1024))
+
+
 def _get_vtt_subtitles(output_dir: str) -> List[str]:
     if not os.path.isdir(output_dir):
         return []
@@ -305,15 +312,14 @@ class RapidBayDaemon:
                     'hls_filename': master_filename,
                     'hls_subtitles': vtt_subtitles,
                 }
-            elif self.hls_streamer.active_streams.get(m3u8):
+            elif m3u8 in self.hls_streamer.active_streams:
                 # Stream is starting but m3u8 not written yet
                 hls_info = {'hls_pending': True}
-            elif m3u8 not in self.hls_streamer.failed_streams:
+            elif not self.hls_streamer.is_failed(m3u8):
                 # Check if enough data to start streaming
-                available = self._get_available_bytes(magnet_hash, filename)
                 ext = os.path.splitext(filename)[1].lower()
                 can_pipe = ext in video_conversion.PIPE_FRIENDLY_EXTENSIONS
-                if can_pipe and available >= settings.HLS_START_THRESHOLD:
+                if can_pipe and self._hls_can_stream(magnet_hash, filename):
                     hls_info = {'can_stream': True}
 
         # Check if MP4 output file exists (READY - primary output)
@@ -409,7 +415,7 @@ class RapidBayDaemon:
         if i is None or f is None:
             return False
         available_bytes = self._get_available_bytes(magnet_hash, filename)
-        if available_bytes < settings.HLS_START_THRESHOLD:
+        if available_bytes < _hls_effective_threshold(f.size):
             return False
         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
         output_dir = _get_output_dir(magnet_hash)
@@ -421,6 +427,15 @@ class RapidBayDaemon:
             total_file_size=f.size,
             m3u8_filename=_m3u8_filename(filename),
         )
+
+    def _hls_can_stream(self, magnet_hash: str, filename: str) -> bool:
+        h = self.torrent_client.torrents.get(magnet_hash)
+        if not h or not h.has_metadata():
+            return False
+        i, f = torrent.get_index_and_file_from_files(h, filename)
+        if i is None or f is None:
+            return False
+        return self._get_available_bytes(magnet_hash, filename) >= _hls_effective_threshold(f.size)
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
         """Get contiguous bytes available from start of file for pipe feeding."""
@@ -461,7 +476,10 @@ class RapidBayDaemon:
             if srt_file.endswith(".srt") and srt_file.startswith(basename_without_ext):
                 srt_path = os.path.join(dirname, srt_file)
                 srt_stem = os.path.splitext(srt_file)[0]
-                lang = srt_stem[len(basename_without_ext):].lstrip(".")
+                # Strip both . and _ separators so "Movie_en.srt" doesn't end up
+                # as "Movie__en.vtt" (subtitles.download_all_subtitles uses both
+                # styles depending on provider).
+                lang = srt_stem[len(basename_without_ext):].lstrip("._")
                 vtt_name = f"{basename_without_ext}_{lang}.vtt" if lang else srt_stem + ".vtt"
                 vtt_path = os.path.join(output_dir, vtt_name)
                 if not os.path.isfile(vtt_path):
@@ -497,6 +515,11 @@ class RapidBayDaemon:
         active_filenames = video_filenames if video_filenames else filenames
 
         if all(is_state(filename, FileStatus.READY) for filename in active_filenames):
+            output_dir = _get_output_dir(magnet_hash)
+            # Defensive: HLS streams should have completed naturally by the time
+            # all files are READY, but kill any stragglers before remove_files=True
+            # yanks the input out from under them.
+            self.hls_streamer.stop_under(output_dir)
             self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
             self._http_served.pop(magnet_hash, None)
             for f in files:
@@ -504,7 +527,7 @@ class RapidBayDaemon:
                 self.subtitle_downloads.pop(filepath, None)
                 self.http_downloader.clear(filepath)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
-                self.hls_streamer.failed_streams.discard(m3u8)
+                self.hls_streamer.clear_failed(m3u8)
             return
 
         # Iterate over the unfiltered torrent files so `file_progress` indexing
@@ -602,6 +625,10 @@ class RapidBayDaemon:
                 continue
             try:
                 if _torrent_is_stale(h):
+                    # Kill any active HLS stream first; otherwise its ffmpeg +
+                    # pipe-feeder threads outlive remove_files=True and spin
+                    # forever waiting on bytes that will never arrive.
+                    self.hls_streamer.stop_under(_get_output_dir(magnet_hash))
                     # Clear any HTTP downloads for this torrent before removing
                     for f in torrent.get_torrent_info(h).files():
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)

@@ -624,7 +624,7 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
         "conversions": daemon.video_converter.file_conversions,
-        "hls_streams": daemon.hls_streamer.active_streams,
+        "hls_streams": list(daemon.hls_streamer.active_streams.keys()),
         "http_downloads": daemon.http_downloader.downloads,
     }
 

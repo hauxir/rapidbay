@@ -48,17 +48,21 @@ def _extract_torrent_link(result: Dict[str, Any]) -> str | None:
 def search(searchterm: str) -> List[Dict[str, int | str | Any | None]]:
     magnet_links: List[Dict[str, int | str | Any | None]] = []
     try:
-        params = {
+        params: Dict[str, str] = {
             "query": searchterm,
             "type": "search",
-            "limit": 100,
-            "apikey": API_KEY,
+            "limit": "100",
         }
-        headers = {"X-Api-Key": API_KEY}
+        headers: Dict[str, str] = {"X-Api-Key": API_KEY}
         resp = requests.get(
             f"{API_PATH}/search", params=params, headers=headers, timeout=15
         )
-        results: List[Dict[str, Any]] = resp.json() or []
+        resp.raise_for_status()
+        data: Any = resp.json()
+        if not isinstance(data, list):
+            log.debug(f"Prowlarr returned unexpected payload (status={resp.status_code}): {data!r:.200}")
+            return magnet_links
+        results: List[Dict[str, Any]] = [r for r in data if isinstance(r, dict)]  # type: ignore[reportUnknownVariableType]
 
         # Prowlarr can also return usenet results; only torrents are usable here
         results = [

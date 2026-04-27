@@ -230,7 +230,10 @@ def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
     # Filter out results without magnet or torrent_link
     results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
 
-    # Deduplicate by magnet hash (preferring the first occurrence, which has higher seeds after sort)
+    # Sort by seeds before dedup so the highest-seed entry wins for any duplicate
+    # hash/link encountered across backends.
+    results = sorted(results, key=lambda x: x.get("seeds", 0) or 0, reverse=True)
+
     seen_hashes: set[str] = set()
     seen_links: set[str] = set()
     deduped: List[Dict[str, Any]] = []
@@ -251,7 +254,7 @@ def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
             seen_links.add(link)
         deduped.append(r)
 
-    return sorted(deduped, key=lambda x: x.get("seeds", 0) or 0, reverse=True)
+    return deduped
 
 
 @app.get("/health")

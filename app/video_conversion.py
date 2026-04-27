@@ -225,9 +225,8 @@ class VideoConverter:
 class HLSStreamer:
     def __init__(self) -> None:
         self.active_streams: Dict[str, bool] = {}
+        self._reservation_lock = threading.Lock()
 
-    @threaded
-    @log.catch_and_log_exceptions
     def start_stream(
         self,
         input_filepath: str,
@@ -235,15 +234,41 @@ class HLSStreamer:
         get_sequential_bytes: Callable[[], int],
         total_file_size: int,
         m3u8_filename: str = "stream.m3u8",
-    ) -> None:
-        m3u8_path = os.path.join(output_dir, m3u8_filename)
-        try:
-            if len(self.active_streams) >= settings.MAX_PARALLEL_CONVERSIONS:
-                return
-            if self.active_streams.get(m3u8_path):
-                return
+    ) -> bool:
+        """Reserve a stream slot synchronously and kick off ffmpeg in a thread.
 
+        Returns True if a stream is now active (newly started or already running),
+        False if capacity is exhausted.
+        """
+        m3u8_path = os.path.join(output_dir, m3u8_filename)
+        with self._reservation_lock:
+            if self.active_streams.get(m3u8_path):
+                return True
+            if len(self.active_streams) >= settings.MAX_PARALLEL_CONVERSIONS:
+                return False
             self.active_streams[m3u8_path] = True
+        self._run_stream(
+            input_filepath,
+            output_dir,
+            get_sequential_bytes,
+            total_file_size,
+            m3u8_filename,
+            m3u8_path,
+        )
+        return True
+
+    @threaded
+    @log.catch_and_log_exceptions
+    def _run_stream(
+        self,
+        input_filepath: str,
+        output_dir: str,
+        get_sequential_bytes: Callable[[], int],
+        total_file_size: int,
+        m3u8_filename: str,
+        m3u8_path: str,
+    ) -> None:
+        try:
             os.makedirs(output_dir, exist_ok=True)
 
             segment_prefix = os.path.splitext(m3u8_filename)[0]
@@ -251,18 +276,14 @@ class HLSStreamer:
             init_filename = f"{segment_prefix}_init.mp4"
             stderr_log_path = os.path.join(output_dir, m3u8_filename + ".log")
 
-            ext = os.path.splitext(input_filepath)[1].lower()
-            use_pipe = ext in PIPE_FRIENDLY_EXTENSIONS
-
             # Detect video codec for proper tagging
             video_codec = _detect_video_codec(input_filepath)
             video_tag = "hvc1" if video_codec == "hevc" else "avc1"
 
-            ffmpeg_input = ["pipe:0"] if use_pipe else [input_filepath]
             hls_time = str(settings.HLS_SEGMENT_DURATION)
             ffmpeg_cmd = [
                 "ffmpeg", "-nostdin",
-                "-i", *ffmpeg_input,
+                "-i", "pipe:0",
                 "-vcodec", "copy",
                 "-acodec", "aac", "-ab", settings.AAC_BITRATE,
                 "-ac", str(settings.AAC_CHANNELS),
@@ -279,19 +300,13 @@ class HLSStreamer:
             ]
 
             with open(stderr_log_path, "w") as stderr_log:
-                if use_pipe:
-                    proc = Popen(ffmpeg_cmd, stdin=PIPE, stdout=DEVNULL, stderr=stderr_log)
-                    feeder = threading.Thread(
-                        target=self._pipe_feeder,
-                        args=(input_filepath, proc, get_sequential_bytes, total_file_size),
-                    )
-                    feeder.start()
-                    feeder.join()
-                else:
-                    # MP4/MOV need seeking — wait for full file, then use direct input
-                    while get_sequential_bytes() < total_file_size:
-                        time.sleep(1)
-                    proc = Popen(ffmpeg_cmd, stdin=DEVNULL, stdout=DEVNULL, stderr=stderr_log)
+                proc = Popen(ffmpeg_cmd, stdin=PIPE, stdout=DEVNULL, stderr=stderr_log)
+                feeder = threading.Thread(
+                    target=self._pipe_feeder,
+                    args=(input_filepath, proc, get_sequential_bytes, total_file_size),
+                )
+                feeder.start()
+                feeder.join()
                 proc.wait()
 
             if proc.returncode != 0:
@@ -342,16 +357,25 @@ class HLSStreamer:
                         break
 
                     available = get_sequential_bytes()
+                    # Cap by current on-disk size: the piece estimator can run
+                    # ahead of bytes flushed to the file, and reading past EOF
+                    # would otherwise spin in a tight retry loop.
+                    try:
+                        available = min(available, os.path.getsize(filepath))
+                    except OSError:
+                        pass
 
                     if available <= bytes_written:
                         time.sleep(0.5)
                         continue
 
                     to_read = available - bytes_written
+                    hit_eof = False
                     while to_read > 0:
                         chunk_size = min(to_read, PIPE_READ_CHUNK)
                         data = f.read(chunk_size)
                         if not data:
+                            hit_eof = True
                             break
                         try:
                             proc.stdin.write(data)  # type: ignore[union-attr]
@@ -360,6 +384,10 @@ class HLSStreamer:
                             return
                         bytes_written += len(data)
                         to_read -= len(data)
+
+                    if hit_eof:
+                        time.sleep(0.5)
+                        continue
 
                     if bytes_written >= total_file_size and available >= total_file_size:
                         break

@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 import shutil
+import subprocess
 import time
 from threading import Event, Thread
 from typing import Any, Dict, List, Set
@@ -310,7 +311,7 @@ class RapidBayDaemon:
                 # Check if enough data to start streaming
                 available = self._get_available_bytes(magnet_hash, filename)
                 ext = os.path.splitext(filename)[1].lower()
-                can_pipe = ext in (".mkv", ".avi", ".ts", ".mpg", ".mpeg")
+                can_pipe = ext in video_conversion.PIPE_FRIENDLY_EXTENSIONS
                 if can_pipe and available >= settings.HLS_START_THRESHOLD:
                     hls_info = {'can_stream': True}
 
@@ -392,8 +393,8 @@ class RapidBayDaemon:
 
     def start_hls_stream(self, magnet_hash: str, filename: str) -> bool:
         """Start HLS streaming for a file. Returns True if stream was started or already active."""
-        is_video = os.path.splitext(filename)[1][1:] in settings.VIDEO_EXTENSIONS
-        if not is_video:
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in video_conversion.PIPE_FRIENDLY_EXTENSIONS:
             return False
         m3u8 = _m3u8_path(magnet_hash, filename)
         if os.path.isfile(m3u8) or self.hls_streamer.active_streams.get(m3u8):
@@ -410,14 +411,13 @@ class RapidBayDaemon:
         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
         output_dir = _get_output_dir(magnet_hash)
         os.makedirs(output_dir, exist_ok=True)
-        self.hls_streamer.start_stream(
+        return self.hls_streamer.start_stream(
             filepath,
             output_dir,
             lambda _mh=magnet_hash, _fn=filename: self._get_available_bytes(_mh, _fn),
             total_file_size=f.size,
             m3u8_filename=_m3u8_filename(filename),
         )
-        return True
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
         """Get contiguous bytes available from start of file for pipe feeding."""
@@ -457,11 +457,10 @@ class RapidBayDaemon:
                 vtt_name = f"{basename_without_ext}_{lang}.vtt" if lang else srt_stem + ".vtt"
                 vtt_path = os.path.join(output_dir, vtt_name)
                 if not os.path.isfile(vtt_path):
-                    from subprocess import Popen
-                    Popen(
-                        f'ffmpeg -nostdin -v quiet -i "{srt_path}" "{vtt_path}"',
-                        shell=True,
-                    ).wait()
+                    subprocess.run(
+                        ["ffmpeg", "-nostdin", "-v", "quiet", "-i", srt_path, vtt_path],
+                        check=False,
+                    )
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
 
     def _handle_torrent(self, magnet_hash: str) -> None:

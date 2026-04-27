@@ -1045,7 +1045,14 @@
                 var self = this;
                 var magnet_hash = get_hash(this.params.magnet_link);
                 self.streamRequested = true;
-                post("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function () {});
+                post("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function (data) {
+                    // Backend may decline (capacity exhausted, etc). Re-show
+                    // the ▶ button so the user can retry instead of being
+                    // stuck on the loading screen forever.
+                    if (!data || data.started === false) {
+                        self.streamRequested = false;
+                    }
+                });
             },
             onStreamError: function () {
                 // HLS playback failed (e.g. unsupported codec) — drop back to loading screen

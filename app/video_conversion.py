@@ -6,6 +6,7 @@ import re
 import tempfile
 import threading
 import time
+import urllib.parse
 from subprocess import DEVNULL, PIPE, Popen
 from typing import Any, Callable, Dict, List, Tuple
 
@@ -389,14 +390,15 @@ class HLSStreamer:
                         proc.terminate()
                 feeder = threading.Thread(
                     target=self._pipe_feeder,
-                    args=(input_filepath, proc, get_sequential_bytes, total_file_size),
+                    args=(input_filepath, proc, get_sequential_bytes, total_file_size, m3u8_path),
                 )
                 feeder.start()
                 feeder.join()
                 proc.wait()
 
             if proc.returncode != 0:
-                intentional = m3u8_path in self._stopping
+                with self._reservation_lock:
+                    intentional = m3u8_path in self._stopping
                 if not intentional:
                     with open(stderr_log_path) as f:
                         stderr = f.read()
@@ -440,6 +442,7 @@ class HLSStreamer:
         proc: Popen,  # type: ignore[type-arg]
         get_sequential_bytes: Callable[[], int],
         total_file_size: int,
+        m3u8_path: str,
     ) -> None:
         bytes_written = 0
         try:
@@ -447,6 +450,10 @@ class HLSStreamer:
                 if proc.poll() is not None:
                     return
                 time.sleep(0.5)
+
+            # Initialize the stall clock only after the input file exists —
+            # waiting for libtorrent to materialize the file isn't a stall.
+            last_progress_time = time.monotonic()
 
             with open(filepath, "rb") as f:
                 while True:
@@ -461,6 +468,15 @@ class HLSStreamer:
                         available = min(available, os.path.getsize(filepath))
 
                     if available <= bytes_written:
+                        # Watchdog: if the torrent has been making no progress
+                        # for HLS_STALL_TIMEOUT, free the slot. Routed through
+                        # self.stop() so _run_stream's intentional-exit path
+                        # handles cleanup (no .failed marker — torrent might
+                        # recover later and the user can ▶ again).
+                        if time.monotonic() - last_progress_time > settings.HLS_STALL_TIMEOUT:
+                            log.debug(f"HLS stream stalled ({settings.HLS_STALL_TIMEOUT}s no progress): {m3u8_path}")
+                            self.stop(m3u8_path)
+                            return
                         time.sleep(0.5)
                         continue
 
@@ -479,6 +495,7 @@ class HLSStreamer:
                             return
                         bytes_written += len(data)
                         to_read -= len(data)
+                        last_progress_time = time.monotonic()
 
                     if hit_eof:
                         time.sleep(0.5)
@@ -578,6 +595,12 @@ def write_hls_master_playlist(
         )
         sub_playlist_filename = f"{vtt}.m3u8"
         sub_playlist_path = os.path.join(output_dir, sub_playlist_filename)
+        # URI attributes in HLS manifests must be valid URIs — VTT filenames can
+        # contain spaces, commas, and other chars that produce malformed manifests
+        # if interpolated raw. Escape both the sub-playlist URI in the master and
+        # the VTT URI inside the sub-playlist itself.
+        sub_playlist_uri = urllib.parse.quote(sub_playlist_filename)
+        vtt_uri = urllib.parse.quote(vtt)
         _atomic_write(
             sub_playlist_path,
             (
@@ -587,14 +610,14 @@ def write_hls_master_playlist(
                 f"#EXT-X-TARGETDURATION:{target_duration}\n"
                 "#EXT-X-MEDIA-SEQUENCE:0\n"
                 f"#EXTINF:{duration:.3f},\n"
-                f"{vtt}\n"
+                f"{vtt_uri}\n"
                 "#EXT-X-ENDLIST\n"
             ),
         )
         lines.append(
             f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="{name}",'
             + f'LANGUAGE="{lang_safe}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,'
-            + f'URI="{sub_playlist_filename}"'
+            + f'URI="{sub_playlist_uri}"'
         )
 
     bandwidth = 2000000
@@ -602,7 +625,7 @@ def write_hls_master_playlist(
         lines.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},SUBTITLES="subs"')
     else:
         lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}")
-    lines.append(video_m3u8_filename)
+    lines.append(urllib.parse.quote(video_m3u8_filename))
 
     _atomic_write(master_path, "\n".join(lines) + "\n")
     with _master_playlist_cache_lock:

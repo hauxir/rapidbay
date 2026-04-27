@@ -265,34 +265,39 @@ class TorrentClient:
         """Returns number of contiguous bytes available from start of file."""
         cache_key = (magnet_hash, filename)
         cached = self._seq_bytes_cache.get(cache_key)
-        now = time.time()
+        now = time.monotonic()
         if cached is not None and now - cached[0] < self._seq_bytes_ttl:
             return cached[1]
-        h = self.torrents.get(magnet_hash)
-        if not h or not h.has_metadata():
-            return 0
-        ti = h.get_torrent_info()
-        files = ti.files()
-        i, f = get_index_and_file_from_files(h, filename)
-        if i is None or f is None:
-            return 0
-        file_offset = files.file_offset(i)
-        file_size = f.size
-        piece_length = ti.piece_length()
-        first_piece = file_offset // piece_length
-        sequential_bytes = 0
-        piece_idx = first_piece
-        while piece_idx < ti.num_pieces() and h.have_piece(piece_idx):
-            piece_start = piece_idx * piece_length
-            piece_end = piece_start + ti.piece_size(piece_idx)
-            chunk_start = max(piece_start, file_offset)
-            chunk_end = min(piece_end, file_offset + file_size)
-            if chunk_start >= file_offset + file_size:
-                break
-            sequential_bytes = chunk_end - file_offset
-            piece_idx += 1
-        self._seq_bytes_cache[cache_key] = (now, sequential_bytes)
-        return sequential_bytes
+        # Hold the per-magnet lock while dereferencing the torrent handle —
+        # remove_torrent runs on the daemon's main loop and would otherwise
+        # invalidate `h` mid-call. RLock is reentrant, so callers that already
+        # hold this lock (e.g. _handle_torrent) won't deadlock.
+        with self.locks.lock(magnet_hash):
+            h = self.torrents.get(magnet_hash)
+            if not h or not h.has_metadata():
+                return 0
+            ti = h.get_torrent_info()
+            files = ti.files()
+            i, f = get_index_and_file_from_files(h, filename)
+            if i is None or f is None:
+                return 0
+            file_offset = files.file_offset(i)
+            file_size = f.size
+            piece_length = ti.piece_length()
+            first_piece = file_offset // piece_length
+            sequential_bytes = 0
+            piece_idx = first_piece
+            while piece_idx < ti.num_pieces() and h.have_piece(piece_idx):
+                piece_start = piece_idx * piece_length
+                piece_end = piece_start + ti.piece_size(piece_idx)
+                chunk_start = max(piece_start, file_offset)
+                chunk_end = min(piece_end, file_offset + file_size)
+                if chunk_start >= file_offset + file_size:
+                    break
+                sequential_bytes = chunk_end - file_offset
+                piece_idx += 1
+            self._seq_bytes_cache[cache_key] = (now, sequential_bytes)
+            return sequential_bytes
 
     def _write_filelist_to_disk(self, magnet_link: str) -> None:
         magnet_hash = get_hash(magnet_link)

@@ -331,7 +331,7 @@ video::cue {
 .search-history { position: absolute; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto; margin-top: 10px; }
 .search-history-item { padding: 10px 15px; color: rgba(255,255,255,0.7); cursor: pointer; text-align: left; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .search-history-item:hover, .search-history-item:focus-visible { background: rgba(255,255,255,0.1); color: white; outline: none; }
-.topbar-flex { display: flex; justify-content: space-between; align-items: center; }
+.topbar-flex { display: flex; justify-content: space-between; align-items: center; overflow: visible; }
 .topbar-flex > button:first-child { position: relative; left: auto; flex-shrink: 0; }
 .topbar-flex > .filename-truncate { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; position: relative; left: auto; right: auto; max-width: none; }
 .topbar-flex > .buttons { flex-shrink: 0; position: relative; margin-right: 0; }

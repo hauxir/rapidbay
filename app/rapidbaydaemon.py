@@ -324,10 +324,16 @@ class RapidBayDaemon:
                 self.http_downloader.clear(filepath)
             return
 
-        for i, f in enumerate(files):
+        # Iterate over the unfiltered torrent files so `file_progress` indexing
+        # matches libtorrent's view; the `files` list above is filtered by
+        # priority and its indices don't line up.
+        file_progress = h.file_progress()
+        for i, f in enumerate(torrent.get_torrent_info(h).files()):
+            if file_priorities[i] == 0:
+                continue
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             if self.http_downloader.downloads.get(filepath, -1) == 1:
-                torrent_progress = h.file_progress()[i] / f.size if f.size > 0 else 0
+                torrent_progress = file_progress[i] / f.size if f.size > 0 else 0
                 if torrent_progress >= 0.99:
                     self.http_downloader.clear(filepath)
 

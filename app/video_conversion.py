@@ -129,11 +129,8 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
 
     # Append ffmpeg's stderr to the same log file the duration was written to.
     # Popen dups the fd, so the parent can close immediately after spawn.
-    log_f = open(log_path, "a")
-    try:
+    with open(log_path, "a") as log_f:
         return Popen(args, stderr=log_f, stdout=DEVNULL)
-    finally:
-        log_f.close()
 
 
 def get_conversion_progress(filepath: str) -> float:

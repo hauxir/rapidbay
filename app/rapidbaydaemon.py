@@ -540,7 +540,11 @@ class RapidBayDaemon:
                 # as "Movie__en.vtt" (subtitles.download_all_subtitles uses both
                 # styles depending on provider).
                 lang = srt_stem[len(basename_without_ext):].lstrip("._")
-                vtt_name = f"{basename_without_ext}_{lang}.vtt" if lang else srt_stem + ".vtt"
+                # Always emit a "_<lang>" suffix — the frontend's label parser
+                # takes everything after the last "_" as the language; without
+                # one, scene releases that ship a bare "{stem}.srt" end up
+                # labeled with the full filename in the subtitle picker.
+                vtt_name = f"{basename_without_ext}_{lang or 'und'}.vtt"
                 vtt_path = os.path.join(output_dir, vtt_name)
                 if not os.path.isfile(vtt_path):
                     # Bound runtime so a malformed SRT can't wedge the

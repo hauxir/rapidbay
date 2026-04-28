@@ -2,8 +2,9 @@ import contextlib
 import datetime
 import os
 import re
+import subprocess
 import time
-from subprocess import Popen
+from subprocess import Popen, TimeoutExpired
 from typing import Any, Dict, List, Tuple
 
 import log
@@ -53,20 +54,50 @@ def _extract_subtitles_as_vtt(filepath: str) -> Any:
     )
 
 
+def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> List[str]:
+    """Returns ffprobe `codec_name` for every stream of the given type
+    ("a" for audio, "v" for video). Empty list if ffprobe fails or finds no
+    matching streams."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", stream_type,
+                "-show_entries", "stream=codec_name",
+                "-of", "default=nw=1:nk=1",
+                filepath,
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        return [c.strip().lower() for c in result.stdout.splitlines() if c.strip()]
+    except (TimeoutExpired, OSError):
+        return []
+
+
+def _video_codec_passthrough(codec: str) -> bool:
+    """True when the video codec is browser-compatible inside MP4 and can be
+    stream-copied. Matches both ffprobe `codec_name` ("h264", "hevc") and
+    MediaInfo `format` ("AVC", "HEVC")."""
+    return any(s in codec for s in ("h264", "h265", "avc", "hevc", "av1"))
+
+
 def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_filepaths: List[Tuple[str | None, str]] | None = None) -> Any:
     if subtitle_filepaths is None:
         subtitle_filepaths = []
     output_extension: str = os.path.splitext(output_filepath)[1]
     media_info: Any = MediaInfo.parse(input_filepath)
-    audio_codecs: List[str] = [
-        t.format.lower() for t in media_info.tracks if t.track_type == "Audio"
-    ]
-    video_codecs: List[str] = [
-        t.format.lower() for t in media_info.tracks if t.track_type == "Video"
-    ]
-    needs_audio_conversion: bool = not any("aac" in c for c in audio_codecs)
-    needs_video_conversion: bool = settings.CONVERT_VIDEO and not any(("avc" in c or "hevc" in c or "av1" in c) for c in video_codecs)
-    is_hevc: bool = any(("hevc" in c) for c in video_codecs)
+    # Codec detection via ffprobe — MediaInfo's `format` strings vary across
+    # containers (e.g. "AAC LC", "MPEG-4 Audio") and miss codecs entirely on
+    # partial/unusual files, which would force a needless transcode.
+    audio_codecs: List[str] = _ffprobe_stream_codecs(input_filepath, "a")
+    video_codecs: List[str] = _ffprobe_stream_codecs(input_filepath, "v")
+    needs_audio_conversion: bool = bool(audio_codecs) and not any("aac" in c for c in audio_codecs)
+    needs_video_conversion: bool = (
+        settings.CONVERT_VIDEO
+        and bool(video_codecs)
+        and not any(_video_codec_passthrough(c) for c in video_codecs)
+    )
+    is_hevc: bool = any(("hevc" in c or "h265" in c) for c in video_codecs)
     has_picture_subs: bool = (
         len(
             [

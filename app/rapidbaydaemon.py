@@ -30,7 +30,12 @@ def _get_download_path(magnet_hash: str, filename: str) -> str | None:
     filepaths = get_filepaths(magnet_hash)
     if filepaths:
         normalized = normalize_filename(filename)
-        torrent_path = next(fp for fp in filepaths if normalize_filename(fp).endswith(normalized))
+        torrent_path = next(
+            (fp for fp in filepaths if normalize_filename(fp).endswith(normalized)),
+            None,
+        )
+        if torrent_path is None:
+            return None
         return os.path.join(f"{settings.DOWNLOAD_DIR}{magnet_hash}", torrent_path)
     return None
 
@@ -219,13 +224,18 @@ class RapidBayDaemon:
         # writes between urlretrieve and libtorrent corrupted the file in
         # practice. The file stays in `_http_served` so the daemon's
         # priority-based filters still treat it as user-selected.
+        # Hold the per-torrent lock around the read-modify-write of priorities;
+        # other code paths (torrent_client.download_file,
+        # torrent_client.get_sequential_bytes, the heartbeat failover) all
+        # mutate the same handle under this lock.
         if using_http and h is not None:
-            self._http_served.setdefault(magnet_hash, set()).add(filename)
-            i, _ = torrent.get_index_and_file_from_files(h, filename)
-            if i is not None:
-                priorities = list(h.file_priorities())
-                priorities[i] = 0
-                torrent.prioritize_files(h, priorities)
+            with self.torrent_client.locks.lock(magnet_hash):
+                self._http_served.setdefault(magnet_hash, set()).add(filename)
+                i, _ = torrent.get_index_and_file_from_files(h, filename)
+                if i is not None:
+                    priorities = list(h.file_priorities())
+                    priorities[i] = 0
+                    torrent.prioritize_files(h, priorities)
 
         if download_subtitles:
             for subtitle_filename in _subtitle_filenames(
@@ -406,23 +416,37 @@ class RapidBayDaemon:
 
         # Fail over to libtorrent when an HTTP download errored: restore the
         # file's priority on libtorrent's handle and drop it from
-        # `_http_served` so peers can finish the download.
+        # `_http_served` so peers can finish the download. Keep the failure
+        # entry only if it matched an `_http_served` row whose recovery raised
+        # — that's the case worth retrying. Recovered, or orphaned (no
+        # matching row, or the torrent is already gone), → discard.
         for failed_path in list(self.http_downloader.failures):
-            self.http_downloader.failures.discard(failed_path)
+            matched = False
+            recovery_failed = False
             for mh, names in list(self._http_served.items()):
-                h = self.torrent_client.torrents.get(mh)
-                if not h:
-                    continue
                 for fn in list(names):
-                    if _get_download_path(mh, fn) == failed_path:
-                        i, _ = torrent.get_index_and_file_from_files(h, fn)
-                        if i is not None:
-                            priorities = list(h.file_priorities())
-                            priorities[i] = 4
-                            torrent.prioritize_files(h, priorities)
+                    if _get_download_path(mh, fn) != failed_path:
+                        continue
+                    matched = True
+                    h = self.torrent_client.torrents.get(mh)
+                    if h is None:
                         names.discard(fn)
+                        continue
+                    try:
+                        with self.torrent_client.locks.lock(mh):
+                            i, _ = torrent.get_index_and_file_from_files(h, fn)
+                            if i is not None:
+                                priorities = list(h.file_priorities())
+                                priorities[i] = 4
+                                torrent.prioritize_files(h, priorities)
+                        names.discard(fn)
+                    except Exception:
+                        log.write_log()
+                        recovery_failed = True
                 if not names:
                     self._http_served.pop(mh, None)
+            if not (matched and recovery_failed):
+                self.http_downloader.failures.discard(failed_path)
 
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)

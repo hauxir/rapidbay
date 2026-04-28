@@ -1,7 +1,7 @@
 import contextlib
 import os
 import urllib.request
-from typing import Dict
+from typing import Dict, Set
 
 import log
 from common import threaded
@@ -10,6 +10,9 @@ from common import threaded
 class HttpDownloader:
     def __init__(self) -> None:
         self.downloads: Dict[str, float] = {}
+        # Output paths whose urlretrieve raised. The daemon drains this each
+        # heartbeat to fail over to libtorrent for the affected file.
+        self.failures: Set[str] = set()
 
     def clear(self, output_path: str) -> None:
         with contextlib.suppress(KeyError):
@@ -33,4 +36,9 @@ class HttpDownloader:
 
         dirname = os.path.dirname(output_path)
         os.makedirs(dirname, exist_ok=True)
-        urllib.request.urlretrieve(url, output_path, progress)
+        try:
+            urllib.request.urlretrieve(url, output_path, progress)
+        except Exception:
+            self.downloads.pop(output_path, None)
+            self.failures.add(output_path)
+            raise

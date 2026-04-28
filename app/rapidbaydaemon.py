@@ -4,7 +4,7 @@ import os
 import shutil
 import time
 from threading import Event, Thread
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import http_cache
 import log
@@ -137,6 +137,13 @@ class RapidBayDaemon:
             torrents_dir=settings.TORRENTS_DIR,
         )
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
+        # Files we're fetching via HTTP (Real-Debrid). Tracked separately from
+        # libtorrent's `file_priorities`, because we set those files to
+        # priority 0 to keep libtorrent from writing the same path in parallel
+        # — the daemon's lifecycle code uses `priority != 0` as a proxy for
+        # "user-selected", which would otherwise drop these files from
+        # `active_filenames` and remove the torrent (with files) mid-download.
+        self._http_served: Dict[str, Set[str]] = {}
         self._stop_event: Event = Event()
         self.thread: Thread = Thread(target=self._loop_wrapper, args=())
         self.thread.daemon = True
@@ -155,10 +162,11 @@ class RapidBayDaemon:
             result[magnet_hash] = {}
             files = torrent.get_torrent_info(h).files()
             file_priorities = h.file_priorities()
+            http_served_names = self._http_served.get(magnet_hash, set())
             for priority, f in zip(list(file_priorities), list(files), strict=False):
-                if priority == 0:
-                    continue
                 filename = os.path.basename(f.path)
+                if priority == 0 and filename not in http_served_names:
+                    continue
                 result[magnet_hash][filename] = self.get_file_status(
                     magnet_hash, filename
                 )
@@ -191,18 +199,33 @@ class RapidBayDaemon:
 
         download_path = _get_download_path(magnet_hash, filename)
 
+        using_http = False
         if download_path:
-            http_download_progress = self.http_downloader.downloads.get(download_path)
-            if http_download_progress is None:
+            if self.http_downloader.downloads.get(download_path) is not None:
+                using_http = True
+            else:
                 cached_url = http_cache.get_cached_url(magnet_hash, filename)
                 if cached_url:
                     self.http_downloader.download_file(cached_url, download_path)
+                    using_http = True
 
         self.torrent_client.download_file(magnet_link, filename)
 
         h = self.torrent_client.torrents.get(magnet_hash)
         h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)  # type: ignore
         h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)  # type: ignore
+
+        # Stop libtorrent from also fetching this file from peers — concurrent
+        # writes between urlretrieve and libtorrent corrupted the file in
+        # practice. The file stays in `_http_served` so the daemon's
+        # priority-based filters still treat it as user-selected.
+        if using_http and h is not None:
+            self._http_served.setdefault(magnet_hash, set()).add(filename)
+            i, _ = torrent.get_index_and_file_from_files(h, filename)
+            if i is not None:
+                priorities = list(h.file_priorities())
+                priorities[i] = 0
+                torrent.prioritize_files(h, priorities)
 
         if download_subtitles:
             for subtitle_filename in _subtitle_filenames(
@@ -299,10 +322,13 @@ class RapidBayDaemon:
         if not h:
             return
         file_priorities = h.file_priorities()
+        http_served_names = self._http_served.get(magnet_hash, set())
+        # Include priority-0 files that we're HTTP-serving — see _http_served's
+        # comment on RapidBayDaemon.
         files = [
             f
             for priority, f in zip(file_priorities, torrent.get_torrent_info(h).files(), strict=False)
-            if priority != 0
+            if priority != 0 or os.path.basename(f.path) in http_served_names
         ]
         filenames = [os.path.basename(f.path) for f in files]
         video_filenames = [
@@ -318,6 +344,7 @@ class RapidBayDaemon:
 
         if all(is_state(filename, FileStatus.READY) for filename in active_filenames):
             self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
+            self._http_served.pop(magnet_hash, None)
             for f in files:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                 self.subtitle_downloads.pop(filepath, None)
@@ -325,8 +352,12 @@ class RapidBayDaemon:
             return
 
         # Iterate over the unfiltered torrent files so `file_progress` indexing
-        # matches libtorrent's view; the `files` list above is filtered by
-        # priority and its indices don't line up.
+        # matches libtorrent's view; `files` above is filtered. Skip
+        # HTTP-served files here — their libtorrent progress is pinned at 0
+        # (we set priority 0), so the >=0.99 check will never fire and the
+        # entry would be cleared while the daemon's state machine still
+        # depends on http_progress == 1 to advance past DOWNLOADING. It's
+        # cleared on the WAITING_FOR_CONVERSION transition below instead.
         file_progress = h.file_progress()
         for i, f in enumerate(torrent.get_torrent_info(h).files()):
             if file_priorities[i] == 0:
@@ -373,6 +404,26 @@ class RapidBayDaemon:
         # Process libtorrent session alerts for better monitoring
         self.torrent_client.process_alerts()
 
+        # Fail over to libtorrent when an HTTP download errored: restore the
+        # file's priority on libtorrent's handle and drop it from
+        # `_http_served` so peers can finish the download.
+        for failed_path in list(self.http_downloader.failures):
+            self.http_downloader.failures.discard(failed_path)
+            for mh, names in list(self._http_served.items()):
+                h = self.torrent_client.torrents.get(mh)
+                if not h:
+                    continue
+                for fn in list(names):
+                    if _get_download_path(mh, fn) == failed_path:
+                        i, _ = torrent.get_index_and_file_from_files(h, fn)
+                        if i is not None:
+                            priorities = list(h.file_priorities())
+                            priorities[i] = 4
+                            torrent.prioritize_files(h, priorities)
+                        names.discard(fn)
+                if not names:
+                    self._http_served.pop(mh, None)
+
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)
             if not h:
@@ -384,6 +435,7 @@ class RapidBayDaemon:
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                         self.subtitle_downloads.pop(filepath, None)
                         self.http_downloader.clear(filepath)
+                    self._http_served.pop(magnet_hash, None)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
                 elif h.has_metadata():
                     with self.torrent_client.locks.lock(magnet_hash):

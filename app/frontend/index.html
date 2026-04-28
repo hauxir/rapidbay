@@ -226,7 +226,7 @@
         </script>
 
         <script type="text/x-template" id="caption-button-template">
-            <button v-if="tracks.length > 0" class="btn btn-dark" @click="flipCaptions()">{{currentCaption || "&#128172;"}}</button>
+            <button v-if="trackCount > 0" class="btn btn-dark" @click="flipCaptions()">{{currentCaption || "&#128172;"}}</button>
         </script>
 
         <script type="text/x-template" id="chromecast-button-template">

@@ -631,7 +631,7 @@
     Vue.component("caption-button", {
         template: "#caption-button-template",
         data: function () {
-            return { currentCaption: null, tracks: [] };
+            return { currentCaption: null, trackCount: 0 };
         },
         methods: {
             flipCaptions: function () {
@@ -664,38 +664,39 @@
         mounted: function () {
             var video = document.getElementsByTagName("video")[0];
             var self = this;
-            if (video) {
-                this.tracks = video.textTracks;
-                for (var i = 0; i < this.tracks.length; i++) {
-                    var track = this.tracks[i];
-                    if (track.mode === "showing") {
-                        this.currentCaption = track.language;
+            if (!video) return;
+            // TextTrackList is a live, non-plain object — Vue 2 can't observe
+            // its length, and the `change` event only fires on mode changes,
+            // not on track additions. With HLS, subtitle tracks are appended
+            // by hls.js after mount, so we have to mirror the count into a
+            // reactive data field and listen to `addtrack`/`removetrack`.
+            self.trackCount = video.textTracks.length;
+            for (var i = 0; i < video.textTracks.length; i++) {
+                if (video.textTracks[i].mode === "showing") {
+                    self.currentCaption = video.textTracks[i].language;
+                }
+            }
+            this.captionChangeListener = function () {
+                self.currentCaption = null;
+                for (var i = 0; i < video.textTracks.length; i++) {
+                    if (video.textTracks[i].mode === "showing") {
+                        self.currentCaption = video.textTracks[i].language;
                     }
                 }
-                this.captionChangeListener = function (e) {
-                    self.tracks = video.textTracks;
-                    self.currentCaption = null;
-                    for (var i = 0; i < self.tracks.length; i++) {
-                        var track = self.tracks[i];
-                        if (track.mode === "showing") {
-                            self.currentCaption = track.language;
-                        }
-                    }
-                };
-                video.textTracks.addEventListener(
-                    "change",
-                    this.captionChangeListener
-                );
-            }
+            };
+            this.trackListMutationListener = function () {
+                self.trackCount = video.textTracks.length;
+            };
+            video.textTracks.addEventListener("change", this.captionChangeListener);
+            video.textTracks.addEventListener("addtrack", this.trackListMutationListener);
+            video.textTracks.addEventListener("removetrack", this.trackListMutationListener);
         },
         destroyed: function () {
             var video = document.getElementsByTagName("video")[0];
-            if (video) {
-                video.textTracks.removeEventListener(
-                    "change",
-                    this.captionChangeListener
-                );
-            }
+            if (!video) return;
+            video.textTracks.removeEventListener("change", this.captionChangeListener);
+            video.textTracks.removeEventListener("addtrack", this.trackListMutationListener);
+            video.textTracks.removeEventListener("removetrack", this.trackListMutationListener);
         },
     });
 

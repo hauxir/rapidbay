@@ -133,7 +133,7 @@ _VALID_MAGNET_HASH = re.compile(r"^[a-z0-9]{32}$|^[a-z0-9]{40}$|^[a-z0-9]{64}$")
 
 
 def _is_valid_magnet_hash(s: str) -> bool:
-    return isinstance(s, str) and bool(_VALID_MAGNET_HASH.fullmatch(s))
+    return bool(_VALID_MAGNET_HASH.fullmatch(s))
 
 
 def _is_safe_subpath(parent: str, child: str) -> bool:
@@ -153,11 +153,22 @@ def _hls_effective_threshold(file_size: int) -> int:
     return min(settings.HLS_START_THRESHOLD, max(file_size // 4, 1024 * 1024))
 
 
-def _get_vtt_subtitles(output_dir: str) -> List[str]:
+def _get_vtt_subtitles(output_dir: str, video_filename: str) -> List[str]:
     if not os.path.isdir(output_dir):
         return []
+    # VTTs land in a per-magnet output_dir that's shared across every file in
+    # the torrent, so a season pack accumulates subs for every episode. Anchor
+    # on the video's stem + a separator so episode 1's master playlist doesn't
+    # surface episode 2/3/...'s tracks. Both producers prefix with the stem:
+    # ffmpeg-extracted "{stem}.{idx}_{lang}.vtt" and downloaded "{stem}_{lang}.vtt".
+    stem = os.path.splitext(os.path.basename(video_filename))[0]
     return sorted(
-        [f for f in os.listdir(output_dir) if f.endswith(".vtt") and "_" in os.path.splitext(f)[0]],
+        [
+            f for f in os.listdir(output_dir)
+            if f.endswith(".vtt")
+            and "_" in os.path.splitext(f)[0]
+            and (f.startswith(stem + ".") or f.startswith(stem + "_"))
+        ],
         key=lambda fn: fn.split("_")[-1],
     )
 
@@ -319,7 +330,7 @@ class RapidBayDaemon:
         if is_video and settings.HLS_STREAMING:
             m3u8 = _m3u8_path(magnet_hash, filename)
             if os.path.isfile(m3u8):
-                vtt_subtitles = _get_vtt_subtitles(output_dir)
+                vtt_subtitles = _get_vtt_subtitles(output_dir, filename)
                 # Wrap the media playlist in a master playlist that exposes any
                 # available VTTs as EXT-X-MEDIA:TYPE=SUBTITLES tracks. hls.js
                 # will only render <track>-style subtitles when they're declared

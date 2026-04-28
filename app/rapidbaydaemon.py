@@ -544,7 +544,9 @@ class RapidBayDaemon:
                 # takes everything after the last "_" as the language; without
                 # one, scene releases that ship a bare "{stem}.srt" end up
                 # labeled with the full filename in the subtitle picker.
-                vtt_name = f"{basename_without_ext}_{lang or 'und'}.vtt"
+                # Default to "en" because most scene releases that ship a single
+                # language-less SRT are English.
+                vtt_name = f"{basename_without_ext}_{lang or 'en'}.vtt"
                 vtt_path = os.path.join(output_dir, vtt_name)
                 if not os.path.isfile(vtt_path):
                     # Bound runtime so a malformed SRT can't wedge the

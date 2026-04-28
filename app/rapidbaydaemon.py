@@ -260,12 +260,7 @@ class RapidBayDaemon:
             http_progress = self.http_downloader.downloads.get(download_path, 0)
 
             # If HTTP download is complete, trust that over torrent progress
-            if http_progress == 1:
-                download_progress = 1
-                # Trigger recheck but don't wait for it - let heartbeat handle it
-                h.force_recheck()
-            else:
-                download_progress = max(http_progress, download_progress)
+            download_progress = 1 if http_progress == 1 else max(http_progress, download_progress)
 
         if download_progress == 1:
             if filename_extension[1:] in settings.VIDEO_EXTENSIONS:
@@ -329,22 +324,12 @@ class RapidBayDaemon:
                 self.http_downloader.clear(filepath)
             return
 
-        # Check if any HTTP downloads are active and trigger recheck
-        needs_recheck = False
         for i, f in enumerate(files):
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-            http_progress = self.http_downloader.downloads.get(filepath, -1)
-            if http_progress > 0:
-                needs_recheck = True
-                if http_progress == 1:
-                    # Only clear HTTP tracking if torrent now recognizes the file as complete
-                    torrent_progress = h.file_progress()[i] / f.size if f.size > 0 else 0
-                    if torrent_progress >= 0.99:  # Allow for small rounding errors
-                        self.http_downloader.clear(filepath)
-                        log.debug(f"HTTP cache download completed and recognized by torrent for {filepath}")
-
-        if needs_recheck:
-            h.force_recheck()
+            if self.http_downloader.downloads.get(filepath, -1) == 1:
+                torrent_progress = h.file_progress()[i] / f.size if f.size > 0 else 0
+                if torrent_progress >= 0.99:
+                    self.http_downloader.clear(filepath)
 
         for f in files:
             filename = os.path.basename(f.path)

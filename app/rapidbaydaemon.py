@@ -361,19 +361,13 @@ class RapidBayDaemon:
             if self.video_converter.file_conversions.get(output_filepath):
                 return {'status': FileStatus.FINISHING_UP, **hls_info}
             base_filename = os.path.basename(output_filepath)
-            base_filename_without_extension = os.path.splitext(base_filename)[0]
             return {
                 'status': FileStatus.READY,
                 'filename': base_filename,
-                'subtitles': sorted(
-                    [
-                        f
-                        for f in os.listdir(os.path.dirname(output_filepath))
-                        if f.endswith(".vtt")
-                        and f.startswith(base_filename_without_extension)
-                    ],
-                    key=lambda fn: fn.split("_")[-1],
-                ),
+                # Anchor on stem + separator so that ffmpeg-emitted phantom
+                # subtitle segments (named "{stem}{N}.vtt" without separator)
+                # don't leak into the picker.
+                'subtitles': _get_vtt_subtitles(os.path.dirname(output_filepath), base_filename),
                 'supported': any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS),
                 **hls_info,
             }

@@ -397,6 +397,12 @@ class HLSStreamer:
             ffmpeg_cmd = [
                 "ffmpeg", "-nostdin",
                 "-i", "pipe:0",
+                # ffmpeg's default per-output-type stream selection auto-maps
+                # the input's subtitle track and emits WebVTT segments next to
+                # the video segments (named "{stem}{N}.vtt"). We surface
+                # subtitles separately via the master playlist, so disable
+                # subtitle output here to keep the segment dir clean.
+                "-sn",
                 "-vcodec", "copy",
                 *audio_args,
                 "-tag:v", video_tag,

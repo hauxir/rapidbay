@@ -335,5 +335,7 @@ video::cue {
 .topbar-flex > button:first-child { position: relative; left: auto; flex-shrink: 0; }
 .topbar-flex > .filename-truncate { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; position: relative; left: auto; right: auto; max-width: none; }
 .topbar-flex > .buttons { flex-shrink: 0; position: relative; margin-right: 0; }
-.download-progress-badge { flex-shrink: 0; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.15); font-size: 0.8em; color: rgba(255,255,255,0.8); cursor: help; }
+.download-progress-badge { flex-shrink: 0; padding: 2px 6px; border-radius: 3px; background: rgba(255,255,255,0.15); font-size: 0.8em; color: rgba(255,255,255,0.8); position: relative; }
+.download-progress-tooltip { display: none; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; padding: 4px 8px; background: rgba(0,0,0,0.9); color: rgba(255,255,255,0.95); border-radius: 3px; font-size: 1em; white-space: nowrap; pointer-events: none; z-index: 10; }
+.download-progress-badge:hover .download-progress-tooltip { display: block; }
 .stream-message { margin-top: 16px; text-align: center; color: rgba(255,255,255,0.7); font-size: 0.9em; }

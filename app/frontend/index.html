@@ -195,8 +195,9 @@
                                {{decodeURIComponent(url.split("/").pop())}}
                            </a>
                        </div>
-                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge" :title="downloadStatusLabel">
+                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
                            {{Math.round(downloadProgress * 100)}}%
+                           <span v-if="downloadStatusLabel" class="download-progress-tooltip">{{downloadStatusLabel}}</span>
                        </span>
                        <div class="buttons" v-if="supported">
                            <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>

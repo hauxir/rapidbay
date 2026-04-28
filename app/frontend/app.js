@@ -257,7 +257,7 @@
     });
 
     Vue.component("player", {
-        props: ["supported", "url", "subtitles", "back", "magnet", "filename", "downloadProgress", "onStreamError"],
+        props: ["supported", "url", "subtitles", "back", "magnet", "filename", "downloadProgress", "downloadStatus", "onStreamError"],
         data: function () {
             return {
                 isDesktop:
@@ -267,6 +267,13 @@
                 isChrome: window.isChrome,
                 hovering: false,
             };
+        },
+        computed: {
+            downloadStatusLabel: function () {
+                if (!this.downloadStatus) return "";
+                var text = this.downloadStatus.replace(/_/g, " ");
+                return text.charAt(0).toUpperCase() + text.slice(1);
+            },
         },
         watch: {
             // url changes within the same playback session when subs become

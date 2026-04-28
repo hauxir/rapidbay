@@ -55,6 +55,33 @@ def _extract_subtitles_as_vtt(filepath: str, output_dir: str) -> Any:
     return Popen(args)
 
 
+def _cleanup_pre_emitted_vtts(output_dir: str, output_filepath: str) -> None:
+    """Drop the SRT→VTT files that _run_subtitle_download pre-emits to make
+    subtitles available during HLS playback.
+
+    Once MP4 conversion has baked external SRTs into the MP4 and
+    _extract_subtitles_as_vtt has written indexed "{stem}.{idx}_{lang}.vtt"
+    files, the pre-emitted "{stem}_{lang}.vtt" files are duplicates with the
+    same language tag — the browser surfaces both <track> elements
+    simultaneously and the user sees subs rendered twice. Only delete when
+    the indexed extraction actually produced output, so a failed extraction
+    doesn't leave the picker empty.
+    """
+    stem = os.path.splitext(os.path.basename(output_filepath))[0]
+    indexed_re = re.compile(re.escape(stem) + r"\.\d+_.+\.vtt$")
+    pre_emitted_re = re.compile(re.escape(stem) + r"_.+\.vtt$")
+    try:
+        files = os.listdir(output_dir)
+    except OSError:
+        return
+    if not any(indexed_re.fullmatch(f) for f in files):
+        return
+    for f in files:
+        if pre_emitted_re.fullmatch(f):
+            with contextlib.suppress(OSError):
+                os.remove(os.path.join(output_dir, f))
+
+
 def _incomplete_path(output_filepath: str) -> str:
     output_extension: str = os.path.splitext(output_filepath)[1]
     return f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
@@ -263,6 +290,7 @@ class VideoConverter:
             os.replace(_incomplete_path(output_filepath), output_filepath)
 
             _extract_subtitles_as_vtt(output_filepath, output_dir).wait()
+            _cleanup_pre_emitted_vtts(output_dir, output_filepath)
 
         finally:
             with contextlib.suppress(KeyError):

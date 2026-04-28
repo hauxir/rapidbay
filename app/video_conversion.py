@@ -569,6 +569,9 @@ def _atomic_write(path: str, content: str) -> None:
     try:
         with os.fdopen(fd, "w") as f:
             f.write(content)
+        # mkstemp defaults to 0600; nginx workers run as www-data and need
+        # read access to the playlist files served from /play/.
+        os.chmod(tmp, 0o644)
         os.replace(tmp, path)
     except Exception:
         with contextlib.suppress(OSError):

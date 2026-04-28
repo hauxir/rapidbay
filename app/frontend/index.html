@@ -156,7 +156,7 @@
 
         <script type="text/x-template" id="download-screen-template">
             <div class="player_wrapper" v-if="play_link">
-	      <player :key="play_link.split('?')[0]" :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename" :download-progress="downloadProgress" :on-stream-error="onStreamError"/>
+	      <player :key="play_link.split('?')[0]" :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename" :download-progress="downloadProgress" :download-status="status" :on-stream-error="onStreamError"/>
             </div>
             <div v-else class="root">
               <div class="topbar topbar-flex">
@@ -195,7 +195,7 @@
                                {{decodeURIComponent(url.split("/").pop())}}
                            </a>
                        </div>
-                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
+                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge" :title="downloadStatusLabel">
                            {{Math.round(downloadProgress * 100)}}%
                        </span>
                        <div class="buttons" v-if="supported">

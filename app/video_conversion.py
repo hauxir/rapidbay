@@ -5,7 +5,7 @@ import re
 import subprocess
 import time
 from subprocess import Popen, TimeoutExpired
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import log
 import settings
@@ -54,7 +54,7 @@ def _extract_subtitles_as_vtt(filepath: str) -> Any:
     )
 
 
-def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> Optional[List[str]]:
+def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> List[str] | None:
     """Returns ffprobe `codec_name` for every stream of the given type
     ("a" for audio, "v" for video). Returns `None` when ffprobe fails (timeout,
     missing binary, non-zero exit) so callers can distinguish probe failure
@@ -75,8 +75,7 @@ def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> Optional[List[str
         return None
     if result.returncode != 0:
         log.debug(
-            f"ffprobe non-zero exit ({result.returncode}) for {filepath} "
-            f"({stream_type}): {result.stderr.strip()}"
+            f"ffprobe non-zero exit ({result.returncode}) for {filepath} ({stream_type}): {result.stderr.strip()}"
         )
         return None
     return [c.strip().lower() for c in result.stdout.splitlines() if c.strip()]
@@ -99,8 +98,8 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
     # containers (e.g. "AAC LC", "MPEG-4 Audio") and miss codecs entirely on
     # partial/unusual files, which would force a needless transcode. Fall back
     # to MediaInfo if ffprobe is unavailable or errors out.
-    audio_codecs: Optional[List[str]] = _ffprobe_stream_codecs(input_filepath, "a")
-    video_codecs: Optional[List[str]] = _ffprobe_stream_codecs(input_filepath, "v")
+    audio_codecs: List[str] | None = _ffprobe_stream_codecs(input_filepath, "a")
+    video_codecs: List[str] | None = _ffprobe_stream_codecs(input_filepath, "v")
     if audio_codecs is None:
         audio_codecs = [
             t.format.lower() for t in media_info.tracks if t.track_type == "Audio" and t.format

@@ -5,7 +5,7 @@ import re
 import subprocess
 import time
 from subprocess import Popen, TimeoutExpired
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import log
 import settings
@@ -54,10 +54,11 @@ def _extract_subtitles_as_vtt(filepath: str) -> Any:
     )
 
 
-def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> List[str]:
+def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> Optional[List[str]]:
     """Returns ffprobe `codec_name` for every stream of the given type
-    ("a" for audio, "v" for video). Empty list if ffprobe fails or finds no
-    matching streams."""
+    ("a" for audio, "v" for video). Returns `None` when ffprobe fails (timeout,
+    missing binary, non-zero exit) so callers can distinguish probe failure
+    from a file that genuinely has no streams of that type."""
     try:
         result = subprocess.run(
             [
@@ -69,15 +70,23 @@ def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> List[str]:
             ],
             capture_output=True, text=True, timeout=15, check=False,
         )
-        return [c.strip().lower() for c in result.stdout.splitlines() if c.strip()]
-    except (TimeoutExpired, OSError):
-        return []
+    except (TimeoutExpired, OSError) as e:
+        log.debug(f"ffprobe failed for {filepath} ({stream_type}): {e}")
+        return None
+    if result.returncode != 0:
+        log.debug(
+            f"ffprobe non-zero exit ({result.returncode}) for {filepath} "
+            f"({stream_type}): {result.stderr.strip()}"
+        )
+        return None
+    return [c.strip().lower() for c in result.stdout.splitlines() if c.strip()]
 
 
 def _video_codec_passthrough(codec: str) -> bool:
     """True when the video codec is browser-compatible inside MP4 and can be
-    stream-copied. Matches both ffprobe `codec_name` ("h264", "hevc") and
+    stream-copied. Accepts both ffprobe `codec_name` ("h264", "hevc") and
     MediaInfo `format` ("AVC", "HEVC")."""
+    codec = codec.lower()
     return any(s in codec for s in ("h264", "h265", "avc", "hevc", "av1"))
 
 
@@ -88,9 +97,18 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
     media_info: Any = MediaInfo.parse(input_filepath)
     # Codec detection via ffprobe — MediaInfo's `format` strings vary across
     # containers (e.g. "AAC LC", "MPEG-4 Audio") and miss codecs entirely on
-    # partial/unusual files, which would force a needless transcode.
-    audio_codecs: List[str] = _ffprobe_stream_codecs(input_filepath, "a")
-    video_codecs: List[str] = _ffprobe_stream_codecs(input_filepath, "v")
+    # partial/unusual files, which would force a needless transcode. Fall back
+    # to MediaInfo if ffprobe is unavailable or errors out.
+    audio_codecs: Optional[List[str]] = _ffprobe_stream_codecs(input_filepath, "a")
+    video_codecs: Optional[List[str]] = _ffprobe_stream_codecs(input_filepath, "v")
+    if audio_codecs is None:
+        audio_codecs = [
+            t.format.lower() for t in media_info.tracks if t.track_type == "Audio" and t.format
+        ]
+    if video_codecs is None:
+        video_codecs = [
+            t.format.lower() for t in media_info.tracks if t.track_type == "Video" and t.format
+        ]
     needs_audio_conversion: bool = bool(audio_codecs) and not any("aac" in c for c in audio_codecs)
     needs_video_conversion: bool = (
         settings.CONVERT_VIDEO

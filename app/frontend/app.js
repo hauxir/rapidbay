@@ -257,7 +257,7 @@
     });
 
     Vue.component("player", {
-        props: ["supported", "url", "subtitles", "back", "magnet", "filename"],
+        props: ["supported", "url", "subtitles", "back", "magnet", "filename", "downloadProgress", "downloadStatus", "onStreamError"],
         data: function () {
             return {
                 isDesktop:
@@ -267,6 +267,58 @@
                 isChrome: window.isChrome,
                 hovering: false,
             };
+        },
+        computed: {
+            downloadStatusLabel: function () {
+                if (!this.downloadStatus) return "";
+                var text = this.downloadStatus.replace(/_/g, " ");
+                return text.charAt(0).toUpperCase() + text.slice(1);
+            },
+        },
+        watch: {
+            // url changes within the same playback session when subs become
+            // available (cache-buster increments). Reload hls.js's source in
+            // place — the parent's :key strips the query string so we don't
+            // remount the <video> here. Playback time and play/pause state
+            // are preserved across the reload.
+            url: function (newUrl, oldUrl) {
+                if (!newUrl || newUrl === oldUrl) return;
+                if (newUrl.split("?")[0] !== oldUrl.split("?")[0]) return;
+                var video = document.getElementsByTagName("video")[0];
+                if (!video) return;
+                var fullUrl = window.location.origin + newUrl;
+                var resumeAt = video.currentTime;
+                var wasPlaying = !video.paused && !video.ended;
+                if (this.hls) {
+                    var hls = this.hls;
+                    var seeked = false;
+                    var resume = function () {
+                        if (seeked) return;
+                        seeked = true;
+                        hls.off(Hls.Events.MANIFEST_PARSED, resume);
+                        if (resumeAt > 0) {
+                            video.currentTime = resumeAt;
+                        }
+                        if (wasPlaying) {
+                            video.play().catch(function () {});
+                        }
+                    };
+                    hls.once(Hls.Events.MANIFEST_PARSED, resume);
+                    hls.loadSource(fullUrl);
+                } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+                    var onLoaded = function () {
+                        video.removeEventListener("loadedmetadata", onLoaded);
+                        if (resumeAt > 0) {
+                            video.currentTime = resumeAt;
+                        }
+                        if (wasPlaying) {
+                            video.play().catch(function () {});
+                        }
+                    };
+                    video.addEventListener("loadedmetadata", onLoaded);
+                    video.src = fullUrl;
+                }
+            },
         },
         mounted: function () {
             var magnet_hash = this.url.split("/")[2];
@@ -287,6 +339,55 @@
             }
 
             var video = document.getElementsByTagName("video")[0];
+            var videoUrl = window.location.origin + self.url;
+            var isHLS = self.url.indexOf(".m3u8") !== -1;
+
+            if (isHLS && typeof Hls !== "undefined" && Hls.isSupported()) {
+                var errorRecoveries = 0;
+                var maxRecoveries = 5;
+                self.hls = new Hls({
+                    startPosition: 0,
+                    maxBufferHole: 0.5,
+                    nudgeOffset: 0.2,
+                    nudgeMaxRetry: 10,
+                    // Subtitles are exposed via EXT-X-MEDIA in the master
+                    // playlist; suppress hls.js's CEA-608/708 auto-extraction
+                    // so embedded closed captions don't render alongside.
+                    enableCEA708Captions: false,
+                });
+                self.hls.on(Hls.Events.ERROR, function (event, data) {
+                    if (!self.hls) return;
+                    if (data.fatal) {
+                        console.warn("HLS fatal error:", data.type, data.details);
+                        errorRecoveries++;
+                        if (errorRecoveries > maxRecoveries) {
+                            self.hls.destroy();
+                            self.hls = null;
+                            if (self.onStreamError) {
+                                self.onStreamError();
+                            }
+                            return;
+                        }
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                            self.hls.recoverMediaError();
+                        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            self.hls.startLoad();
+                        } else {
+                            self.hls.destroy();
+                            self.hls = null;
+                            if (self.onStreamError) {
+                                self.onStreamError();
+                            }
+                        }
+                    }
+                });
+                self.hls.loadSource(videoUrl);
+                self.hls.attachMedia(video);
+            } else if (isHLS && video.canPlayType("application/vnd.apple.mpegurl")) {
+                video.src = videoUrl;
+            } else {
+                video.src = videoUrl;
+            }
 
             video.addEventListener("play", function () {
                 getNextFile().then(function (data) {
@@ -342,27 +443,41 @@
                 markFileCompleted(self.magnet, self.filename);
             });
 
-            var captionLanguage = localStorage.getItem("captionLanguage");
+            function normalizeLanguage(lang) {
+                return lang ? lang.split("-")[0].toLowerCase() : lang;
+            }
+            function applyCaptionPreference() {
+                var tracks = video.textTracks;
+                var captionLanguage = normalizeLanguage(localStorage.getItem("captionLanguage"));
+                if (!captionLanguage) return;
+                // Don't mutate modes unless we're actually selecting one — hls.js's
+                // text-track poll treats any non-"disabled" track as the active
+                // subtitle, so blanket-hiding tracks would auto-select whichever
+                // happens to be last in the list.
+                var hasShowing = false;
+                var currentTrack;
+                for (var i = 0; i < tracks.length; i++) {
+                    if (tracks[i].mode === "showing") {
+                        hasShowing = true;
+                    }
+                    if (!currentTrack && normalizeLanguage(tracks[i].language) === captionLanguage) {
+                        currentTrack = tracks[i];
+                    }
+                }
+                if (hasShowing || !currentTrack) return;
+                currentTrack.mode = "showing";
+            }
             var tracks = video.textTracks;
             for (var i = 0; i < tracks.length; i++) {
                 var track = tracks[i];
                 track.mode = "disabled";
             }
-            if (captionLanguage) {
-                var currentTrack;
-                for (var i = 0; i < tracks.length; i++) {
-                    var track = tracks[i];
-                    track.mode = "hidden";
-                    if (!currentTrack && track.language === captionLanguage) {
-                        currentTrack = track;
-                    }
-                }
-                if (currentTrack) {
-                    currentTrack.mode = "showing";
-                }
-            }
+            applyCaptionPreference();
+            this.addTrackListener = function () {
+                applyCaptionPreference();
+            };
+            video.textTracks.addEventListener("addtrack", this.addTrackListener);
             this.captionChangeListener = function (e) {
-                console.log(e);
                 var tracks = e.currentTarget;
                 var captionLanguage;
                 for (var i = 0; i < tracks.length; i++) {
@@ -374,7 +489,7 @@
                 if (captionLanguage) {
                     window.localStorage.setItem(
                         "captionLanguage",
-                        captionLanguage
+                        normalizeLanguage(captionLanguage)
                     );
                 } else {
                     window.localStorage.removeItem("captionLanguage");
@@ -464,11 +579,19 @@
             if (this.positionInterval) {
                 clearInterval(this.positionInterval);
             }
+            if (this.hls) {
+                this.hls.destroy();
+                this.hls = null;
+            }
             var video = document.getElementsByTagName("video")[0];
             if (video) {
                 video.textTracks.removeEventListener(
                     "change",
                     this.captionChangeListener
+                );
+                video.textTracks.removeEventListener(
+                    "addtrack",
+                    this.addTrackListener
                 );
                 if (video.currentTime > 0) {
                     saveVideoPosition(this.magnet, this.filename, video.currentTime);
@@ -515,17 +638,20 @@
     Vue.component("caption-button", {
         template: "#caption-button-template",
         data: function () {
-            return { currentCaption: null, tracks: [] };
+            return { currentCaption: null, trackCount: 0 };
         },
         methods: {
             flipCaptions: function () {
                 var video = document.getElementsByTagName("video")[0];
                 var currentIndex = null;
                 var tracks = video.textTracks;
+                // Ensure all tracks are at least "hidden" so they load content
                 for (var i = 0; i < tracks.length; i++) {
                     var track = tracks[i];
                     if (track.mode === "showing") {
                         currentIndex = i;
+                    } else if (track.mode === "disabled") {
+                        track.mode = "hidden";
                     }
                 }
                 if (currentIndex !== null) {
@@ -538,49 +664,52 @@
                     }
                 } else if (tracks.length > 0) {
                     tracks[0].mode = "showing";
+                    this.currentCaption = tracks[0].language;
                 }
             },
         },
         mounted: function () {
             var video = document.getElementsByTagName("video")[0];
             var self = this;
-            if (video) {
-                this.tracks = video.textTracks;
-                for (var i = 0; i < this.tracks.length; i++) {
-                    var track = this.tracks[i];
-                    if (track.mode === "showing") {
-                        this.currentCaption = track.language;
+            if (!video) return;
+            // TextTrackList is a live, non-plain object — Vue 2 can't observe
+            // its length, and the `change` event only fires on mode changes,
+            // not on track additions. With HLS, subtitle tracks are appended
+            // by hls.js after mount, so we have to mirror the count into a
+            // reactive data field and listen to `addtrack`/`removetrack`.
+            self.trackCount = video.textTracks.length;
+            for (var i = 0; i < video.textTracks.length; i++) {
+                if (video.textTracks[i].mode === "showing") {
+                    self.currentCaption = video.textTracks[i].language;
+                }
+            }
+            this.captionChangeListener = function () {
+                self.currentCaption = null;
+                for (var i = 0; i < video.textTracks.length; i++) {
+                    if (video.textTracks[i].mode === "showing") {
+                        self.currentCaption = video.textTracks[i].language;
                     }
                 }
-                this.captionChangeListener = function (e) {
-                    self.tracks = video.textTracks;
-                    self.currentCaption = null;
-                    for (var i = 0; i < self.tracks.length; i++) {
-                        var track = self.tracks[i];
-                        if (track.mode === "showing") {
-                            self.currentCaption = track.language;
-                        }
-                    }
-                };
-                video.textTracks.addEventListener(
-                    "change",
-                    this.captionChangeListener
-                );
-            }
+            };
+            this.trackListMutationListener = function () {
+                self.trackCount = video.textTracks.length;
+            };
+            video.textTracks.addEventListener("change", this.captionChangeListener);
+            video.textTracks.addEventListener("addtrack", this.trackListMutationListener);
+            video.textTracks.addEventListener("removetrack", this.trackListMutationListener);
         },
         destroyed: function () {
             var video = document.getElementsByTagName("video")[0];
-            if (video) {
-                video.textTracks.removeEventListener(
-                    "change",
-                    this.captionChangeListener
-                );
-            }
+            if (!video) return;
+            video.textTracks.removeEventListener("change", this.captionChangeListener);
+            video.textTracks.removeEventListener("addtrack", this.trackListMutationListener);
+            video.textTracks.removeEventListener("removetrack", this.trackListMutationListener);
         },
     });
 
     Vue.component("chromecast-button", {
         template: "#chromecast-button-template",
+        props: ["videoUrl"],
         methods: {
             cast: function () {
                 var root = window.location.origin;
@@ -599,8 +728,9 @@
                 var current_subtitle_url = current_subtitle
                     ? root + current_subtitle.id
                     : null;
+                var contentUrl = this.videoUrl ? root + this.videoUrl : video.src;
                 var media = {
-                    content: video.src,
+                    content: contentUrl,
                     title: "RapidBay",
                     subtitles: current_subtitle
                         ? [
@@ -949,7 +1079,12 @@
                 subheading: null,
                 play_link: null,
                 subtitles: [],
-		supported: null
+                supported: null,
+                downloadProgress: null,
+                canStream: false,
+                streamRequested: false,
+                hlsFailed: false,
+                streamMessage: null
             };
         },
         methods: {
@@ -959,6 +1094,36 @@
             },
             back: function () {
                 window.history.back();
+            },
+            startStream: function () {
+                var self = this;
+                var magnet_hash = get_hash(this.params.magnet_link);
+                self.streamRequested = true;
+                self.streamMessage = null;
+                post("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function (data) {
+                    if (data && data.started) return;
+                    // Backend declined — re-show ▶ and surface the reason so
+                    // the user knows whether to retry, give up, or wait.
+                    self.streamRequested = false;
+                    var reasons = {
+                        disabled: "Streaming is disabled.",
+                        unsupported_format: "This file format can't be streamed live.",
+                        codec_failed: "Streaming failed for this file's codec.",
+                        capacity: "Server is at streaming capacity. Try again shortly.",
+                        not_ready: "Not enough data buffered yet — wait a moment.",
+                        no_torrent: "Torrent isn't ready yet.",
+                        file_not_found: "File not found in torrent.",
+                        invalid_path: "Invalid filename.",
+                    };
+                    self.streamMessage = (data && reasons[data.reason]) || "Couldn't start the stream.";
+                });
+            },
+            onStreamError: function () {
+                // HLS playback failed (e.g. unsupported codec) — drop back to loading screen
+                this.play_link = null;
+                this.streamRequested = false;
+                this.canStream = false;
+                this.hlsFailed = true;
             },
         },
         created: function () {
@@ -992,33 +1157,59 @@
                             data.peers === 0 || data.peers
                                 ? data.peers + " Peers"
                                 : null;
-                        self.play_link = data.filename
-                            ? "/play/" +
-                              magnet_hash +
-                              "/" +
-                              encodeURIComponent(data.filename)
-                            : null;
-			self.supported = !!data.supported
-                        if (!window.isSafari) {
-                            self.subtitles = data.subtitles
-                                ? data.subtitles.map(function (sub) {
-                                      return {
-                                          language: sub
-                                              .substring(
-                                                  sub.lastIndexOf("_") + 1
-                                              )
-                                              .replace(".vtt", ""),
-                                          url:
-                                              "/play/" +
-                                              magnet_hash +
-                                              "/" +
-                                              sub,
-                                      };
-                                  })
-                                : [];
+                        // Set play link: prefer MP4 (ready state), fall back to HLS for early playback.
+                        // For HLS, we tag the URL with the current subtitle count so that
+                        // when new VTTs arrive the regenerated master playlist gets refetched
+                        // by hls.js (cache-bust). The player's `:key` ignores the query
+                        // string so subs-count changes only swap the source internally
+                        // (preserving playback position) instead of remounting the video.
+                        if (data.status === "ready" && data.filename) {
+                            var mp4Link = "/play/" + magnet_hash + "/" + encodeURIComponent(data.filename);
+                            if (self.play_link !== mp4Link) {
+                                self.play_link = mp4Link;
+                            }
+                            self.supported = !!data.supported;
+                        } else if (data.hls_filename && !self.hlsFailed) {
+                            var hlsSubCount = (data.hls_subtitles || []).length;
+                            var hlsLink = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename) + "?subs=" + hlsSubCount;
+                            var alreadyHls = self.play_link && self.play_link.indexOf(".m3u8") !== -1;
+                            if (!self.play_link || alreadyHls) {
+                                if (self.play_link !== hlsLink) {
+                                    self.play_link = hlsLink;
+                                }
+                                self.supported = true;
+                            }
                         }
+                        // Track download progress for display in player header
+                        self.downloadProgress = data.status !== "ready" ? (data.progress || null) : null;
+                        // Pass <track>-style subtitles only for MP4 playback. For HLS, subtitles
+                        // are declared in the master playlist via EXT-X-MEDIA so hls.js (and
+                        // native HLS clients) manage them — adding <track> elements alongside
+                        // confuses the native track selection.
+                        var playingHls = self.play_link && self.play_link.indexOf(".m3u8") !== -1;
+                        if (!window.isSafari && !playingHls) {
+                            var subs = data.subtitles || [];
+                            self.subtitles = subs.map(function (sub) {
+                                return {
+                                    language: sub
+                                        .substring(
+                                            sub.lastIndexOf("_") + 1
+                                        )
+                                        .replace(".vtt", ""),
+                                    url:
+                                        "/play/" +
+                                        magnet_hash +
+                                        "/" +
+                                        sub,
+                                };
+                            });
+                        } else if (playingHls) {
+                            self.subtitles = [];
+                        }
+                        // Show stream button when backend confirms enough data is available
+                        self.canStream = !!data.can_stream;
                         if (self.status !== "ready") {
-                            rbsetTimeout(get_file_info, 1000);
+                            rbsetTimeout(get_file_info, self.play_link ? 3000 : 1000);
                         }
                     }
                 );

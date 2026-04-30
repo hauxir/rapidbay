@@ -57,6 +57,10 @@ class FileStatusResponse(BaseModel):
     supported: bool | None = None
     progress: float | None = None
     peers: int | None = None
+    hls_filename: str | None = None
+    hls_subtitles: List[str] | None = None
+    hls_pending: bool | None = None
+    can_stream: bool | None = None
 
 
 class NextFileResponse(BaseModel):
@@ -87,6 +91,7 @@ class StatusResponse(BaseModel):
     torrent_downloads: Any
     session_torrents: List[str]
     conversions: Any
+    hls_streams: Any
     http_downloads: Any
 
 # Global daemon instance
@@ -507,9 +512,14 @@ def magnet_download(
     if not magnet_link or not filename:
         raise HTTPException(status_code=400, detail="magnet_link and filename required")
     magnet_hash: str = torrent.get_hash(magnet_link)
-    if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:
+    if daemon.get_file_status(magnet_hash, filename)["status"] not in (FileStatus.READY, FileStatus.CONVERTING):
         daemon.download_file(magnet_link, filename)
     return {"magnet_hash": magnet_hash}
+
+
+@app.post("/api/magnet/{magnet_hash}/{filename}/stream")
+def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    return daemon.start_hls_stream(magnet_hash, filename)
 
 
 @app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
@@ -613,6 +623,7 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
         "conversions": daemon.video_converter.file_conversions,
+        "hls_streams": list(daemon.hls_streamer.active_streams.keys()),
         "http_downloads": daemon.http_downloader.downloads,
     }
 

@@ -202,6 +202,21 @@ class RapidBayDaemon:
         ]:
             return
 
+        # Add to libtorrent first so the on-disk filelist is rewritten with
+        # libtorrent's view of file paths before we compute the HTTP target.
+        # An RD-supplied filelist can list a file as `inner.mkv` while
+        # libtorrent stores it at `<torrent_name>/inner.mkv` for multi-file
+        # torrents. If the HTTP download key was computed from the RD view
+        # but get_file_status later resolves the path against libtorrent's
+        # view, the http_progress lookup misses and the file stalls in
+        # DOWNLOADING — libtorrent's own progress is pinned at 0 once we
+        # set this file's priority to 0 below.
+        self.torrent_client.download_file(magnet_link, filename)
+
+        h = self.torrent_client.torrents.get(magnet_hash)
+        h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)  # type: ignore
+        h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)  # type: ignore
+
         download_path = _get_download_path(magnet_hash, filename)
 
         using_http = False
@@ -213,12 +228,6 @@ class RapidBayDaemon:
                 if cached_url:
                     self.http_downloader.download_file(cached_url, download_path)
                     using_http = True
-
-        self.torrent_client.download_file(magnet_link, filename)
-
-        h = self.torrent_client.torrents.get(magnet_hash)
-        h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)  # type: ignore
-        h.set_upload_limit(settings.TORRENT_UPLOAD_LIMIT)  # type: ignore
 
         # Stop libtorrent from also fetching this file from peers — concurrent
         # writes between urlretrieve and libtorrent corrupted the file in

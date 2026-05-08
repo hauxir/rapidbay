@@ -479,11 +479,32 @@
             video.textTracks.addEventListener("addtrack", this.addTrackListener);
             this.captionChangeListener = function (e) {
                 var tracks = e.currentTarget;
-                var captionLanguage;
+                // Multiple tracks can end up in "showing" simultaneously:
+                // Chromium has had long-standing quirks where it auto-enables
+                // every <track srclang="en"> that matches the user's caption
+                // language, and hls.js's loadSource appends new TextTrack
+                // objects without being able to remove the previously-shown
+                // ones (HTML5 doesn't expose removal). When that happens the
+                // user sees every line rendered twice. Keep the most-recently
+                // activated track (highest index — newest from loadSource,
+                // and matches the just-clicked one when flipCaptions cycles
+                // forward) and hide the rest.
+                var lastShowingIndex = -1;
                 for (var i = 0; i < tracks.length; i++) {
-                    var track = tracks[i];
-                    if (track.mode === "showing") {
-                        captionLanguage = track.language;
+                    if (tracks[i].mode === "showing") {
+                        lastShowingIndex = i;
+                    }
+                }
+                var captionLanguage = null;
+                for (var j = 0; j < tracks.length; j++) {
+                    if (tracks[j].mode !== "showing") continue;
+                    if (j !== lastShowingIndex) {
+                        // Setting mode re-fires "change", but the next pass
+                        // sees only one showing and exits without further
+                        // mutation — no infinite loop.
+                        tracks[j].mode = "hidden";
+                    } else {
+                        captionLanguage = tracks[j].language;
                     }
                 }
                 if (captionLanguage) {

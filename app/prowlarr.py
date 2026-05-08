@@ -1,6 +1,9 @@
+import asyncio
 import re
 from typing import Any, Dict, List
+from urllib.parse import urlencode
 
+import aiohttp
 import log
 import requests
 import settings
@@ -44,25 +47,54 @@ def _extract_torrent_link(result: Dict[str, Any]) -> str | None:
     return None
 
 
+@memoize(3600)
+def get_indexer_ids() -> List[int]:
+    resp = requests.get(
+        f"{API_PATH}/indexer",
+        headers={"X-Api-Key": API_KEY},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return [i["id"] for i in data if isinstance(i, dict) and i.get("enable")]
+
+
+async def fetch_json(session: aiohttp.ClientSession, url: str) -> List[Dict[str, Any]]:
+    try:
+        async with session.get(url) as response:
+            data: Any = await response.json()
+            if not isinstance(data, list):
+                return []
+            return [r for r in data if isinstance(r, dict)]  # type: ignore[reportUnknownVariableType]
+    except (TimeoutError, aiohttp.ClientError):
+        return []
+
+
+async def fetch_all(urls: List[str]) -> List[List[Dict[str, Any]]]:
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=5),
+        headers={"X-Api-Key": API_KEY},
+    ) as session:
+        tasks = [asyncio.ensure_future(fetch_json(session, url)) for url in urls]
+        return await asyncio.gather(*tasks)
+
+
 @memoize(300)
 def search(searchterm: str) -> List[Dict[str, int | str | Any | None]]:
     magnet_links: List[Dict[str, int | str | Any | None]] = []
     try:
-        params: Dict[str, str] = {
-            "query": searchterm,
-            "type": "search",
-            "limit": "100",
-        }
-        headers: Dict[str, str] = {"X-Api-Key": API_KEY}
-        resp = requests.get(
-            f"{API_PATH}/search", params=params, headers=headers, timeout=15
-        )
-        resp.raise_for_status()
-        data: Any = resp.json()
-        if not isinstance(data, list):
-            log.debug(f"Prowlarr returned unexpected payload (status={resp.status_code}): {data!r:.200}")
-            return magnet_links
-        results: List[Dict[str, Any]] = [r for r in data if isinstance(r, dict)]  # type: ignore[reportUnknownVariableType]
+        urls = [
+            f"{API_PATH}/search?{urlencode({'query': searchterm, 'type': 'search', 'limit': 100, 'indexerIds': iid})}"
+            for iid in get_indexer_ids()
+        ]
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        responses = loop.run_until_complete(fetch_all(urls))
+
+        results: List[Dict[str, Any]] = []
+        for data in responses:
+            results.extend(data)
 
         # Prowlarr can also return usenet results; only torrents are usable here
         results = [
@@ -124,7 +156,7 @@ def search(searchterm: str) -> List[Dict[str, int | str | Any | None]]:
                     "published": parse(published) if published else None,
                 }
             )
-    except (requests.RequestException, KeyError, ValueError) as e:
+    except (requests.RequestException, aiohttp.ClientError, KeyError, ValueError) as e:
         log.write_log()
         log.debug(f"Prowlarr search failed: {e}")
     return magnet_links

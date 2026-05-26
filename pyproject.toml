@@ -15,7 +15,7 @@ dependencies = [
     "uvicorn[standard]==0.34.0",
     "python-multipart==0.0.20",
     "iso-639==0.4.5",
-    "lxml==5.4.0",
+    "lxml==6.1.0",
     "parse-torrent-name==1.1.1",
     "pymediainfo==4.2.1",
     "python-dateutil==2.9.0.post0",

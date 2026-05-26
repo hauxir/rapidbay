@@ -321,10 +321,17 @@ class RapidBayDaemon:
             else:
                 return {'status': FileStatus.READY_TO_COPY}
             return {'status': FileStatus.DOWNLOAD_FINISHED}
+        torrent_status = h.status()
+        download_rate = torrent_status.download_rate
+        if download_path:
+            download_rate += self.http_downloader.download_rates.get(download_path, 0)
+        is_http = filename in self._http_served.get(magnet_hash, set())
         return {
             'status': FileStatus.DOWNLOADING,
             'progress': download_progress,
-            'peers': h.status().num_peers,
+            'peers': None if is_http else torrent_status.num_peers,
+            'source': 'http' if is_http else 'torrent',
+            'download_rate': download_rate,
         }
 
     def _download_external_subtitles(self, filepath: str, skip: List[str] | None = None) -> None:

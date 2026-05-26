@@ -130,10 +130,13 @@ def play(magnet_link, filename):
         status_str = status.get("status")
         progress_percentage = int(status.get("progress", 0) * 100)
         peers = status.get("peers")
+        source = status.get("source")
         if status_str != "ready":
             if progress_percentage > 0:
                 status_str = status_str + f" ({progress_percentage}%)"
-            if peers is not None:
+            if source == "http":
+                status_str = status_str + ", HTTP"
+            elif peers is not None:
                 status_str = status_str + f", {peers} peers"
         status_str = status_str.replace("_", " ").title()
         progress.update(progress_percentage, status_str)

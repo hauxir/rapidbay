@@ -988,10 +988,19 @@
                                   Math.round(data.progress * 100) +
                                   "%)"
                                 : text;
-                        self.subheading =
-                            data.peers === 0 || data.peers
-                                ? data.peers + " Peers"
-                                : null;
+                        var subheadingParts = [];
+                        if (data.source === "http") {
+                            subheadingParts.push("HTTP");
+                        } else if (data.peers === 0 || data.peers) {
+                            subheadingParts.push(data.peers + " Peers");
+                        }
+                        if (data.download_rate) {
+                            var mbps = (data.download_rate / 1000000).toFixed(2);
+                            subheadingParts.push(mbps + " MB/s");
+                        }
+                        self.subheading = subheadingParts.length
+                            ? subheadingParts.join(" · ")
+                            : null;
                         self.play_link = data.filename
                             ? "/play/" +
                               magnet_hash +

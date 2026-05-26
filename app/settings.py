@@ -50,7 +50,7 @@ SUBTITLE_LANGUAGES: List[str] = ["en"]  # list of languages, e.g. ["en", "de", "
 # CONVERSION
 CONVERT_VIDEO: bool = True
 VIDEO_CONVERSION_PARAMS: str = "libx264 -preset ultrafast"
-AAC_BITRATE: str = "128k"
+AAC_BITRATE: str = "256k"
 AAC_CHANNELS: int = 2
 INCOMPLETE_POSTFIX: str = ".incomplete"
 LOG_POSTFIX: str = ".log"

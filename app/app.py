@@ -57,6 +57,8 @@ class FileStatusResponse(BaseModel):
     supported: bool | None = None
     progress: float | None = None
     peers: int | None = None
+    source: str | None = None
+    download_rate: int | None = None
 
 
 class NextFileResponse(BaseModel):

@@ -1,6 +1,6 @@
 import asyncio
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 from urllib.parse import urlencode
 
 import aiohttp
@@ -8,7 +8,7 @@ import log
 import requests
 import settings
 import torrent
-from common import memoize
+from common import memoize, should_drop_from_trending
 from dateutil.parser import parse
 
 API_PATH = f"{settings.PROWLARR_HOST}/api/v1"
@@ -123,12 +123,19 @@ def search(searchterm: str) -> List[Dict[str, int | str | Any | None]]:
 
         for result in results:
             indexer = result.get("indexer") or ""
-            if (
-                searchterm == ""
-                and indexer in settings.EXCLUDE_TRACKERS_FROM_TRENDING
-            ):
-                continue
             title = result.get("title")
+            if searchterm == "":
+                if indexer in settings.EXCLUDE_TRACKERS_FROM_TRENDING:
+                    continue
+                raw_categories: list[Any] = result.get("categories") or []
+                cats: list[int] = []
+                for c in raw_categories:
+                    if isinstance(c, dict):
+                        cid = cast("dict[str, Any]", c).get("id")
+                        if isinstance(cid, int):
+                            cats.append(cid)
+                if should_drop_from_trending(title, cats):
+                    continue
             if not title:
                 continue
 

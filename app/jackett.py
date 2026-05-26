@@ -8,7 +8,7 @@ import log
 import requests
 import settings
 import torrent
-from common import memoize
+from common import memoize, should_drop_from_trending
 from dateutil.parser import parse
 
 API_PATH = f"{settings.JACKETT_HOST}/api/v2.0"
@@ -87,12 +87,14 @@ def search(searchterm: str) -> List[Dict[str, int | str | Any | None]]:
             results = sorted(results, key=sort_by_only_season, reverse=True)
 
         for result in results:
-            if (
-                searchterm == ""
-                and result.get("TrackerId") in settings.EXCLUDE_TRACKERS_FROM_TRENDING
-            ):
-                continue
-            elif (result.get("Link") or result.get("MagnetUri")) and result.get(
+            if searchterm == "":
+                if result.get("TrackerId") in settings.EXCLUDE_TRACKERS_FROM_TRENDING:
+                    continue
+                raw_cats: list[Any] = result.get("Category") or []
+                cats = [c for c in raw_cats if isinstance(c, int)]
+                if should_drop_from_trending(result.get("Title"), cats):
+                    continue
+            if (result.get("Link") or result.get("MagnetUri")) and result.get(
                 "Title"
             ):
                 magnet_uri = result.get("MagnetUri")

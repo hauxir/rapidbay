@@ -235,6 +235,67 @@ PIPE_READ_CHUNK = 256 * 1024  # 256KB chunks for pipe feeder
 # Containers that support sequential reading from a pipe (no seeking needed)
 PIPE_FRIENDLY_EXTENSIONS = {".mkv", ".avi", ".ts", ".mpg", ".mpeg"}
 
+# ISO-BMFF containers (MP4) are only sequentially pipe-readable when their
+# `moov` box precedes `mdat` ("faststart"). moov-at-end files can't be demuxed
+# from a forward-only stream — ffmpeg would have to seek to EOF for the index,
+# which a pipe can't do — so those fall back to download-then-convert.
+PROBE_EXTENSIONS = {".mp4"}
+
+
+def _mp4_is_faststart(filepath: str, available_bytes: int) -> bool:
+    """True iff the MP4's `moov` box appears before its `mdat`.
+
+    Walks only the top-level box headers within the first `available_bytes`
+    downloaded contiguously from the start, so it's safe to call mid-download.
+    Returns False when the layout can't be confirmed (not enough bytes yet,
+    moov-at-end, or malformed) — the caller treats that as not pipe-streamable.
+    """
+    try:
+        with open(filepath, "rb") as f:
+            offset = 0
+            # Bound the walk so a malformed file can't spin; faststart layouts
+            # reach moov within the first handful of top-level boxes.
+            for _ in range(64):
+                if offset + 8 > available_bytes:
+                    return False
+                f.seek(offset)
+                header = f.read(8)
+                if len(header) < 8:
+                    return False
+                size = int.from_bytes(header[:4], "big")
+                box_type = header[4:8]
+                if box_type == b"moov":
+                    return True
+                if box_type == b"mdat":
+                    return False
+                if size == 1:
+                    # 64-bit largesize follows the 8-byte header.
+                    if offset + 16 > available_bytes:
+                        return False
+                    size = int.from_bytes(f.read(8), "big")
+                    if size < 16:
+                        return False
+                elif size < 8:
+                    # size 0 (extends to EOF) or corrupt — can't advance.
+                    return False
+                offset += size
+    except OSError:
+        return False
+    return False
+
+
+def is_pipe_streamable(filepath: str, available_bytes: int) -> bool:
+    """Whether `filepath` can be HLS-streamed by feeding it sequentially into
+    ffmpeg's stdin. Always-friendly containers qualify by extension; MP4 only
+    when faststart (moov before mdat), probed against the downloaded prefix.
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in PIPE_FRIENDLY_EXTENSIONS:
+        return True
+    if ext in PROBE_EXTENSIONS:
+        return _mp4_is_faststart(filepath, available_bytes)
+    return False
+
 
 def _detect_video_codec(filepath: str) -> str:
     """Detect video codec from file. Returns 'hevc', 'h264', etc.

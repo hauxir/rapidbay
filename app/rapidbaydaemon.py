@@ -350,10 +350,10 @@ class RapidBayDaemon:
                 # Stream is starting but m3u8 not written yet
                 hls_info = {'hls_pending': True}
             elif not self.hls_streamer.is_failed(m3u8):
-                # Check if enough data to start streaming
-                ext = os.path.splitext(filename)[1].lower()
-                can_pipe = ext in video_conversion.PIPE_FRIENDLY_EXTENSIONS
-                if can_pipe and self._hls_can_stream(magnet_hash, filename):
+                # Offer early playback once enough contiguous data is on disk and
+                # the container is sequentially pipe-readable (MP4 only when
+                # faststart — see video_conversion.is_pipe_streamable).
+                if self._hls_can_stream(magnet_hash, filename):
                     hls_info = {'can_stream': True}
 
         # Check if MP4 output file exists (READY - primary output)
@@ -451,7 +451,10 @@ class RapidBayDaemon:
         if not _is_valid_magnet_hash(magnet_hash):
             return {"started": False, "reason": "invalid_path"}
         ext = os.path.splitext(filename)[1].lower()
-        if ext not in video_conversion.PIPE_FRIENDLY_EXTENSIONS:
+        if (
+            ext not in video_conversion.PIPE_FRIENDLY_EXTENSIONS
+            and ext not in video_conversion.PROBE_EXTENSIONS
+        ):
             return {"started": False, "reason": "unsupported_format"}
         output_dir = _get_output_dir(magnet_hash)
         m3u8 = _m3u8_path(magnet_hash, filename)
@@ -479,6 +482,10 @@ class RapidBayDaemon:
         available_bytes = self._get_available_bytes(magnet_hash, filename)
         if available_bytes < _hls_effective_threshold(f.size):
             return {"started": False, "reason": "not_ready"}
+        # MP4 only pipes when faststart; a moov-at-end file can warm up past the
+        # threshold but still can't be demuxed from a forward-only stream.
+        if not video_conversion.is_pipe_streamable(filepath, available_bytes):
+            return {"started": False, "reason": "unsupported_format"}
         os.makedirs(output_dir, exist_ok=True)
         started = self.hls_streamer.start_stream(
             filepath,
@@ -496,7 +503,11 @@ class RapidBayDaemon:
         i, f = torrent.get_index_and_file_from_files(h, filename)
         if i is None or f is None:
             return False
-        return self._get_available_bytes(magnet_hash, filename) >= _hls_effective_threshold(f.size)
+        available = self._get_available_bytes(magnet_hash, filename)
+        if available < _hls_effective_threshold(f.size):
+            return False
+        filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+        return video_conversion.is_pipe_streamable(filepath, available)
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
         """Get contiguous bytes available from start of file for pipe feeding."""

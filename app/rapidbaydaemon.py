@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import functools
 import json
 import os
 import re
@@ -482,10 +483,22 @@ class RapidBayDaemon:
         available_bytes = self._get_available_bytes(magnet_hash, filename)
         if available_bytes < _hls_effective_threshold(f.size):
             return {"started": False, "reason": "not_ready"}
-        # MP4 only pipes when faststart; a moov-at-end file can warm up past the
-        # threshold but still can't be demuxed from a forward-only stream.
+        remux_mdat = None
+        is_range_downloaded = None
         if not video_conversion.is_pipe_streamable(filepath, available_bytes):
-            return {"started": False, "reason": "unsupported_format"}
+            # Not directly pipeable. A moov-at-end MP4 can still stream via the
+            # faststart remux — but only for torrent-backed files: HTTP
+            # (Real-Debrid) writes strictly sequentially, so the trailing moov
+            # arrives last and remux would buy nothing.
+            is_http = filename in self._http_served.get(magnet_hash, set())
+            remux_mdat = None if is_http else video_conversion.mp4_remux_layout(filepath, available_bytes)
+            if remux_mdat is None:
+                return {"started": False, "reason": "unsupported_format"}
+            # Rush the trailing moov region so the remux can start promptly.
+            self.torrent_client.prioritize_byte_range(magnet_hash, filename, remux_mdat[1], f.size)
+            is_range_downloaded = functools.partial(
+                self.torrent_client.is_range_downloaded, magnet_hash, filename
+            )
         os.makedirs(output_dir, exist_ok=True)
         started = self.hls_streamer.start_stream(
             filepath,
@@ -493,6 +506,8 @@ class RapidBayDaemon:
             lambda _mh=magnet_hash, _fn=filename: self._get_available_bytes(_mh, _fn),
             total_file_size=f.size,
             m3u8_filename=_m3u8_filename(filename),
+            remux_mdat=remux_mdat,
+            is_range_downloaded=is_range_downloaded,
         )
         return {"started": True} if started else {"started": False, "reason": "capacity"}
 
@@ -507,7 +522,13 @@ class RapidBayDaemon:
         if available < _hls_effective_threshold(f.size):
             return False
         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-        return video_conversion.is_pipe_streamable(filepath, available)
+        if video_conversion.is_pipe_streamable(filepath, available):
+            return True
+        # moov-at-end MP4: streamable via the faststart remux (torrent files
+        # only — HTTP-served files download the trailing moov last).
+        if filename in self._http_served.get(magnet_hash, set()):
+            return False
+        return video_conversion.mp4_remux_layout(filepath, available) is not None
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
         """Get contiguous bytes available from start of file for pipe feeding."""

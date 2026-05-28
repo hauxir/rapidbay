@@ -242,59 +242,233 @@ PIPE_FRIENDLY_EXTENSIONS = {".mkv", ".avi", ".ts", ".mpg", ".mpeg"}
 PROBE_EXTENSIONS = {".mp4"}
 
 
-def _mp4_is_faststart(filepath: str, available_bytes: int) -> bool:
-    """True iff the MP4's `moov` box appears before its `mdat`.
+# Container boxes on the path to the chunk-offset tables
+# (moov→trak→mdia→minf→stbl). When relocating moov we only recurse into these,
+# so a leaf box whose payload happens to contain "stco"/"co64" byte sequences is
+# never misparsed as a real box.
+_MP4_CONTAINER_BOXES = frozenset({b"moov", b"trak", b"mdia", b"minf", b"stbl"})
+
+
+def _read_box_header(buf: bytes | bytearray, offset: int) -> Tuple[int, bytes, int] | None:
+    """Parse an ISO-BMFF box header at `offset` in `buf`.
+
+    Returns (box_size, box_type, header_len) or None if there aren't enough
+    bytes for a full header. box_size is the total box size including the
+    header; 0 ("extends to end of container") is returned as-is for the caller
+    to interpret.
+    """
+    if offset + 8 > len(buf):
+        return None
+    size = int.from_bytes(buf[offset:offset + 4], "big")
+    box_type = bytes(buf[offset + 4:offset + 8])
+    header_len = 8
+    if size == 1:
+        if offset + 16 > len(buf):
+            return None
+        size = int.from_bytes(buf[offset + 8:offset + 16], "big")
+        header_len = 16
+    return size, box_type, header_len
+
+
+def _mp4_head_layout(filepath: str, available_bytes: int) -> Dict[str, int | str] | None:
+    """Classify an MP4's top-level layout from its downloaded prefix.
 
     Walks only the top-level box headers within the first `available_bytes`
-    downloaded contiguously from the start, so it's safe to call mid-download.
-    Returns False when the layout can't be confirmed (not enough bytes yet,
-    moov-at-end, or malformed) — the caller treats that as not pipe-streamable.
+    contiguous bytes (cheap header reads, never the multi-MB mdat payload), so
+    it's safe to call mid-download. Returns:
+      - {"mode": "direct"} when `moov` precedes `mdat` (faststart — pipe as-is)
+      - {"mode": "remux", "mdat_start": int, "mdat_end": int} when `mdat`
+        precedes `moov` (moov-at-end — needs the faststart remux)
+      - None when the layout can't be determined yet or is malformed.
     """
     try:
         with open(filepath, "rb") as f:
             offset = 0
-            # Bound the walk so a malformed file can't spin; faststart layouts
-            # reach moov within the first handful of top-level boxes.
+            # Bound the walk; real layouts reach moov/mdat within a handful of
+            # top-level boxes (ftyp, optional free/wide, then mdat or moov).
             for _ in range(64):
                 if offset + 8 > available_bytes:
-                    return False
+                    return None
                 f.seek(offset)
                 header = f.read(8)
                 if len(header) < 8:
-                    return False
+                    return None
                 size = int.from_bytes(header[:4], "big")
                 box_type = header[4:8]
-                if box_type == b"moov":
-                    return True
-                if box_type == b"mdat":
-                    return False
+                header_len = 8
                 if size == 1:
-                    # 64-bit largesize follows the 8-byte header.
                     if offset + 16 > available_bytes:
-                        return False
-                    size = int.from_bytes(f.read(8), "big")
-                    if size < 16:
-                        return False
-                elif size < 8:
-                    # size 0 (extends to EOF) or corrupt — can't advance.
-                    return False
+                        return None
+                    large = f.read(8)
+                    if len(large) < 8:
+                        return None
+                    size = int.from_bytes(large, "big")
+                    header_len = 16
+                if box_type == b"moov":
+                    return {"mode": "direct"}
+                if box_type == b"mdat":
+                    # mdat size 0 (extends to EOF) would put moov nowhere — and
+                    # a corrupt size we can't trust to locate the tail.
+                    if size < header_len:
+                        return None
+                    return {"mode": "remux", "mdat_start": offset, "mdat_end": offset + size}
+                if size < header_len:
+                    return None
                 offset += size
     except OSError:
-        return False
-    return False
+        return None
+    return None
 
 
 def is_pipe_streamable(filepath: str, available_bytes: int) -> bool:
     """Whether `filepath` can be HLS-streamed by feeding it sequentially into
-    ffmpeg's stdin. Always-friendly containers qualify by extension; MP4 only
-    when faststart (moov before mdat), probed against the downloaded prefix.
+    ffmpeg's stdin as-is. Always-friendly containers qualify by extension; MP4
+    only when faststart (moov before mdat), probed against the downloaded prefix.
     """
     ext = os.path.splitext(filepath)[1].lower()
     if ext in PIPE_FRIENDLY_EXTENSIONS:
         return True
     if ext in PROBE_EXTENSIONS:
-        return _mp4_is_faststart(filepath, available_bytes)
+        layout = _mp4_head_layout(filepath, available_bytes)
+        return layout is not None and layout["mode"] == "direct"
     return False
+
+
+def mp4_remux_layout(filepath: str, available_bytes: int) -> Tuple[int, int] | None:
+    """For a moov-at-end MP4, return (mdat_start, mdat_end) — the byte range of
+    the mdat box, located purely from the downloaded prefix. The region after
+    mdat_end holds the moov index, which the caller fetches (out of order) and
+    relocates ahead of mdat via build_faststart_preamble. Returns None for
+    faststart MP4s, non-MP4s, or layouts that can't yet be determined.
+    """
+    if os.path.splitext(filepath)[1].lower() not in PROBE_EXTENSIONS:
+        return None
+    layout = _mp4_head_layout(filepath, available_bytes)
+    if layout is None or layout["mode"] != "remux":
+        return None
+    return int(layout["mdat_start"]), int(layout["mdat_end"])
+
+
+def _extract_moov(tail: bytes) -> bytes | None:
+    """Find and return the full `moov` box within `tail` (the bytes following
+    mdat). Skips any free/skip/wide padding between mdat and moov."""
+    offset = 0
+    for _ in range(64):
+        hdr = _read_box_header(tail, offset)
+        if hdr is None:
+            return None
+        size, box_type, header_len = hdr
+        if box_type == b"moov":
+            if size < header_len or offset + size > len(tail):
+                return None
+            return bytes(tail[offset:offset + size])
+        if size < header_len:
+            return None
+        offset += size
+        if offset >= len(tail):
+            return None
+    return None
+
+
+def _rewrite_stco(buf: bytearray, start: int, end: int, delta: int) -> bool:
+    """Add `delta` to every 32-bit chunk offset in an stco box body. Returns
+    False if any offset would overflow 32 bits (would require widening to
+    co64, which changes moov's size) — the caller bails to download-then-convert."""
+    if start + 8 > end:  # version/flags (4) + entry_count (4)
+        return False
+    count = int.from_bytes(buf[start + 4:start + 8], "big")
+    pos = start + 8
+    for _ in range(count):
+        if pos + 4 > end:
+            return False
+        value = int.from_bytes(buf[pos:pos + 4], "big") + delta
+        if value > 0xFFFFFFFF:
+            return False
+        buf[pos:pos + 4] = value.to_bytes(4, "big")
+        pos += 4
+    return True
+
+
+def _rewrite_co64(buf: bytearray, start: int, end: int, delta: int) -> bool:
+    """Add `delta` to every 64-bit chunk offset in a co64 box body."""
+    if start + 8 > end:
+        return False
+    count = int.from_bytes(buf[start + 4:start + 8], "big")
+    pos = start + 8
+    for _ in range(count):
+        if pos + 8 > end:
+            return False
+        value = int.from_bytes(buf[pos:pos + 8], "big") + delta
+        if value > (1 << 64) - 1:
+            return False
+        buf[pos:pos + 8] = value.to_bytes(8, "big")
+        pos += 8
+    return True
+
+
+def _rewrite_boxes(buf: bytearray, start: int, end: int, delta: int) -> bool:
+    """Recurse the box tree in [start, end), shifting stco/co64 offsets by
+    `delta`. Recurses only into known container boxes."""
+    offset = start
+    while offset + 8 <= end:
+        hdr = _read_box_header(buf, offset)
+        if hdr is None:
+            return False
+        size, box_type, header_len = hdr
+        box_end = end if size == 0 else offset + size
+        if size != 0 and (size < header_len or box_end > end):
+            return False
+        inner = offset + header_len
+        if box_type in _MP4_CONTAINER_BOXES:
+            ok = _rewrite_boxes(buf, inner, box_end, delta)
+        elif box_type == b"stco":
+            ok = _rewrite_stco(buf, inner, box_end, delta)
+        elif box_type == b"co64":
+            ok = _rewrite_co64(buf, inner, box_end, delta)
+        else:
+            ok = True
+        if not ok:
+            return False
+        if size == 0:
+            break
+        offset = box_end
+    return True
+
+
+def build_faststart_preamble(
+    filepath: str, mdat_start: int, mdat_end: int, file_size: int
+) -> bytes | None:
+    """Build the bytes to feed before the mdat box so a moov-at-end MP4 streams
+    as faststart: the leading boxes [0:mdat_start] (ftyp etc.) followed by the
+    relocated moov with its chunk offsets shifted by +len(moov) (since mdat now
+    sits that many bytes later). The tail [mdat_end:file_size] must already be
+    downloaded. Returns None for unsupported layouts (no moov, or a 32-bit stco
+    table that would overflow and need a co64 upgrade)."""
+    try:
+        with open(filepath, "rb") as f:
+            f.seek(0)
+            pre_mdat = f.read(mdat_start)
+            if len(pre_mdat) < mdat_start:
+                return None
+            f.seek(mdat_end)
+            tail = f.read(file_size - mdat_end)
+    except OSError:
+        return None
+    if len(tail) < file_size - mdat_end:
+        return None
+    moov = _extract_moov(tail)
+    if moov is None:
+        return None
+    hdr = _read_box_header(moov, 0)
+    if hdr is None or hdr[1] != b"moov":
+        return None
+    # mdat shifts later by exactly len(moov) bytes, so every chunk offset that
+    # points into mdat must grow by the same amount.
+    delta = len(moov)
+    buf = bytearray(moov)
+    if not _rewrite_boxes(buf, hdr[2], len(buf), delta):
+        return None
+    return pre_mdat + bytes(buf)
 
 
 def _detect_video_codec(filepath: str) -> str:
@@ -462,11 +636,18 @@ class HLSStreamer:
         get_sequential_bytes: Callable[[], int],
         total_file_size: int,
         m3u8_filename: str = "stream.m3u8",
+        remux_mdat: Tuple[int, int] | None = None,
+        is_range_downloaded: Callable[[int, int], bool] | None = None,
     ) -> bool:
         """Reserve a stream slot synchronously and kick off ffmpeg in a thread.
 
         Returns True if a stream is now active (newly started or already running),
         False if capacity is exhausted.
+
+        When `remux_mdat` (mdat_start, mdat_end) is given, the input is a
+        moov-at-end MP4: the streamer waits for the trailing moov to download
+        (probed via `is_range_downloaded`), relocates it ahead of mdat, and
+        feeds the synthesized faststart stream into ffmpeg.
         """
         m3u8_path = os.path.join(output_dir, m3u8_filename)
         if self.is_failed(m3u8_path):
@@ -488,6 +669,8 @@ class HLSStreamer:
             total_file_size,
             m3u8_filename,
             m3u8_path,
+            remux_mdat,
+            is_range_downloaded,
         )
         return True
 
@@ -501,6 +684,8 @@ class HLSStreamer:
         total_file_size: int,
         m3u8_filename: str,
         m3u8_path: str,
+        remux_mdat: Tuple[int, int] | None = None,
+        is_range_downloaded: Callable[[int, int], bool] | None = None,
     ) -> None:
         try:
             os.makedirs(output_dir, exist_ok=True)
@@ -509,6 +694,18 @@ class HLSStreamer:
             segment_pattern = os.path.join(output_dir, f"{segment_prefix}_seg_%04d.m4s")
             init_filename = f"{segment_prefix}_init.mp4"
             stderr_log_path = os.path.join(output_dir, m3u8_filename + ".log")
+
+            # Moov-at-end MP4: wait for the prioritized trailing moov to land,
+            # then relocate it ahead of mdat. Done before codec detection so
+            # ffprobe can read the (now-present) moov, and before spawning
+            # ffmpeg so a build failure costs nothing.
+            preamble: bytes | None = None
+            if remux_mdat is not None:
+                preamble = self._await_remux_preamble(
+                    input_filepath, total_file_size, remux_mdat, is_range_downloaded, m3u8_path
+                )
+                if preamble is None:
+                    return  # _await_remux_preamble handled marking/cleanup
 
             # Detect video codec for proper tagging
             video_codec = _detect_video_codec(input_filepath)
@@ -563,10 +760,17 @@ class HLSStreamer:
                 if pending_stop:
                     with contextlib.suppress(Exception):
                         proc.terminate()
-                feeder = threading.Thread(
-                    target=self._pipe_feeder,
-                    args=(input_filepath, proc, get_sequential_bytes, total_file_size, m3u8_path),
-                )
+                if preamble is not None and remux_mdat is not None:
+                    feeder = threading.Thread(
+                        target=self._remux_feeder,
+                        args=(input_filepath, proc, get_sequential_bytes, preamble,
+                              remux_mdat[0], remux_mdat[1], m3u8_path),
+                    )
+                else:
+                    feeder = threading.Thread(
+                        target=self._pipe_feeder,
+                        args=(input_filepath, proc, get_sequential_bytes, total_file_size, m3u8_path),
+                    )
                 feeder.start()
                 feeder.join()
                 # Bounded wait: once the feeder closes stdin, ffmpeg should
@@ -697,6 +901,115 @@ class HLSStreamer:
                         continue
 
                     if bytes_written >= total_file_size and available >= total_file_size:
+                        break
+
+        finally:
+            with contextlib.suppress(Exception):
+                proc.stdin.close()  # type: ignore[union-attr]
+
+    def _await_remux_preamble(
+        self,
+        input_filepath: str,
+        total_file_size: int,
+        remux_mdat: Tuple[int, int],
+        is_range_downloaded: Callable[[int, int], bool] | None,
+        m3u8_path: str,
+    ) -> bytes | None:
+        """Wait for the prioritized trailing moov to download, then build the
+        relocated ftyp+moov' preamble. Returns the preamble, or None after
+        handling cleanup: a stall/stop times out silently (no .failed marker,
+        torrent may be slow and the user can retry); an unsupported layout is
+        marked failed so the ▶ button stops surfacing it."""
+        mdat_start, mdat_end = remux_mdat
+        deadline = time.monotonic() + settings.HLS_STALL_TIMEOUT
+        while True:
+            with self._reservation_lock:
+                if m3u8_path in self._stopping:
+                    return None
+            ready = False
+            if is_range_downloaded is not None:
+                with contextlib.suppress(Exception):
+                    ready = is_range_downloaded(mdat_end, total_file_size)
+            if ready:
+                break
+            if time.monotonic() > deadline:
+                log.debug(f"HLS remux: moov tail not downloaded within timeout: {m3u8_path}")
+                with self._reservation_lock:
+                    self._stopping.add(m3u8_path)
+                return None
+            time.sleep(0.5)
+
+        preamble = build_faststart_preamble(input_filepath, mdat_start, mdat_end, total_file_size)
+        if preamble is None:
+            print(f"HLS remux: unsupported moov layout for {input_filepath}")
+            self.mark_failed(m3u8_path)
+        return preamble
+
+    def _remux_feeder(
+        self,
+        filepath: str,
+        proc: Popen,  # type: ignore[type-arg]
+        get_sequential_bytes: Callable[[], int],
+        preamble: bytes,
+        mdat_start: int,
+        mdat_end: int,
+        m3u8_path: str,
+    ) -> None:
+        """Feed ffmpeg a synthesized faststart stream: the relocated
+        ftyp+moov' preamble, then the original mdat box streamed sequentially as
+        it downloads. The trailing original moov is skipped — it's already in
+        the preamble."""
+        try:
+            try:
+                proc.stdin.write(preamble)  # type: ignore[union-attr]
+                proc.stdin.flush()  # type: ignore[union-attr]
+            except BrokenPipeError:
+                return
+
+            file_pos = mdat_start
+            last_progress_time = time.monotonic()
+            with open(filepath, "rb") as f:
+                f.seek(mdat_start)
+                while True:
+                    if proc.poll() is not None:
+                        break
+
+                    available = get_sequential_bytes()
+                    with contextlib.suppress(OSError):
+                        available = min(available, os.path.getsize(filepath))
+                    # Only ever stream within the mdat box; the moov tail beyond
+                    # mdat_end is already in the preamble.
+                    target = min(available, mdat_end)
+
+                    if target <= file_pos:
+                        if time.monotonic() - last_progress_time > settings.HLS_STALL_TIMEOUT:
+                            log.debug(f"HLS remux stream stalled ({settings.HLS_STALL_TIMEOUT}s no progress): {m3u8_path}")
+                            self.stop(m3u8_path)
+                            return
+                        time.sleep(0.5)
+                        continue
+
+                    to_read = target - file_pos
+                    hit_eof = False
+                    while to_read > 0:
+                        data = f.read(min(to_read, PIPE_READ_CHUNK))
+                        if not data:
+                            hit_eof = True
+                            break
+                        try:
+                            proc.stdin.write(data)  # type: ignore[union-attr]
+                            proc.stdin.flush()  # type: ignore[union-attr]
+                        except BrokenPipeError:
+                            return
+                        file_pos += len(data)
+                        to_read -= len(data)
+                        last_progress_time = time.monotonic()
+
+                    if hit_eof:
+                        time.sleep(0.5)
+                        continue
+
+                    if file_pos >= mdat_end:
                         break
 
         finally:

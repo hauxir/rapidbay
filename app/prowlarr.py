@@ -88,9 +88,12 @@ def search(searchterm: str) -> List[Dict[str, int | str | Any | None]]:
             for iid in get_indexer_ids()
         ]
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        responses = loop.run_until_complete(fetch_all(urls))
+        # asyncio.run() creates a fresh loop and, crucially, closes it (freeing
+        # its epoll/eventfd file descriptors) in its finally. The old
+        # new_event_loop()+set_event_loop() pattern never closed the loop, so
+        # every search leaked ~2 fds — over time the daemon hit EMFILE
+        # ("Too many open files") and crashed.
+        responses = asyncio.run(fetch_all(urls))
 
         results: List[Dict[str, Any]] = []
         for data in responses:

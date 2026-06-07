@@ -434,13 +434,32 @@ async def _merged_search_stream(searchterm: str) -> AsyncIterator[List[Dict[str,
 _search_stream_cache = diskcache.Cache(settings.CACHE_DIR)
 
 
+def _sse_event(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+# SSE comment line; ignored by EventSource but keeps proxies from timing out the stream
+_SSE_KEEPALIVE = ": ping\n\n"
+
+
+def _sse_response(generate: AsyncIterator[str]) -> StreamingResponse:
+    return StreamingResponse(
+        generate,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Tell nginx not to buffer the stream, otherwise events arrive all at once
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/api/search_events/")
 @app.get("/api/search_events/{searchterm}")
 async def search_events(searchterm: str = "", _: None = Depends(authorize)) -> StreamingResponse:
     """Stream search results over SSE: emits a re-ranked snapshot as each indexer responds."""
 
-    def event(payload: Dict[str, Any]) -> str:
-        return f"data: {json.dumps(payload)}\n\n"
+    event = _sse_event
 
     async def generate() -> AsyncIterator[str]:
         if not (settings.JACKETT_HOST or settings.PROWLARR_HOST):
@@ -468,15 +487,7 @@ async def search_events(searchterm: str = "", _: None = Depends(authorize)) -> S
             )
         yield event({"results": None, "done": True})
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            # Tell nginx not to buffer the stream, otherwise events arrive all at once
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return _sse_response(generate())
 
 
 @app.post("/api/magnet_status/", response_model=MagnetStatusResponse)
@@ -620,8 +631,7 @@ def magnet_download(
     return {"magnet_hash": magnet_hash}
 
 
-@app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
-def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+def _file_status(magnet_hash: str, filename: str) -> Dict[str, Any]:
     status = daemon.get_file_status(magnet_hash, filename)
     # Reset expiration timer when file is accessed
     if status.get("status") == FileStatus.READY:
@@ -629,6 +639,32 @@ def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -
         if os.path.isdir(directory):
             os.utime(directory, None)
     return status
+
+
+@app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
+def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    return _file_status(magnet_hash, filename)
+
+
+@app.get("/api/magnet_events/{magnet_hash}/{filename}")
+async def file_status_events(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream file status over SSE: pushes an update whenever it changes, closes when ready."""
+
+    async def generate() -> AsyncIterator[str]:
+        last: Dict[str, Any] | None = None
+        while True:
+            status = await asyncio.to_thread(_file_status, magnet_hash, filename)
+            done = status.get("status") == FileStatus.READY
+            if status != last:
+                last = status
+                yield _sse_event({**status, "done": done})
+            else:
+                yield _SSE_KEEPALIVE
+            if done:
+                return
+            await asyncio.sleep(1)
+
+    return _sse_response(generate())
 
 
 @app.get("/api/next_file/{magnet_hash}/{filename}", response_model=NextFileResponse)
@@ -679,8 +715,7 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
     return {"next_filename": next_filename, "next_magnet": next_magnet}
 
 
-@app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)
-def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+def _files(magnet_hash: str) -> Dict[str, Any]:
     files_list: List[str] | None = _get_files(magnet_hash)
 
     if files_list:
@@ -698,6 +733,27 @@ def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
                 file_statuses[filename] = "downloading"
         return {"files": files_list, "file_statuses": file_statuses}
     return {"files": None}
+
+
+@app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)
+def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    return _files(magnet_hash)
+
+
+@app.get("/api/magnet_events/{magnet_hash}/")
+async def files_events(magnet_hash: str, _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream the torrent file list over SSE: closes once the file list is available."""
+
+    async def generate() -> AsyncIterator[str]:
+        while True:
+            payload = await asyncio.to_thread(_files, magnet_hash)
+            if payload.get("files") is not None:
+                yield _sse_event({**payload, "done": True})
+                return
+            yield _SSE_KEEPALIVE
+            await asyncio.sleep(1)
+
+    return _sse_response(generate())
 
 
 @app.get("/error.log")

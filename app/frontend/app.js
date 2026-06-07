@@ -748,7 +748,7 @@
     Vue.component("search-results-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null, searchterm: "" };
+            return { results: null, searchterm: "", searching: false };
         },
         methods: {
             back: function () {
@@ -822,21 +822,69 @@
                     }
                 });
             } else {
-                get("/api/search/" + self.searchterm, function (data) {
-                    self.results = data.results;
+                var focusFirstResult = function () {
                     rbsetTimeout(function () {
                         var firstTr = document.getElementsByTagName("tr")[0];
                         if (firstTr) {
                             firstTr.focus();
                         }
                     });
-                });
+                };
+                var fallbackSearch = function () {
+                    get("/api/search/" + self.searchterm, function (data) {
+                        self.results = data.results;
+                        self.searching = false;
+                        focusFirstResult();
+                    });
+                };
+                if (window.EventSource) {
+                    // Stream results over SSE: render a re-ranked snapshot as
+                    // each indexer responds instead of waiting for the slowest.
+                    if (!document.cookie) {
+                        document.cookie = localStorage.getItem("cookie");
+                    }
+                    var focused = false;
+                    this.searching = true;
+                    this.eventsource = new EventSource(
+                        "/api/search_events/" + self.searchterm
+                    );
+                    this.eventsource.onmessage = function (e) {
+                        var data = JSON.parse(e.data);
+                        if (data.results) {
+                            self.results = data.results;
+                            if (!focused && data.results.length) {
+                                focused = true;
+                                focusFirstResult();
+                            }
+                        }
+                        if (data.done) {
+                            self.searching = false;
+                            self.eventsource.close();
+                            self.eventsource = null;
+                        }
+                    };
+                    this.eventsource.onerror = function () {
+                        self.eventsource.close();
+                        self.eventsource = null;
+                        if (self.results === null) {
+                            fallbackSearch();
+                        } else {
+                            self.searching = false;
+                        }
+                    };
+                } else {
+                    fallbackSearch();
+                }
             }
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
         },
         destroyed: function () {
             document.removeEventListener("keydown", this.keylistener);
+            if (this.eventsource) {
+                this.eventsource.close();
+                this.eventsource = null;
+            }
         },
     });
 

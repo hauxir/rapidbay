@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import datetime
 import fcntl
@@ -13,6 +14,7 @@ from collections.abc import Generator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator, Dict, List
 
+import diskcache
 import http_cache
 import jackett
 import prowlarr
@@ -22,7 +24,7 @@ import settings
 import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
@@ -221,14 +223,7 @@ def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
 
-def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
-    """Search configured indexer backends (Jackett and/or Prowlarr) and merge results."""
-    results: List[Dict[str, Any]] = []
-    if settings.JACKETT_HOST:
-        results.extend(jackett.search(searchterm))
-    if settings.PROWLARR_HOST:
-        results.extend(prowlarr.search(searchterm))
-
+def _dedup_and_sort(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # Filter out results without magnet or torrent_link
     results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
 
@@ -257,6 +252,16 @@ def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
         deduped.append(r)
 
     return deduped
+
+
+def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
+    """Search configured indexer backends (Jackett and/or Prowlarr) and merge results."""
+    results: List[Dict[str, Any]] = []
+    if settings.JACKETT_HOST:
+        results.extend(jackett.search(searchterm))
+    if settings.PROWLARR_HOST:
+        results.extend(prowlarr.search(searchterm))
+    return _dedup_and_sort(results)
 
 
 @app.get("/health")
@@ -347,30 +352,131 @@ def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return results
 
 
+_NO_BACKEND_RESULTS: List[Dict[str, Any]] = [
+    {
+        "title": "NO SEARCH BACKEND CONFIGURED",
+        "seeds": 1337,
+        "magnet": "N/A"
+    },
+    {
+        "title": "Please connect Jackett (JACKETT_HOST/JACKETT_API_KEY) or Prowlarr (PROWLARR_HOST/PROWLARR_API_KEY)",
+        "seeds": 1337,
+        "magnet": "N/A"
+    }
+]
+
+
+def _finalize_results(results: List[Dict[str, Any]], searchterm: str) -> List[Dict[str, Any]]:
+    """Apply final ordering (move-to-bottom strings, trending weighting) and download status."""
+    filtered_results: List[Dict[str, Any]] = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+    rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+
+    if searchterm == "":
+        return _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)
+    return _add_status_to_results(filtered_results + rest)
+
+
 @app.get("/api/search/", response_model=SearchResponse)
 @app.get("/api/search/{searchterm}", response_model=SearchResponse)
 def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
     if settings.JACKETT_HOST or settings.PROWLARR_HOST:
         results: List[Dict[str, Any]] = _indexer_search(searchterm)
     else:
-        results = [
-            {
-                "title": "NO SEARCH BACKEND CONFIGURED",
-                "seeds": 1337,
-                "magnet": "N/A"
-            },
-            {
-                "title": "Please connect Jackett (JACKETT_HOST/JACKETT_API_KEY) or Prowlarr (PROWLARR_HOST/PROWLARR_API_KEY)",
-                "seeds": 1337,
-                "magnet": "N/A"
-            }
-        ]
-    filtered_results: List[Dict[str, Any]] = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
-    rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+        results = _NO_BACKEND_RESULTS
+    return {"results": _finalize_results(results, searchterm)}
 
-    if searchterm == "":
-        return {"results": _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)}
-    return {"results": _add_status_to_results(filtered_results + rest)}
+
+def _serialize_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Strip non-JSON-serializable fields (e.g. published datetimes) for SSE payloads."""
+    return [
+        {
+            "title": r.get("title"),
+            "seeds": r.get("seeds", 0),
+            "magnet": r.get("magnet"),
+            "torrent_link": r.get("torrent_link"),
+            "status": r.get("status"),
+        }
+        for r in results
+    ]
+
+
+async def _merged_search_stream(searchterm: str) -> AsyncIterator[List[Dict[str, Any]]]:
+    """Merge result batches from all configured backends as their indexers respond."""
+    queue: asyncio.Queue[List[Dict[str, Any]] | None] = asyncio.Queue()
+
+    async def pump(stream: AsyncIterator[List[Dict[str, Any]]]) -> None:
+        try:
+            async for batch in stream:
+                await queue.put(batch)
+        finally:
+            await queue.put(None)
+
+    streams: List[AsyncIterator[List[Dict[str, Any]]]] = []
+    if settings.JACKETT_HOST:
+        streams.append(jackett.search_stream(searchterm))
+    if settings.PROWLARR_HOST:
+        streams.append(prowlarr.search_stream(searchterm))
+
+    tasks = [asyncio.ensure_future(pump(s)) for s in streams]
+    try:
+        remaining = len(tasks)
+        while remaining:
+            batch = await queue.get()
+            if batch is None:
+                remaining -= 1
+                continue
+            yield batch
+    finally:
+        for task in tasks:
+            task.cancel()
+
+
+_search_stream_cache = diskcache.Cache(settings.CACHE_DIR)
+
+
+@app.get("/api/search_events/")
+@app.get("/api/search_events/{searchterm}")
+async def search_events(searchterm: str = "", _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream search results over SSE: emits a re-ranked snapshot as each indexer responds."""
+
+    def event(payload: Dict[str, Any]) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    async def generate() -> AsyncIterator[str]:
+        if not (settings.JACKETT_HOST or settings.PROWLARR_HOST):
+            yield event({"results": _serialize_results(_NO_BACKEND_RESULTS), "done": True})
+            return
+
+        cache_key = ("search_stream", searchterm)
+        cached: List[Dict[str, Any]] | None = await asyncio.to_thread(
+            _search_stream_cache.get, cache_key
+        )
+        if cached is not None:
+            results = _finalize_results(_dedup_and_sort(cached), searchterm)
+            yield event({"results": _serialize_results(results), "done": True})
+            return
+
+        accumulated: List[Dict[str, Any]] = []
+        async for batch in _merged_search_stream(searchterm):
+            accumulated.extend(batch)
+            snapshot = _finalize_results(_dedup_and_sort(accumulated), searchterm)
+            yield event({"results": _serialize_results(snapshot), "done": False})
+
+        if accumulated:
+            await asyncio.to_thread(
+                _search_stream_cache.set, cache_key, accumulated, 300
+            )
+        yield event({"results": None, "done": True})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Tell nginx not to buffer the stream, otherwise events arrive all at once
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/magnet_status/", response_model=MagnetStatusResponse)

@@ -6,7 +6,7 @@ import os
 import random
 import shutil
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import bencodepy
 import libtorrent
@@ -144,6 +144,8 @@ class TorrentClient:
         self.filelist_dir: str | None = filelist_dir
         self.download_dir: str | None = download_dir
         self.torrents_dir: str | None = torrents_dir
+        # Optional hook fired when the filelist is written (metadata resolved)
+        self.on_state_change: Callable[[], None] | None = None
 
     def process_alerts(self) -> None:
         """Process session alerts for better torrent monitoring"""
@@ -278,3 +280,6 @@ class TorrentClient:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "w") as f:
             f.write(json.dumps(result))
+        callback = self.on_state_change
+        if callback:
+            callback()

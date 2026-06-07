@@ -97,10 +97,50 @@ class StatusResponse(BaseModel):
 daemon: RapidBayDaemon
 
 
+class _StateChangeNotifier:
+    """Bridges daemon-thread state changes to asyncio waiters (SSE generators)."""
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._event: asyncio.Event | None = None
+
+    def attach(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._event = asyncio.Event()
+
+    def notify(self) -> None:
+        """Wake all waiters. Safe to call from any thread."""
+        loop = self._loop
+        if loop and not loop.is_closed():
+            loop.call_soon_threadsafe(self._wake)
+
+    def _wake(self) -> None:
+        event = self._event
+        if event:
+            self._event = asyncio.Event()
+            event.set()
+
+    async def wait(self, timeout: float) -> None:
+        """Wait until notified or timeout — the timeout doubles as a fallback
+        sampling tick for state changes that have no notification hook
+        (e.g. torrent download progress)."""
+        event = self._event
+        if event is None:
+            await asyncio.sleep(timeout)
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(event.wait(), timeout)
+
+
+_state_notifier = _StateChangeNotifier()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global daemon
+    _state_notifier.attach(asyncio.get_running_loop())
     daemon = RapidBayDaemon()
+    daemon.on_state_change = _state_notifier.notify
     daemon.start()
     try:
         yield
@@ -662,7 +702,7 @@ async def file_status_events(magnet_hash: str, filename: str, _: None = Depends(
                 yield _SSE_KEEPALIVE
             if done:
                 return
-            await asyncio.sleep(1)
+            await _state_notifier.wait(1)
 
     return _sse_response(generate())
 
@@ -751,7 +791,7 @@ async def files_events(magnet_hash: str, _: None = Depends(authorize)) -> Stream
                 yield _sse_event({**payload, "done": True})
                 return
             yield _SSE_KEEPALIVE
-            await asyncio.sleep(1)
+            await _state_notifier.wait(1)
 
     return _sse_response(generate())
 

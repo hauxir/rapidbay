@@ -1,10 +1,11 @@
+import contextlib
 import datetime
 import json
 import os
 import shutil
 import time
 from threading import Event, Thread
-from typing import Any, Dict, List, Set
+from typing import Any, Callable, Dict, List, Set
 
 import http_cache
 import log
@@ -159,6 +160,19 @@ class RapidBayDaemon:
         self.thread: Thread = Thread(target=self._loop_wrapper, args=())
         self.thread.daemon = True
         self.http_downloader: HttpDownloader = HttpDownloader()
+        # Optional hook fired (from daemon/worker threads) whenever a discrete
+        # state transition happens — filelist written, conversion started or
+        # finished, file copied to output — so SSE subscribers can re-sample
+        # immediately instead of waiting for their 1s fallback tick.
+        self.on_state_change: Callable[[], None] | None = None
+        self.torrent_client.on_state_change = self._notify_state_change
+        self.video_converter.on_state_change = self._notify_state_change
+
+    def _notify_state_change(self) -> None:
+        callback = self.on_state_change
+        if callback:
+            with contextlib.suppress(Exception):
+                callback()
 
     def start(self) -> None:
         self.thread.start()
@@ -247,6 +261,8 @@ class RapidBayDaemon:
                 self.torrent_client.torrents.get(magnet_hash), filename
             ):
                 self.torrent_client.download_file(magnet_link, subtitle_filename)
+
+        self._notify_state_change()
 
     def get_file_status(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
         assert self.thread.is_alive()
@@ -341,6 +357,7 @@ class RapidBayDaemon:
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.DOWNLOADING
         subtitles.download_all_subtitles(filepath, skip=skip)
         self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
+        self._notify_state_change()
 
     def _handle_torrent(self, magnet_hash: str) -> None:
         h = self.torrent_client.torrents.get(magnet_hash)
@@ -425,6 +442,7 @@ class RapidBayDaemon:
                 output_dir = os.path.dirname(output_filepath)
                 os.makedirs(output_dir, exist_ok=True)
                 shutil.copy(filepath, output_filepath)
+                self._notify_state_change()
 
     @log.catch_and_log_exceptions
     def _heartbeat(self) -> None:

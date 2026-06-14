@@ -134,7 +134,9 @@ docker-compose up
 
 [Setting up Rapidbay with Kodi](https://github.com/hauxir/rapidbay/wiki/Setting-up-Rapidbay-with-Kodi)
 
-## Using Real Debrid caching
+## Using debrid caching
 
--   You can speed up downloads by using the torrent cache at real debrid
--   To do that set the env variable RD_TOKEN to the one on https://real-debrid.com/apitoken
+-   You can speed up downloads by using a torrent cache from Real Debrid and/or TorBox
+-   For Real Debrid, set the env variable RD_TOKEN to the one on https://real-debrid.com/apitoken
+-   For TorBox, set the env variable TB_TOKEN to your API key from https://torbox.app/settings
+-   If both are set, Real Debrid is tried first and TorBox is used as a fallback

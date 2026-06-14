@@ -145,7 +145,7 @@ def _get_files(magnet_hash: str) -> List[str] | None:
     filepaths: List[str] | None = get_filepaths(magnet_hash)
 
     if not filepaths:
-        filepaths = http_cache.real_debrid.get_filelist(magnet_hash)
+        filepaths = http_cache.get_cached_filelist(magnet_hash)
 
     if filepaths:
         files: List[str] = [os.path.basename(f) for f in filepaths]

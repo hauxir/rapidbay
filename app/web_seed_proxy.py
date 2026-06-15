@@ -30,27 +30,32 @@ _READ_TIMEOUT = 30
 _STALE_STATUSES = {401, 403, 404, 410}
 
 _lock = threading.Lock()
-# magnet_hash -> { normalized basename -> (filename, debrid url) }
-_registry: Dict[str, Dict[str, Tuple[str, str]]] = {}
+# (provider, magnet_hash) -> { normalized basename -> (filename, debrid url) }
+# Keyed per provider so Real-Debrid and TorBox can be attached as two separate
+# web seeds for the same torrent and each resolve to its own debrid URL.
+_registry: Dict[Tuple[str, str], Dict[str, Tuple[str, str]]] = {}
 _server: Optional["http.server.ThreadingHTTPServer"] = None
 
 
-def register(magnet_hash: str, filename: str, url: str) -> None:
+def register(provider: str, magnet_hash: str, filename: str, url: str) -> None:
     with _lock:
-        _registry.setdefault(magnet_hash, {})[
+        _registry.setdefault((provider, magnet_hash), {})[
             normalize_filename(os.path.basename(filename))
         ] = (filename, url)
 
 
 def unregister(magnet_hash: str) -> None:
     with _lock:
-        _registry.pop(magnet_hash, None)
+        for key in [k for k in _registry if k[1] == magnet_hash]:
+            _registry.pop(key, None)
 
 
-def _lookup(magnet_hash: str, request_path: str) -> Tuple[str, str] | None:
+def _lookup(
+    provider: str, magnet_hash: str, request_path: str
+) -> Tuple[str, str] | None:
     key = normalize_filename(os.path.basename(unquote(request_path)))
     with _lock:
-        return _registry.get(magnet_hash, {}).get(key)
+        return _registry.get((provider, magnet_hash), {}).get(key)
 
 
 def _open(url: str, range_header: str | None) -> requests.Response | None:
@@ -71,13 +76,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def _serve(self, write_body: bool) -> None:
-        # path is /{magnet_hash}/{in-torrent file path...}
-        parts = self.path.lstrip("/").split("/", 1)
-        if len(parts) != 2:
+        # path is /{provider}/{magnet_hash}/{in-torrent file path...}
+        parts = self.path.lstrip("/").split("/", 2)
+        if len(parts) != 3:
             self._fail(404)
             return
-        magnet_hash, rest = parts
-        entry = _lookup(magnet_hash, rest)
+        provider, magnet_hash, rest = parts
+        entry = _lookup(provider, magnet_hash, rest)
         if entry is None:
             self._fail(404)
             return
@@ -86,12 +91,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         range_header = self.headers.get("Range")
         resp = _open(url, range_header)
 
-        # Link likely expired — re-resolve once and retry.
+        # Link likely expired — re-resolve once (from the same provider) and retry.
         if resp is not None and resp.status_code in _STALE_STATUSES:
             resp.close()
-            fresh = http_cache.get_cached_url(magnet_hash, filename)
+            fresh = http_cache.get_provider_url(provider, magnet_hash, filename)
             if fresh and fresh != url:
-                register(magnet_hash, filename, fresh)
+                register(provider, magnet_hash, filename, fresh)
                 resp = _open(fresh, range_header)
 
         if resp is None:
@@ -155,8 +160,10 @@ def start() -> None:
         log.debug(f"web seed proxy listening on {HOST}:{PORT}")
 
 
-def base_url(magnet_hash: str) -> str:
+def base_url(provider: str, magnet_hash: str) -> str:
     """Directory-form GetRight web seed base. libtorrent appends the torrent
-    name and file path, yielding /{magnet_hash}/{name}/{path}."""
+    name and file path, yielding /{provider}/{magnet_hash}/{name}/{path}. The
+    provider segment makes each debrid backend a distinct web seed URL so
+    libtorrent fans piece requests out across them in parallel."""
     start()
-    return f"http://{HOST}:{PORT}/{magnet_hash}/"
+    return f"http://{HOST}:{PORT}/{provider}/{magnet_hash}/"

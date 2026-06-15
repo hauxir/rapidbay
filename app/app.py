@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import datetime
 import fcntl
@@ -13,6 +14,7 @@ from collections.abc import Generator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator, Dict, List
 
+import diskcache
 import http_cache
 import jackett
 import prowlarr
@@ -22,7 +24,7 @@ import settings
 import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
@@ -95,10 +97,50 @@ class StatusResponse(BaseModel):
 daemon: RapidBayDaemon
 
 
+class _StateChangeNotifier:
+    """Bridges daemon-thread state changes to asyncio waiters (SSE generators)."""
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._event: asyncio.Event | None = None
+
+    def attach(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._event = asyncio.Event()
+
+    def notify(self) -> None:
+        """Wake all waiters. Safe to call from any thread."""
+        loop = self._loop
+        if loop and not loop.is_closed():
+            loop.call_soon_threadsafe(self._wake)
+
+    def _wake(self) -> None:
+        event = self._event
+        if event:
+            self._event = asyncio.Event()
+            event.set()
+
+    async def wait(self, timeout: float) -> None:
+        """Wait until notified or timeout — the timeout doubles as a fallback
+        sampling tick for state changes that have no notification hook
+        (e.g. torrent download progress)."""
+        event = self._event
+        if event is None:
+            await asyncio.sleep(timeout)
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(event.wait(), timeout)
+
+
+_state_notifier = _StateChangeNotifier()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global daemon
+    _state_notifier.attach(asyncio.get_running_loop())
     daemon = RapidBayDaemon()
+    daemon.on_state_change = _state_notifier.notify
     daemon.start()
     try:
         yield
@@ -221,14 +263,7 @@ def _weighted_sort_date_seeds(results: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted(results, key=lambda x: (1+dates.index(getdate(x.get("published")))) * x.get("seeds", 0) * (x.get("seeds",0) * 1.5), reverse=True)
 
 
-def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
-    """Search configured indexer backends (Jackett and/or Prowlarr) and merge results."""
-    results: List[Dict[str, Any]] = []
-    if settings.JACKETT_HOST:
-        results.extend(jackett.search(searchterm))
-    if settings.PROWLARR_HOST:
-        results.extend(prowlarr.search(searchterm))
-
+def _dedup_and_sort(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # Filter out results without magnet or torrent_link
     results = [r for r in results if r.get("magnet") or r.get("torrent_link")]
 
@@ -257,6 +292,16 @@ def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
         deduped.append(r)
 
     return deduped
+
+
+def _indexer_search(searchterm: str) -> List[Dict[str, Any]]:
+    """Search configured indexer backends (Jackett and/or Prowlarr) and merge results."""
+    results: List[Dict[str, Any]] = []
+    if settings.JACKETT_HOST:
+        results.extend(jackett.search(searchterm))
+    if settings.PROWLARR_HOST:
+        results.extend(prowlarr.search(searchterm))
+    return _dedup_and_sort(results)
 
 
 @app.get("/health")
@@ -347,30 +392,142 @@ def _add_status_to_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return results
 
 
+_NO_BACKEND_RESULTS: List[Dict[str, Any]] = [
+    {
+        "title": "NO SEARCH BACKEND CONFIGURED",
+        "seeds": 1337,
+        "magnet": "N/A"
+    },
+    {
+        "title": "Please connect Jackett (JACKETT_HOST/JACKETT_API_KEY) or Prowlarr (PROWLARR_HOST/PROWLARR_API_KEY)",
+        "seeds": 1337,
+        "magnet": "N/A"
+    }
+]
+
+
+def _finalize_results(results: List[Dict[str, Any]], searchterm: str) -> List[Dict[str, Any]]:
+    """Apply final ordering (move-to-bottom strings, trending weighting) and download status."""
+    filtered_results: List[Dict[str, Any]] = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+    rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+
+    if searchterm == "":
+        return _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)
+    return _add_status_to_results(filtered_results + rest)
+
+
 @app.get("/api/search/", response_model=SearchResponse)
 @app.get("/api/search/{searchterm}", response_model=SearchResponse)
 def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
     if settings.JACKETT_HOST or settings.PROWLARR_HOST:
         results: List[Dict[str, Any]] = _indexer_search(searchterm)
     else:
-        results = [
-            {
-                "title": "NO SEARCH BACKEND CONFIGURED",
-                "seeds": 1337,
-                "magnet": "N/A"
-            },
-            {
-                "title": "Please connect Jackett (JACKETT_HOST/JACKETT_API_KEY) or Prowlarr (PROWLARR_HOST/PROWLARR_API_KEY)",
-                "seeds": 1337,
-                "magnet": "N/A"
-            }
-        ]
-    filtered_results: List[Dict[str, Any]] = [r for r in results if not any(s in r.get("title","") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
-    rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
+        results = _NO_BACKEND_RESULTS
+    return {"results": _finalize_results(results, searchterm)}
 
-    if searchterm == "":
-        return {"results": _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)}
-    return {"results": _add_status_to_results(filtered_results + rest)}
+
+def _serialize_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Strip non-JSON-serializable fields (e.g. published datetimes) for SSE payloads."""
+    return [
+        {
+            "title": r.get("title"),
+            "seeds": r.get("seeds", 0),
+            "magnet": r.get("magnet"),
+            "torrent_link": r.get("torrent_link"),
+            "status": r.get("status"),
+        }
+        for r in results
+    ]
+
+
+async def _merged_search_stream(searchterm: str) -> AsyncIterator[List[Dict[str, Any]]]:
+    """Merge result batches from all configured backends as their indexers respond."""
+    queue: asyncio.Queue[List[Dict[str, Any]] | None] = asyncio.Queue()
+
+    async def pump(stream: AsyncIterator[List[Dict[str, Any]]]) -> None:
+        try:
+            async for batch in stream:
+                await queue.put(batch)
+        finally:
+            await queue.put(None)
+
+    streams: List[AsyncIterator[List[Dict[str, Any]]]] = []
+    if settings.JACKETT_HOST:
+        streams.append(jackett.search_stream(searchterm))
+    if settings.PROWLARR_HOST:
+        streams.append(prowlarr.search_stream(searchterm))
+
+    tasks = [asyncio.ensure_future(pump(s)) for s in streams]
+    try:
+        remaining = len(tasks)
+        while remaining:
+            batch = await queue.get()
+            if batch is None:
+                remaining -= 1
+                continue
+            yield batch
+    finally:
+        for task in tasks:
+            task.cancel()
+
+
+_search_stream_cache = diskcache.Cache(settings.CACHE_DIR)
+
+
+def _sse_event(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+# SSE comment line; ignored by EventSource but keeps proxies from timing out the stream
+_SSE_KEEPALIVE = ": ping\n\n"
+
+
+def _sse_response(generate: AsyncIterator[str]) -> StreamingResponse:
+    return StreamingResponse(
+        generate,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Tell nginx not to buffer the stream, otherwise events arrive all at once
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/search_events/")
+@app.get("/api/search_events/{searchterm}")
+async def search_events(searchterm: str = "", _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream search results over SSE: emits a re-ranked snapshot as each indexer responds."""
+
+    event = _sse_event
+
+    async def generate() -> AsyncIterator[str]:
+        if not (settings.JACKETT_HOST or settings.PROWLARR_HOST):
+            yield event({"results": _serialize_results(_NO_BACKEND_RESULTS), "done": True})
+            return
+
+        cache_key = ("search_stream", searchterm)
+        cached: List[Dict[str, Any]] | None = await asyncio.to_thread(
+            _search_stream_cache.get, cache_key
+        )
+        if cached is not None:
+            results = _finalize_results(_dedup_and_sort(cached), searchterm)
+            yield event({"results": _serialize_results(results), "done": True})
+            return
+
+        accumulated: List[Dict[str, Any]] = []
+        async for batch in _merged_search_stream(searchterm):
+            accumulated.extend(batch)
+            snapshot = _finalize_results(_dedup_and_sort(accumulated), searchterm)
+            yield event({"results": _serialize_results(snapshot), "done": False})
+
+        if accumulated:
+            await asyncio.to_thread(
+                _search_stream_cache.set, cache_key, accumulated, 300
+            )
+        yield event({"results": None, "done": True})
+
+    return _sse_response(generate())
 
 
 @app.post("/api/magnet_status/", response_model=MagnetStatusResponse)
@@ -514,8 +671,7 @@ def magnet_download(
     return {"magnet_hash": magnet_hash}
 
 
-@app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
-def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+def _file_status(magnet_hash: str, filename: str) -> Dict[str, Any]:
     status = daemon.get_file_status(magnet_hash, filename)
     # Reset expiration timer when file is accessed
     if status.get("status") == FileStatus.READY:
@@ -523,6 +679,32 @@ def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -
         if os.path.isdir(directory):
             os.utime(directory, None)
     return status
+
+
+@app.get("/api/magnet/{magnet_hash}/{filename}", response_model=FileStatusResponse)
+def file_status(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    return _file_status(magnet_hash, filename)
+
+
+@app.get("/api/magnet_events/{magnet_hash}/{filename}")
+async def file_status_events(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream file status over SSE: pushes an update whenever it changes, closes when ready."""
+
+    async def generate() -> AsyncIterator[str]:
+        last: Dict[str, Any] | None = None
+        while True:
+            status = await asyncio.to_thread(_file_status, magnet_hash, filename)
+            done = status.get("status") == FileStatus.READY
+            if status != last:
+                last = status
+                yield _sse_event({**status, "done": done})
+            else:
+                yield _SSE_KEEPALIVE
+            if done:
+                return
+            await _state_notifier.wait(1)
+
+    return _sse_response(generate())
 
 
 @app.get("/api/next_file/{magnet_hash}/{filename}", response_model=NextFileResponse)
@@ -573,8 +755,7 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
     return {"next_filename": next_filename, "next_magnet": next_magnet}
 
 
-@app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)
-def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+def _files(magnet_hash: str) -> Dict[str, Any]:
     files_list: List[str] | None = _get_files(magnet_hash)
 
     if files_list:
@@ -592,6 +773,27 @@ def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
                 file_statuses[filename] = "downloading"
         return {"files": files_list, "file_statuses": file_statuses}
     return {"files": None}
+
+
+@app.get("/api/magnet/{magnet_hash}/", response_model=FilesResponse)
+def files(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    return _files(magnet_hash)
+
+
+@app.get("/api/magnet_events/{magnet_hash}/")
+async def files_events(magnet_hash: str, _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream the torrent file list over SSE: closes once the file list is available."""
+
+    async def generate() -> AsyncIterator[str]:
+        while True:
+            payload = await asyncio.to_thread(_files, magnet_hash)
+            if payload.get("files") is not None:
+                yield _sse_event({**payload, "done": True})
+                return
+            yield _SSE_KEEPALIVE
+            await _state_notifier.wait(1)
+
+    return _sse_response(generate())
 
 
 @app.get("/error.log")

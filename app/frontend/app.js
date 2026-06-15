@@ -111,6 +111,32 @@
         $.post(url, data, callback);
     }
 
+    // Subscribe to a server-sent-events endpoint. Calls callback per event,
+    // closes on {done: true}, and invokes fallback (e.g. to start polling)
+    // if SSE is unavailable or the stream errors.
+    function subscribe(url, callback, fallback) {
+        if (!window.EventSource) {
+            fallback();
+            return null;
+        }
+        if (!document.cookie) {
+            document.cookie = localStorage.getItem("cookie");
+        }
+        var es = new EventSource(url);
+        es.onmessage = function (e) {
+            var data = JSON.parse(e.data);
+            if (data.done) {
+                es.close();
+            }
+            callback(data);
+        };
+        es.onerror = function () {
+            es.close();
+            fallback();
+        };
+        return es;
+    }
+
     function saveToHistory(magnet) {
         var history = JSON.parse(localStorage.getItem("downloadHistory") || "[]");
         history = history.filter(function (h) {
@@ -748,7 +774,7 @@
     Vue.component("search-results-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null, searchterm: "" };
+            return { results: null, searchterm: "", searching: false };
         },
         methods: {
             back: function () {
@@ -822,21 +848,59 @@
                     }
                 });
             } else {
-                get("/api/search/" + self.searchterm, function (data) {
-                    self.results = data.results;
+                var focusFirstResult = function () {
                     rbsetTimeout(function () {
                         var firstTr = document.getElementsByTagName("tr")[0];
                         if (firstTr) {
                             firstTr.focus();
                         }
                     });
-                });
+                };
+                var fallbackSearch = function () {
+                    get("/api/search/" + self.searchterm, function (data) {
+                        self.results = data.results;
+                        self.searching = false;
+                        focusFirstResult();
+                    });
+                };
+                // Stream results over SSE: render a re-ranked snapshot as
+                // each indexer responds instead of waiting for the slowest.
+                var focused = false;
+                this.searching = true;
+                this.eventsource = subscribe(
+                    "/api/search_events/" + self.searchterm,
+                    function (data) {
+                        if (data.results) {
+                            self.results = data.results;
+                            if (!focused && data.results.length) {
+                                focused = true;
+                                focusFirstResult();
+                            }
+                        }
+                        if (data.done) {
+                            self.searching = false;
+                            self.eventsource = null;
+                        }
+                    },
+                    function () {
+                        self.eventsource = null;
+                        if (self.results === null) {
+                            fallbackSearch();
+                        } else {
+                            self.searching = false;
+                        }
+                    }
+                );
             }
             this.keylistener = keylistener.bind({});
             document.addEventListener("keydown", this.keylistener);
         },
         destroyed: function () {
             document.removeEventListener("keydown", this.keylistener);
+            if (this.eventsource) {
+                this.eventsource.close();
+                this.eventsource = null;
+            }
         },
     });
 
@@ -904,36 +968,59 @@
                 magnet_link: this.params.magnet_link,
             });
             var self = this;
-            (function get_files() {
-                get(
-                    "/api/magnet/" + get_hash(self.params.magnet_link) + "/",
-                    function (data) {
+            var magnet_hash = get_hash(this.params.magnet_link);
+            function applyFiles(data) {
+                self.results = data.files;
+                self.fileStatuses = data.file_statuses || {};
+                rbsetTimeout(function () {
+                    // Find first unwatched file
+                    var firstUnwatched = 0;
+                    for (var i = 0; i < self.results.length; i++) {
+                        if (self.completedFiles.indexOf(self.results[i]) === -1) {
+                            firstUnwatched = i;
+                            break;
+                        }
+                    }
+                    var rows = document.getElementsByTagName("tr");
+                    if (rows[firstUnwatched]) {
+                        rows[firstUnwatched].focus();
+                    }
+                });
+            }
+            function pollFiles() {
+                (function get_files() {
+                    get("/api/magnet/" + magnet_hash + "/", function (data) {
                         if (data.files == null) {
                             rbsetTimeout(get_files, 1000);
                             return;
                         }
-                        self.results = data.files;
-                        self.fileStatuses = data.file_statuses || {};
-                        rbsetTimeout(function () {
-                            // Find first unwatched file
-                            var firstUnwatched = 0;
-                            for (var i = 0; i < self.results.length; i++) {
-                                if (self.completedFiles.indexOf(self.results[i]) === -1) {
-                                    firstUnwatched = i;
-                                    break;
-                                }
-                            }
-                            var rows = document.getElementsByTagName("tr");
-                            if (rows[firstUnwatched]) {
-                                rows[firstUnwatched].focus();
-                            }
-                        });
+                        applyFiles(data);
+                    });
+                })();
+            }
+            // Server pushes the file list the moment metadata resolves
+            this.eventsource = subscribe(
+                "/api/magnet_events/" + magnet_hash + "/",
+                function (data) {
+                    if (data.files) {
+                        applyFiles(data);
                     }
-                );
-            })();
+                    if (data.done) {
+                        self.eventsource = null;
+                    }
+                },
+                function () {
+                    self.eventsource = null;
+                    pollFiles();
+                }
+            );
         },
         destroyed: function () {
             document.removeEventListener("keydown", this.keylistener);
+            if (this.eventsource) {
+                this.eventsource.close();
+                this.eventsource = null;
+            }
         },
     });
 
@@ -971,70 +1058,98 @@
             saveToHistory(this.params.magnet_link);
             var self = this;
             var magnet_hash = get_hash(this.params.magnet_link);
-            (function get_file_info() {
-                get(
-                    "/api/magnet/" +
-                        magnet_hash +
-                        "/" +
-                        encodeURIComponent(self.params.filename),
-                    function (data) {
-                        self.status = data.status;
-                        self.progress = data.progress;
-                        var text = data.status.replace(/_/g, " ");
-                        self.heading =
-                            data.progress === 0 || data.progress
-                                ? text +
-                                  " (" +
-                                  Math.round(data.progress * 100) +
-                                  "%)"
-                                : text;
-                        var subheadingParts = [];
-                        if (data.source === "http") {
-                            subheadingParts.push("HTTP");
-                        } else if (data.peers === 0 || data.peers) {
-                            subheadingParts.push(data.peers + " Peers");
+            function applyFileInfo(data) {
+                self.status = data.status;
+                self.progress = data.progress;
+                var text = data.status.replace(/_/g, " ");
+                self.heading =
+                    data.progress === 0 || data.progress
+                        ? text +
+                          " (" +
+                          Math.round(data.progress * 100) +
+                          "%)"
+                        : text;
+                var subheadingParts = [];
+                if (data.source === "http") {
+                    subheadingParts.push("HTTP");
+                } else if (data.peers === 0 || data.peers) {
+                    subheadingParts.push(data.peers + " Peers");
+                }
+                if (data.download_rate) {
+                    var mbps = (data.download_rate / 1000000).toFixed(2);
+                    subheadingParts.push(mbps + " MB/s");
+                }
+                self.subheading = subheadingParts.length
+                    ? subheadingParts.join(" · ")
+                    : null;
+                self.play_link = data.filename
+                    ? "/play/" +
+                      magnet_hash +
+                      "/" +
+                      encodeURIComponent(data.filename)
+                    : null;
+                self.supported = !!data.supported;
+                if (!window.isSafari) {
+                    self.subtitles = data.subtitles
+                        ? data.subtitles.map(function (sub) {
+                              return {
+                                  language: sub
+                                      .substring(
+                                          sub.lastIndexOf("_") + 1
+                                      )
+                                      .replace(".vtt", ""),
+                                  url:
+                                      "/play/" +
+                                      magnet_hash +
+                                      "/" +
+                                      sub,
+                              };
+                          })
+                        : [];
+                }
+            }
+            function pollFileInfo() {
+                (function get_file_info() {
+                    get(
+                        "/api/magnet/" +
+                            magnet_hash +
+                            "/" +
+                            encodeURIComponent(self.params.filename),
+                        function (data) {
+                            applyFileInfo(data);
+                            if (self.status !== "ready") {
+                                rbsetTimeout(get_file_info, 1000);
+                            }
                         }
-                        if (data.download_rate) {
-                            var mbps = (data.download_rate / 1000000).toFixed(2);
-                            subheadingParts.push(mbps + " MB/s");
-                        }
-                        self.subheading = subheadingParts.length
-                            ? subheadingParts.join(" · ")
-                            : null;
-                        self.play_link = data.filename
-                            ? "/play/" +
-                              magnet_hash +
-                              "/" +
-                              encodeURIComponent(data.filename)
-                            : null;
-			self.supported = !!data.supported
-                        if (!window.isSafari) {
-                            self.subtitles = data.subtitles
-                                ? data.subtitles.map(function (sub) {
-                                      return {
-                                          language: sub
-                                              .substring(
-                                                  sub.lastIndexOf("_") + 1
-                                              )
-                                              .replace(".vtt", ""),
-                                          url:
-                                              "/play/" +
-                                              magnet_hash +
-                                              "/" +
-                                              sub,
-                                      };
-                                  })
-                                : [];
-                        }
-                        if (self.status !== "ready") {
-                            rbsetTimeout(get_file_info, 1000);
-                        }
+                    );
+                })();
+            }
+            // Server pushes status changes (progress, peers, ready) as they happen
+            this.eventsource = subscribe(
+                "/api/magnet_events/" +
+                    magnet_hash +
+                    "/" +
+                    encodeURIComponent(self.params.filename),
+                function (data) {
+                    applyFileInfo(data);
+                    if (data.done) {
+                        self.eventsource = null;
                     }
-                );
-            })();
+                },
+                function () {
+                    self.eventsource = null;
+                    if (self.status !== "ready") {
+                        pollFileInfo();
+                    }
+                }
+            );
         },
         destroyed: function () {
             document.removeEventListener("keydown", this.keylistener);
+            if (this.eventsource) {
+                this.eventsource.close();
+                this.eventsource = null;
+            }
         },
     });
 

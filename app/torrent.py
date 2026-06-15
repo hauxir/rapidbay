@@ -209,6 +209,19 @@ class TorrentClient:
             prioritize_files(h, file_priorities)
             self._write_filelist_to_disk(magnet_link)
 
+    def add_web_seed(self, magnet_hash: str, url: str) -> None:
+        """Attach a GetRight-style (BEP19) web seed to a torrent.
+
+        For single-file torrents libtorrent uses the URL directly as the file
+        source, downloading and hash-verifying pieces from it alongside (or
+        instead of) peers. If the web seed errors or serves mismatching bytes,
+        libtorrent disables it and falls back to peers on its own.
+        """
+        with self.locks.lock(magnet_hash):
+            h = self.torrents.get(magnet_hash)
+            if h is not None:
+                h.add_url_seed(url)
+
     def remove_torrent(self, magnet_hash: str, remove_files: bool = False) -> None:
         try:
             h = self.torrents[magnet_hash]

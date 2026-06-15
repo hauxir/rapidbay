@@ -94,7 +94,10 @@ def memoize(expire: int = 300) -> Callable[[Callable[..., Any]], Callable[..., A
         cache = diskcache.Cache(settings.CACHE_DIR)
 
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = (args, frozenset(kwargs.items()))
+            # Include the function identity in the key: all memoized functions
+            # share the same cache directory, so e.g. jackett.search("x") and
+            # prowlarr.search("x") would otherwise collide.
+            key = (func.__module__, func.__qualname__, args, frozenset(kwargs.items()))
             if key in cache:
                 return cache[key]
             result = func(*args, **kwargs)

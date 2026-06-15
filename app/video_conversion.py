@@ -529,10 +529,18 @@ def _detect_audio_codec(filepath: str) -> str:
 class VideoConverter:
     def __init__(self) -> None:
         self.file_conversions: Dict[str, bool] = {}
+        # Optional hook fired when a conversion starts or finishes
+        self.on_state_change: Callable[[], None] | None = None
+
+    def _notify(self) -> None:
+        callback = self.on_state_change
+        if callback:
+            callback()
 
     @threaded
     @log.catch_and_log_exceptions
     def convert_file(self, input_filepath: str, output_filepath: str) -> None:
+        notify_on_exit = False
         try:
 
             if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
@@ -541,6 +549,8 @@ class VideoConverter:
                 return
 
             self.file_conversions[output_filepath] = True
+            notify_on_exit = True
+            self._notify()
 
             output_dir: str = os.path.dirname(output_filepath)
             os.makedirs(output_dir, exist_ok=True)
@@ -577,6 +587,8 @@ class VideoConverter:
         finally:
             with contextlib.suppress(KeyError):
                 del self.file_conversions[output_filepath]
+            if notify_on_exit:
+                self._notify()
 
 
 class HLSStreamer:

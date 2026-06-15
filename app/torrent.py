@@ -6,7 +6,7 @@ import os
 import random
 import shutil
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import bencodepy
 import libtorrent
@@ -150,6 +150,8 @@ class TorrentClient:
         self.filelist_dir: str | None = filelist_dir
         self.download_dir: str | None = download_dir
         self.torrents_dir: str | None = torrents_dir
+        # Optional hook fired when the filelist is written (metadata resolved)
+        self.on_state_change: Callable[[], None] | None = None
 
     def process_alerts(self) -> None:
         """Process session alerts for better torrent monitoring"""
@@ -216,6 +218,19 @@ class TorrentClient:
             if settings.HLS_STREAMING:
                 h.set_flags(libtorrent.torrent_flags.sequential_download)
             self._write_filelist_to_disk(magnet_link)
+
+    def add_web_seed(self, magnet_hash: str, url: str) -> None:
+        """Attach a GetRight-style (BEP19) web seed to a torrent.
+
+        For single-file torrents libtorrent uses the URL directly as the file
+        source, downloading and hash-verifying pieces from it alongside (or
+        instead of) peers. If the web seed errors or serves mismatching bytes,
+        libtorrent disables it and falls back to peers on its own.
+        """
+        with self.locks.lock(magnet_hash):
+            h = self.torrents.get(magnet_hash)
+            if h is not None:
+                h.add_url_seed(url)
 
     def remove_torrent(self, magnet_hash: str, remove_files: bool = False) -> None:
         try:
@@ -369,3 +384,6 @@ class TorrentClient:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "w") as f:
             f.write(json.dumps(result))
+        callback = self.on_state_change
+        if callback:
+            callback()

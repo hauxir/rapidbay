@@ -148,6 +148,21 @@ body {
     animation: rotate 5s linear infinite;
 }
 
+.search-progress {
+    display: flex;
+    justify-content: center;
+    padding: 10px 0 20px;
+}
+
+.search-progress-spinner {
+    width: 22px;
+    height: 22px;
+    border: 3px solid #fff;
+    border-top: 3px solid #ccc;
+    border-radius: 50%;
+    animation: rotate 1.5s linear infinite;
+}
+
 @keyframes rotate {
     100% {
         transform: rotate(360deg);

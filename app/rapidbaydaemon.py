@@ -241,19 +241,23 @@ class RapidBayDaemon:
         # running a parallel HTTP download. libtorrent stays the sole writer,
         # hash-verifies every piece, and falls back to peers on its own — so
         # there's no urlretrieve/libtorrent write race, no priority-0 dance, and
-        # no manual failover. Both single- and multi-file torrents go through the
+        # no manual failover. When more than one debrid provider has the file,
+        # each is attached as its own web seed and libtorrent fans piece requests
+        # out across them in parallel, recombining into the one verified file.
+        # Both single- and multi-file torrents go through the
         # local reverse-proxy shim: it maps each in-torrent file path back to its
         # debrid URL and streams the bytes via tinyproxy (so the download takes
         # the same egress/IP as the debrid API calls). The shim's directory-form
         # base URL works for single-file torrents too — libtorrent just appends
         # the lone file name.
         if h is not None and filename not in self._web_seeded.get(magnet_hash, set()):
-            cached_url = http_cache.get_cached_url(magnet_hash, filename)
-            if cached_url:
-                web_seed_proxy.register(magnet_hash, filename, cached_url)
+            cached_urls = http_cache.get_cached_urls(magnet_hash, filename)
+            for provider, cached_url in cached_urls:
+                web_seed_proxy.register(provider, magnet_hash, filename, cached_url)
                 self.torrent_client.add_web_seed(
-                    magnet_hash, web_seed_proxy.base_url(magnet_hash)
+                    magnet_hash, web_seed_proxy.base_url(provider, magnet_hash)
                 )
+            if cached_urls:
                 self._web_seeded.setdefault(magnet_hash, set()).add(filename)
 
         if download_subtitles:

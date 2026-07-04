@@ -1,4 +1,3 @@
-import json
 import os
 from typing import Any, Dict, List, Tuple
 from urllib.parse import unquote
@@ -6,7 +5,6 @@ from urllib.parse import unquote
 import common
 import log
 import requests
-import settings
 
 TB_TOKEN = os.environ.get("TB_TOKEN")
 
@@ -135,13 +133,6 @@ def get_filelist(magnet_hash: str) -> List[str] | None:
             for f in files
             if isinstance(f, dict) and (f.get("name") or f.get("path"))
         ]
-
-        # Write to cache file only if we got results
-        if file_paths:
-            cache_filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
-            os.makedirs(settings.FILELIST_DIR, exist_ok=True)
-            with open(cache_filename, 'w') as f:
-                json.dump(file_paths, f)
 
         return file_paths
 

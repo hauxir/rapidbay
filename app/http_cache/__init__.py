@@ -1,5 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple
+
+import settings
 
 from . import real_debrid, torbox
 
@@ -45,10 +49,34 @@ def get_cached_url(magnet_hash: str, filename: str) -> str | None:
 
     return None
 
-def get_cached_filelist(magnet_hash: str) -> List[str] | None:
-    for provider in _providers:
-        filelist = provider.get_filelist(magnet_hash)
-        if filelist:
-            return filelist
+def _write_filelist_to_disk(magnet_hash: str, filelist: List[str]) -> None:
+    """Cache the filelist so the next request short-circuits before any network
+    call. Written via a temp file + atomic replace so concurrent requests for the
+    same hash can't observe a half-written file."""
+    os.makedirs(settings.FILELIST_DIR, exist_ok=True)
+    cache_filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
+    tmp_filename = f"{cache_filename}.{os.getpid()}.tmp"
+    with open(tmp_filename, "w") as f:
+        json.dump(filelist, f)
+    os.replace(tmp_filename, cache_filename)
 
-    return None
+
+def get_cached_filelist(magnet_hash: str) -> List[str] | None:
+    """Query every provider concurrently and return the first non-empty filelist,
+    so adding a second provider doesn't add it to the critical-path latency. The
+    losing provider's request is left to finish in the background (it has no side
+    effects once we've returned)."""
+    executor = ThreadPoolExecutor(max_workers=len(_providers))
+    try:
+        futures = [
+            executor.submit(provider.get_filelist, magnet_hash)
+            for provider in _providers
+        ]
+        for future in as_completed(futures):
+            filelist = future.result()
+            if filelist:
+                _write_filelist_to_disk(magnet_hash, filelist)
+                return filelist
+        return None
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)

@@ -1,4 +1,3 @@
-import json
 import os
 from typing import Any, Dict, List, Tuple
 from urllib.parse import unquote
@@ -6,11 +5,15 @@ from urllib.parse import unquote
 import common
 import log
 import requests
-import settings
 
 TB_TOKEN = os.environ.get("TB_TOKEN")
 
 API_BASE = "https://api.torbox.app/v1/api"
+
+# Bound every provider call so a hung request can't keep a fan-out thread alive
+# indefinitely (get_cached_filelist returns on the first winner and leaves the
+# others running in the background).
+REQUEST_TIMEOUT = 30
 
 
 def _get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -18,6 +21,7 @@ def _get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
         f"{API_BASE}{path}",
         params=params,
         headers={"authorization": f"Bearer {TB_TOKEN}"},
+        timeout=REQUEST_TIMEOUT,
     )
     if not (200 <= response.status_code < 300):
         log.debug(f"TorBox GET failed: {path} - Status: {response.status_code}")
@@ -31,6 +35,7 @@ def _post(path: str, data: Dict[str, str]) -> Dict[str, Any] | None:
             f"{API_BASE}{path}",
             data,
             headers={"authorization": f"Bearer {TB_TOKEN}"},
+            timeout=REQUEST_TIMEOUT,
         )
         if not (200 <= response.status_code < 300):
             log.debug(f"TorBox POST failed: {path} - Status: {response.status_code}")
@@ -135,13 +140,6 @@ def get_filelist(magnet_hash: str) -> List[str] | None:
             for f in files
             if isinstance(f, dict) and (f.get("name") or f.get("path"))
         ]
-
-        # Write to cache file only if we got results
-        if file_paths:
-            cache_filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
-            os.makedirs(settings.FILELIST_DIR, exist_ok=True)
-            with open(cache_filename, 'w') as f:
-                json.dump(file_paths, f)
 
         return file_paths
 

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import tempfile
@@ -66,10 +67,8 @@ def _write_filelist_to_disk(magnet_hash: str, filelist: List[str]) -> None:
         os.replace(tmp_filename, cache_filename)
     except BaseException:
         # Best-effort cleanup so a failed write doesn't leak the temp file.
-        try:
+        with contextlib.suppress(OSError):
             os.remove(tmp_filename)
-        except OSError:
-            pass
         raise
 
 

@@ -12,6 +12,7 @@
         <script src="/lib/jquery-ui-focusable-1.13.2.min.js"></script>
         <script src="/lib/vue.2.5.3.min.js"></script>
         <script src="/lib/navigo.6.0.2.min.js"></script>
+        <script src="/lib/hls.1.5.18.min.js"></script>
         <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
         <script src="/lib/chromecastjs.js"></script>
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
@@ -155,7 +156,7 @@
 
         <script type="text/x-template" id="download-screen-template">
             <div class="player_wrapper" v-if="play_link">
-	      <player :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename"/>
+	      <player :key="play_link.split('?')[0]" :supported="supported" :url="play_link" :subtitles="subtitles" :back="back" :magnet="params.magnet_link" :filename="params.filename" :download-progress="downloadProgress" :download-status="status" :on-stream-error="onStreamError"/>
             </div>
             <div v-else class="root">
               <div class="topbar topbar-flex">
@@ -166,6 +167,7 @@
                   {{params.filename}}
                   </div>
                   <div class="buttons">
+                      <button v-if="canStream && !streamRequested" @click="startStream()" class="btn btn-dark" title="Stream while downloading">&#9654;</button>
                       <favorite-button :magnet="params.magnet_link" :filename="params.filename"/>
                       <fullscreen-button/>
                   </div>
@@ -177,6 +179,7 @@
                       :subheading="subheading"
                       :progress="progress"
                   />
+                  <div v-if="streamMessage" class="stream-message">{{streamMessage}}</div>
               </div>
             </div>
         </script>
@@ -192,8 +195,12 @@
                                {{decodeURIComponent(url.split("/").pop())}}
                            </a>
                        </div>
+                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
+                           {{Math.round(downloadProgress * 100)}}%
+                           <span v-if="downloadStatusLabel" class="download-progress-tooltip">{{downloadStatusLabel}}</span>
+                       </span>
                        <div class="buttons" v-if="supported">
-                           <chromecast-button v-if="url && isDesktop && isChrome"/>
+                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>
             	<caption-button v-if="url"/>
                            <favorite-button :magnet="magnet" :filename="filename"/>
                            <fullscreen-button/>
@@ -203,7 +210,7 @@
                 poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                 disablepictureinpicture
                        controlslist="nodownload noplaybackrate"
-                v-if="supported && url" :src="url" controls autoplay playsinline tabindex="0"
+                v-if="supported && url" controls autoplay playsinline tabindex="0"
             >
                        <track v-for="subtitle in subtitles"
                            :label="subtitle.language" kind="subtitles"
@@ -220,7 +227,7 @@
         </script>
 
         <script type="text/x-template" id="caption-button-template">
-            <button v-if="tracks.length > 0" class="btn btn-dark" @click="flipCaptions()">{{currentCaption || "&#128172;"}}</button>
+            <button v-if="trackCount > 0" class="btn btn-dark" @click="flipCaptions()">{{currentCaption || "&#128172;"}}</button>
         </script>
 
         <script type="text/x-template" id="chromecast-button-template">

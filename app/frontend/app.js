@@ -878,6 +878,14 @@
                             }
                         }
                         if (data.done) {
+                            // Stream ended without ever delivering a snapshot
+                            // (no indexer returned anything): settle to an
+                            // empty list so the spinner stops and the empty
+                            // state renders instead of loading forever.
+                            if (self.results === null) {
+                                self.results = data.results || [];
+                                focusFirstResult();
+                            }
                             self.searching = false;
                             self.eventsource = null;
                         }

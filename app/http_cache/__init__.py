@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple
 
@@ -55,10 +56,21 @@ def _write_filelist_to_disk(magnet_hash: str, filelist: List[str]) -> None:
     same hash can't observe a half-written file."""
     os.makedirs(settings.FILELIST_DIR, exist_ok=True)
     cache_filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
-    tmp_filename = f"{cache_filename}.{os.getpid()}.tmp"
-    with open(tmp_filename, "w") as f:
-        json.dump(filelist, f)
-    os.replace(tmp_filename, cache_filename)
+    # A unique temp file (in the same dir, so os.replace stays atomic) — a
+    # PID-only name would collide when two threads cache the same hash at once,
+    # letting their interleaved writes publish a half-written file.
+    fd, tmp_filename = tempfile.mkstemp(dir=settings.FILELIST_DIR, prefix=f"{magnet_hash}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(filelist, f)
+        os.replace(tmp_filename, cache_filename)
+    except BaseException:
+        # Best-effort cleanup so a failed write doesn't leak the temp file.
+        try:
+            os.remove(tmp_filename)
+        except OSError:
+            pass
+        raise
 
 
 def get_cached_filelist(magnet_hash: str) -> List[str] | None:

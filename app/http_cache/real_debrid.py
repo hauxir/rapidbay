@@ -8,11 +8,17 @@ import requests
 
 RD_TOKEN = os.environ.get("RD_TOKEN")
 
+# Bound every provider call so a hung request can't keep a fan-out thread alive
+# indefinitely (get_cached_filelist returns on the first winner and leaves the
+# others running in the background).
+REQUEST_TIMEOUT = 30
+
 
 def _get(path: str) -> Dict[str, Any]:
     response = requests.get(
         f"https://api.real-debrid.com/rest/1.0{path}",
         headers={"authorization": f"Bearer {RD_TOKEN}"},
+        timeout=REQUEST_TIMEOUT,
     )
     if not (200 <= response.status_code < 300):
         log.debug(f"Real Debrid GET failed: {path} - Status: {response.status_code}")
@@ -26,6 +32,7 @@ def _post(path: str, data: Dict[str, str]) -> Dict[str, Any] | None:
             f"https://api.real-debrid.com/rest/1.0{path}",
             data,
             headers={"authorization": f"Bearer {RD_TOKEN}"},
+            timeout=REQUEST_TIMEOUT,
         )
         if not (200 <= response.status_code < 300):
             log.debug(f"Real Debrid POST failed: {path} - Status: {response.status_code}")

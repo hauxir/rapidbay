@@ -774,7 +774,7 @@
     Vue.component("search-results-screen", {
         mixins: [rbmixin],
         data: function () {
-            return { results: null, searchterm: "", searching: false };
+            return { results: null, searchterm: "" };
         },
         methods: {
             back: function () {
@@ -859,14 +859,12 @@
                 var fallbackSearch = function () {
                     get("/api/search/" + self.searchterm, function (data) {
                         self.results = data.results;
-                        self.searching = false;
                         focusFirstResult();
                     });
                 };
                 // Stream results over SSE: render a re-ranked snapshot as
                 // each indexer responds instead of waiting for the slowest.
                 var focused = false;
-                this.searching = true;
                 this.eventsource = subscribe(
                     "/api/search_events/" + self.searchterm,
                     function (data) {
@@ -886,7 +884,6 @@
                                 self.results = data.results || [];
                                 focusFirstResult();
                             }
-                            self.searching = false;
                             self.eventsource = null;
                         }
                     },
@@ -894,8 +891,6 @@
                         self.eventsource = null;
                         if (self.results === null) {
                             fallbackSearch();
-                        } else {
-                            self.searching = false;
                         }
                     }
                 );

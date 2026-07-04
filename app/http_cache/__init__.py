@@ -2,8 +2,10 @@ import contextlib
 import json
 import os
 import tempfile
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import settings
 
@@ -17,6 +19,19 @@ from . import real_debrid, torbox
 # often.
 _providers = [torbox, real_debrid]
 _by_name = {p.__name__.rsplit(".", 1)[-1]: p for p in _providers}
+
+# Negative cache for get_cached_filelist: hashes that recently resolved to "no
+# cached filelist on any provider". A browse view polls get_cached_filelist on a
+# loop, and every miss otherwise re-queries each provider — where each
+# provider's get_filelist re-adds the magnet to that account as a side effect
+# (Real-Debrid addMagnet, TorBox createtorrent — the latter also queues a
+# server-side download). Remembering misses for a short TTL keeps a polling
+# browser from hammering the debrid APIs and re-adding uncached magnets every
+# tick. Successful lookups need no entry here: they get written to the on-disk
+# filelist cache, which short-circuits the whole call earlier up the stack.
+_NEGATIVE_TTL = 60.0  # seconds
+_negative_cache: Dict[str, float] = {}
+_negative_lock = threading.Lock()
 
 
 def get_cached_urls(magnet_hash: str, filename: str) -> List[Tuple[str, str]]:
@@ -77,6 +92,14 @@ def get_cached_filelist(magnet_hash: str) -> List[str] | None:
     so adding a second provider doesn't add it to the critical-path latency. The
     losing provider's request is left to finish in the background (it has no side
     effects once we've returned)."""
+    now = time.monotonic()
+    with _negative_lock:
+        # Prune expired misses so the cache can't grow unbounded across hashes.
+        for h in [h for h, ts in _negative_cache.items() if now - ts >= _NEGATIVE_TTL]:
+            del _negative_cache[h]
+        if magnet_hash in _negative_cache:
+            return None
+
     executor = ThreadPoolExecutor(max_workers=len(_providers))
     try:
         futures = [
@@ -88,6 +111,10 @@ def get_cached_filelist(magnet_hash: str) -> List[str] | None:
             if filelist:
                 _write_filelist_to_disk(magnet_hash, filelist)
                 return filelist
+        # No provider had it cached — remember the miss so a polling caller
+        # doesn't re-add the magnet on every tick until it's actually cached.
+        with _negative_lock:
+            _negative_cache[magnet_hash] = now
         return None
     finally:
         executor.shutdown(wait=False, cancel_futures=True)

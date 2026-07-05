@@ -47,7 +47,9 @@ def _resolve_subtitle_language(raw: str) -> Tuple[str, str]:
         ("name", code.title()),
     ):
         try:
-            lang = _iso639_languages.get(**{key: value})
+            # iso639's Language object exposes .part1/.part2b/.name dynamically;
+            # its type stub doesn't declare them, so treat it as Any.
+            lang: Any = _iso639_languages.get(**{key: value})
         except KeyError:
             continue
         return (lang.part1 or lang.part2b or code), lang.name

@@ -144,5 +144,8 @@ def get_filelist(magnet_hash: str) -> List[str] | None:
         return file_paths
 
     except Exception as e:
+        # Surface the error rather than masking it as an empty result, so
+        # get_cached_filelist can tell a transient failure apart from a genuine
+        # "not cached" and avoid poisoning its negative cache with the former.
         log.debug(f"TorBox filelist error for {magnet_hash}: {str(e)}")
-        return None
+        raise

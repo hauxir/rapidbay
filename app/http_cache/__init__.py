@@ -106,15 +106,26 @@ def get_cached_filelist(magnet_hash: str) -> List[str] | None:
             executor.submit(provider.get_filelist, magnet_hash)
             for provider in _providers
         ]
+        had_error = False
         for future in as_completed(futures):
-            filelist = future.result()
+            try:
+                filelist = future.result()
+            except Exception:
+                # A provider errored (network/API failure) rather than reporting
+                # a definitive "not cached". Don't count this toward a miss —
+                # let the next poll retry instead of freezing the outage in.
+                had_error = True
+                continue
             if filelist:
                 _write_filelist_to_disk(magnet_hash, filelist)
                 return filelist
-        # No provider had it cached — remember the miss so a polling caller
-        # doesn't re-add the magnet on every tick until it's actually cached.
-        with _negative_lock:
-            _negative_cache[magnet_hash] = now
+        # Only remember a miss when every provider answered without erroring, so
+        # a transient outage isn't cached as "not cached" for the whole TTL.
+        # Timestamp the miss now (not at entry) so the full TTL runs from the
+        # confirmed miss rather than being eaten by slow provider calls.
+        if not had_error:
+            with _negative_lock:
+                _negative_cache[magnet_hash] = time.monotonic()
         return None
     finally:
         executor.shutdown(wait=False, cancel_futures=True)

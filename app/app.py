@@ -96,7 +96,6 @@ class StatusResponse(BaseModel):
     session_torrents: List[str]
     conversions: Any
     hls_streams: Any
-    http_downloads: Any
 
 # Global daemon instance
 daemon: RapidBayDaemon
@@ -823,12 +822,14 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "filelist_dir": path_hierarchy(settings.FILELIST_DIR),
         "torrents_dir": path_hierarchy(settings.TORRENTS_DIR),
         "downloads_dir": path_hierarchy(settings.DOWNLOAD_DIR),
-        "subtitle_downloads": daemon.subtitle_downloads,
+        # Snapshot the live worker-thread dicts (dict()/list()) so response
+        # serialization can't trip over a concurrent mutation from a daemon or
+        # conversion thread ("dictionary changed size during iteration").
+        "subtitle_downloads": dict(daemon.subtitle_downloads),
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
-        "conversions": daemon.video_converter.file_conversions,
+        "conversions": dict(daemon.video_converter.file_conversions),
         "hls_streams": list(daemon.hls_streamer.active_streams.keys()),
-        "http_downloads": daemon.http_downloader.downloads,
     }
 
 

@@ -17,8 +17,7 @@ import subtitles
 import torrent
 import video_conversion
 import web_seed_proxy
-from common import normalize_filename, threaded
-from http_downloader import HttpDownloader
+from common import threaded
 from subtitles import get_subtitle_language
 
 
@@ -28,20 +27,6 @@ def get_filepaths(magnet_hash: str) -> List[str] | None:
         with open(filename) as f:
             data = f.read().replace("\n", "")
             return json.loads(data)
-    return None
-
-
-def _get_download_path(magnet_hash: str, filename: str) -> str | None:
-    filepaths = get_filepaths(magnet_hash)
-    if filepaths:
-        normalized = normalize_filename(filename)
-        torrent_path = next(
-            (fp for fp in filepaths if normalize_filename(fp).endswith(normalized)),
-            None,
-        )
-        if torrent_path is None:
-            return None
-        return os.path.join(f"{settings.DOWNLOAD_DIR}{magnet_hash}", torrent_path)
     return None
 
 
@@ -208,23 +193,15 @@ class RapidBayDaemon:
         )
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
         self.hls_streamer: video_conversion.HLSStreamer = video_conversion.HLSStreamer()
-        # Files we're fetching via HTTP (Real-Debrid). Tracked separately from
-        # libtorrent's `file_priorities`, because we set those files to
-        # priority 0 to keep libtorrent from writing the same path in parallel
-        # — the daemon's lifecycle code uses `priority != 0` as a proxy for
-        # "user-selected", which would otherwise drop these files from
-        # `active_filenames` and remove the torrent (with files) mid-download.
-        self._http_served: Dict[str, Set[str]] = {}
         self._subtitle_gate: Lock = Lock()
-        # Files handed to libtorrent as web seeds (BEP19). Unlike _http_served
-        # these keep normal libtorrent priority — libtorrent is the sole writer
-        # and fetches the file from the web seed and/or peers transparently.
-        # Tracked only so get_file_status can report the source as HTTP.
+        # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
+        # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
+        # the file from the web seed and/or peers transparently; tracked only so
+        # get_file_status can report the source as HTTP.
         self._web_seeded: Dict[str, Set[str]] = {}
         self._stop_event: Event = Event()
         self.thread: Thread = Thread(target=self._loop_wrapper, args=())
         self.thread.daemon = True
-        self.http_downloader: HttpDownloader = HttpDownloader()
         # Optional hook fired (from daemon/worker threads) whenever a discrete
         # state transition happens — filelist written, conversion started or
         # finished, file copied to output — so SSE subscribers can re-sample
@@ -252,10 +229,9 @@ class RapidBayDaemon:
             result[magnet_hash] = {}
             files = torrent.get_torrent_info(h).files()
             file_priorities = h.file_priorities()
-            http_served_names = self._http_served.get(magnet_hash, set())
             for priority, f in zip(list(file_priorities), list(files), strict=False):
                 filename = os.path.basename(f.path)
-                if priority == 0 and filename not in http_served_names:
+                if priority == 0:
                     continue
                 result[magnet_hash][filename] = self.get_file_status(
                     magnet_hash, filename
@@ -288,14 +264,10 @@ class RapidBayDaemon:
             return
 
         # Add to libtorrent first so the on-disk filelist is rewritten with
-        # libtorrent's view of file paths before we compute the HTTP target.
-        # An RD-supplied filelist can list a file as `inner.mkv` while
+        # libtorrent's view of file paths before we resolve the debrid file
+        # below: an RD-supplied filelist can list a file as `inner.mkv` while
         # libtorrent stores it at `<torrent_name>/inner.mkv` for multi-file
-        # torrents. If the HTTP download key was computed from the RD view
-        # but get_file_status later resolves the path against libtorrent's
-        # view, the http_progress lookup misses and the file stalls in
-        # DOWNLOADING — libtorrent's own progress is pinned at 0 once we
-        # set this file's priority to 0 below.
+        # torrents, and the web-seed registration keys off libtorrent's path.
         self.torrent_client.download_file(magnet_link, filename)
 
         h = self.torrent_client.torrents.get(magnet_hash)
@@ -409,15 +381,6 @@ class RapidBayDaemon:
             return {'status': FileStatus.FILE_NOT_FOUND, **hls_info}
         download_progress = h.file_progress()[i] / f.size
 
-        download_path = _get_download_path(magnet_hash, filename)
-        http_progress = 0
-
-        if download_path:
-            http_progress = self.http_downloader.downloads.get(download_path, 0)
-
-            # If HTTP download is complete, trust that over torrent progress
-            download_progress = 1 if http_progress == 1 else max(http_progress, download_progress)
-
         if download_progress == 1:
             if filename_extension[1:] in settings.VIDEO_EXTENSIONS:
                 all_torrent_subtitles_downloaded = all(
@@ -437,12 +400,7 @@ class RapidBayDaemon:
             return {'status': FileStatus.DOWNLOAD_FINISHED, **hls_info}
         torrent_status = h.status()
         download_rate = torrent_status.download_rate
-        if download_path:
-            download_rate += self.http_downloader.download_rates.get(download_path, 0)
-        is_http = (
-            filename in self._http_served.get(magnet_hash, set())
-            or filename in self._web_seeded.get(magnet_hash, set())
-        )
+        is_http = filename in self._web_seeded.get(magnet_hash, set())
         return {
             'status': FileStatus.DOWNLOADING,
             'progress': download_progress,
@@ -504,12 +462,10 @@ class RapidBayDaemon:
         remux_mdat = None
         is_range_downloaded = None
         if not video_conversion.is_pipe_streamable(filepath, available_bytes):
-            # Not directly pipeable. A moov-at-end MP4 can still stream via the
-            # faststart remux — but only for torrent-backed files: HTTP
-            # (Real-Debrid) writes strictly sequentially, so the trailing moov
-            # arrives last and remux would buy nothing.
-            is_http = filename in self._http_served.get(magnet_hash, set())
-            remux_mdat = None if is_http else video_conversion.mp4_remux_layout(filepath, available_bytes)
+            # Not directly pipeable, but a moov-at-end MP4 can still stream via
+            # the faststart remux: rush the trailing moov, relocate it ahead of
+            # mdat, and feed the synthesized faststart stream to ffmpeg.
+            remux_mdat = video_conversion.mp4_remux_layout(filepath, available_bytes)
             if remux_mdat is None:
                 return {"started": False, "reason": "unsupported_format"}
             # Rush the trailing moov region so the remux can start promptly.
@@ -542,28 +498,13 @@ class RapidBayDaemon:
         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
         if video_conversion.is_pipe_streamable(filepath, available):
             return True
-        # moov-at-end MP4: streamable via the faststart remux (torrent files
-        # only — HTTP-served files download the trailing moov last).
-        if filename in self._http_served.get(magnet_hash, set()):
-            return False
+        # moov-at-end MP4: streamable via the faststart remux.
         return video_conversion.mp4_remux_layout(filepath, available) is not None
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
-        """Get contiguous bytes available from start of file for pipe feeding."""
-        best = 0
-        # Piece-based sequential bytes — only counts verified contiguous pieces from file start
-        best = max(best, self.torrent_client.get_sequential_bytes(magnet_hash, filename))
-        # HTTP download progress — HTTP writes sequentially to file, so this is truly sequential
-        h = self.torrent_client.torrents.get(magnet_hash)
-        if h and h.has_metadata():
-            i, f = torrent.get_index_and_file_from_files(h, filename)
-            if i is not None and f is not None:
-                download_path = _get_download_path(magnet_hash, filename)
-                if download_path:
-                    http_progress = self.http_downloader.downloads.get(download_path, 0)
-                    if http_progress > 0:
-                        best = max(best, int(http_progress * f.size))
-        return best
+        """Contiguous bytes available from the start of the file for pipe
+        feeding — the count of verified contiguous pieces from file start."""
+        return self.torrent_client.get_sequential_bytes(magnet_hash, filename)
 
     def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:
         # Test-and-set the dedup marker synchronously so racing callers (heartbeats
@@ -620,13 +561,10 @@ class RapidBayDaemon:
         if not h:
             return
         file_priorities = h.file_priorities()
-        http_served_names = self._http_served.get(magnet_hash, set())
-        # Include priority-0 files that we're HTTP-serving — see _http_served's
-        # comment on RapidBayDaemon.
         files = [
             f
             for priority, f in zip(file_priorities, torrent.get_torrent_info(h).files(), strict=False)
-            if priority != 0 or os.path.basename(f.path) in http_served_names
+            if priority != 0
         ]
         filenames = [os.path.basename(f.path) for f in files]
         video_filenames = [
@@ -647,13 +585,11 @@ class RapidBayDaemon:
             # yanks the input out from under them.
             self.hls_streamer.stop_under(output_dir)
             self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
-            self._http_served.pop(magnet_hash, None)
             self._web_seeded.pop(magnet_hash, None)
             web_seed_proxy.unregister(magnet_hash)
             for f in files:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                 self.subtitle_downloads.pop(filepath, None)
-                self.http_downloader.clear(filepath)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
             video_conversion.clear_master_playlist_cache_under(output_dir)
@@ -661,23 +597,6 @@ class RapidBayDaemon:
             # viewers may still be streaming from them. They'll age out via
             # _remove_old_files_and_directories like any other output file.
             return
-
-        # Iterate over the unfiltered torrent files so `file_progress` indexing
-        # matches libtorrent's view; `files` above is filtered. Skip
-        # HTTP-served files here — their libtorrent progress is pinned at 0
-        # (we set priority 0), so the >=0.99 check will never fire and the
-        # entry would be cleared while the daemon's state machine still
-        # depends on http_progress == 1 to advance past DOWNLOADING. It's
-        # cleared on the WAITING_FOR_CONVERSION transition below instead.
-        file_progress = h.file_progress()
-        for i, f in enumerate(torrent.get_torrent_info(h).files()):
-            if file_priorities[i] == 0:
-                continue
-            filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-            if self.http_downloader.downloads.get(filepath, -1) == 1:
-                torrent_progress = file_progress[i] / f.size if f.size > 0 else 0
-                if torrent_progress >= 0.99:
-                    self.http_downloader.clear(filepath)
 
         output_dir = _get_output_dir(magnet_hash)
 
@@ -699,7 +618,6 @@ class RapidBayDaemon:
                 if not os.path.isfile(filepath):
                     log.debug(f"File not found for conversion, skipping: {filepath}")
                     continue
-                self.http_downloader.clear(filepath)
                 os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
                 self.video_converter.convert_file(filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
@@ -718,40 +636,6 @@ class RapidBayDaemon:
         # Process libtorrent session alerts for better monitoring
         self.torrent_client.process_alerts()
 
-        # Fail over to libtorrent when an HTTP download errored: restore the
-        # file's priority on libtorrent's handle and drop it from
-        # `_http_served` so peers can finish the download. Keep the failure
-        # entry only if it matched an `_http_served` row whose recovery raised
-        # — that's the case worth retrying. Recovered, or orphaned (no
-        # matching row, or the torrent is already gone), → discard.
-        for failed_path in list(self.http_downloader.failures):
-            matched = False
-            recovery_failed = False
-            for mh, names in list(self._http_served.items()):
-                for fn in list(names):
-                    if _get_download_path(mh, fn) != failed_path:
-                        continue
-                    matched = True
-                    h = self.torrent_client.torrents.get(mh)
-                    if h is None:
-                        names.discard(fn)
-                        continue
-                    try:
-                        with self.torrent_client.locks.lock(mh):
-                            i, _ = torrent.get_index_and_file_from_files(h, fn)
-                            if i is not None:
-                                priorities = list(h.file_priorities())
-                                priorities[i] = 4
-                                torrent.prioritize_files(h, priorities)
-                        names.discard(fn)
-                    except Exception:
-                        log.write_log()
-                        recovery_failed = True
-                if not names:
-                    self._http_served.pop(mh, None)
-            if not (matched and recovery_failed):
-                self.http_downloader.failures.discard(failed_path)
-
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)
             if not h:
@@ -763,12 +647,9 @@ class RapidBayDaemon:
                     # pipe-feeder threads outlive remove_files=True and spin
                     # forever waiting on bytes that will never arrive.
                     self.hls_streamer.stop_under(output_dir)
-                    # Clear any HTTP downloads for this torrent before removing
                     for f in torrent.get_torrent_info(h).files():
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                         self.subtitle_downloads.pop(filepath, None)
-                        self.http_downloader.clear(filepath)
-                    self._http_served.pop(magnet_hash, None)
                     self._web_seeded.pop(magnet_hash, None)
                     web_seed_proxy.unregister(magnet_hash)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
@@ -790,12 +671,6 @@ class RapidBayDaemon:
         _remove_old_files_and_directories(
             settings.TORRENTS_DIR, settings.MAX_OUTPUT_FILE_AGE
         )
-
-        # Clean up orphaned http_downloads entries
-        active_hashes = set(self.torrent_client.torrents.keys())
-        for filepath in list(self.http_downloader.downloads.keys()):
-            if not any(hash in filepath for hash in active_hashes):
-                self.http_downloader.clear(filepath)
 
     def _loop_wrapper(self) -> None:
         try:

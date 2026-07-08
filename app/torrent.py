@@ -149,6 +149,7 @@ class TorrentClient:
         # Network self-healing state (see _watchdog_network).
         self._last_watchdog: float = time.monotonic()
         self._dht_dead_streak: int = 0
+        self._was_healthy: bool = False
 
     def process_alerts(self) -> None:
         """Process session alerts for better torrent monitoring"""
@@ -180,6 +181,12 @@ class TorrentClient:
     # time out forever because no peers are reachable — even though a fresh
     # session on the same box works fine. libtorrent won't rebind on its own, so
     # we watch DHT liveness and call reopen_network_sockets() when it flatlines.
+    #
+    # We only act on a *regression*: the session must have been healthy at least
+    # once before we treat a dead check as a blip to recover from. Otherwise an
+    # environment where DHT never bootstraps (UDP filtered, but trackers/web
+    # seeds work fine) would thrash the listen socket every couple of minutes
+    # forever, disrupting working transfers and spamming logs.
     _WATCHDOG_INTERVAL = 60.0  # seconds between health checks
     _DHT_DEAD_CHECKS = 2  # consecutive dead checks (~2 min) before reopening
 
@@ -194,7 +201,11 @@ class TorrentClient:
         except Exception:
             return
         if dht_nodes > 0 and listening:
+            self._was_healthy = True
             self._dht_dead_streak = 0
+            return
+        # Never been healthy → nothing to recover to; leave it alone.
+        if not self._was_healthy:
             return
         self._dht_dead_streak += 1
         if self._dht_dead_streak < self._DHT_DEAD_CHECKS:
@@ -206,10 +217,14 @@ class TorrentClient:
             f"listening={listening}) — reopening sockets",
             flush=True,
         )
-        with contextlib.suppress(Exception):
+        try:
             self.session.reopen_network_sockets()
-        with contextlib.suppress(Exception):
+        except Exception as e:
+            print(f"web torrent: reopen_network_sockets failed: {e}", flush=True)
+        try:
             self.session.start_dht()
+        except Exception as e:
+            print(f"web torrent: start_dht failed: {e}", flush=True)
         self._dht_dead_streak = 0
 
     def fetch_filelist_from_link(self, magnet_link: str) -> None:

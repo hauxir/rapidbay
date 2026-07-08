@@ -146,6 +146,9 @@ class TorrentClient:
         self.torrents_dir: str | None = torrents_dir
         # Optional hook fired when the filelist is written (metadata resolved)
         self.on_state_change: Callable[[], None] | None = None
+        # Network self-healing state (see _watchdog_network).
+        self._last_watchdog: float = time.monotonic()
+        self._dht_dead_streak: int = 0
 
     def process_alerts(self) -> None:
         """Process session alerts for better torrent monitoring"""
@@ -167,6 +170,47 @@ class TorrentClient:
                 print("DHT bootstrap completed")
             elif isinstance(alert, libtorrent.listen_succeeded_alert):
                 print(f"Listening on {alert.address}:{alert.port}")
+            elif isinstance(alert, libtorrent.listen_failed_alert):
+                # Bind failure — the watchdog will reopen sockets on its tick.
+                print(f"Listen failed on {alert.address}:{alert.port}: {alert.error}")
+        self._watchdog_network()
+
+    # A long-lived session can silently lose its listen + DHT sockets after a
+    # host network blip (VPN reconnect, interface bounce). Metadata fetches then
+    # time out forever because no peers are reachable — even though a fresh
+    # session on the same box works fine. libtorrent won't rebind on its own, so
+    # we watch DHT liveness and call reopen_network_sockets() when it flatlines.
+    _WATCHDOG_INTERVAL = 60.0  # seconds between health checks
+    _DHT_DEAD_CHECKS = 2  # consecutive dead checks (~2 min) before reopening
+
+    def _watchdog_network(self) -> None:
+        now = time.monotonic()
+        if now - self._last_watchdog < self._WATCHDOG_INTERVAL:
+            return
+        self._last_watchdog = now
+        try:
+            dht_nodes = self.session.status().dht_nodes
+            listening = self.session.is_listening()
+        except Exception:
+            return
+        if dht_nodes > 0 and listening:
+            self._dht_dead_streak = 0
+            return
+        self._dht_dead_streak += 1
+        if self._dht_dead_streak < self._DHT_DEAD_CHECKS:
+            return
+        # Sockets look dead — rebind listen + DHT in place. Existing torrent
+        # handles survive; they just regain working sockets.
+        print(
+            f"web torrent: network down (dht_nodes={dht_nodes}, "
+            f"listening={listening}) — reopening sockets",
+            flush=True,
+        )
+        with contextlib.suppress(Exception):
+            self.session.reopen_network_sockets()
+        with contextlib.suppress(Exception):
+            self.session.start_dht()
+        self._dht_dead_streak = 0
 
     def fetch_filelist_from_link(self, magnet_link: str) -> None:
         if self.filelist_dir is None:

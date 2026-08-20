@@ -213,12 +213,11 @@ class TorrentClient:
         # Sockets look dead — rebind listen + DHT in place. Existing torrent
         # handles survive; they just regain working sockets.
         print(
-            f"web torrent: network down (dht_nodes={dht_nodes}, "
-            f"listening={listening}) — reopening sockets",
+            f"web torrent: network down (dht_nodes={dht_nodes}, listening={listening}) — reopening sockets",
             flush=True,
         )
         try:
-            self.session.reopen_network_sockets(libtorrent.session.reopen_map_ports)
+            self.session.reopen_network_sockets(self.session.reopen_map_ports)
         except Exception as e:
             print(f"web torrent: reopen_network_sockets failed: {e}", flush=True)
         try:

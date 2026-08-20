@@ -218,7 +218,7 @@ class TorrentClient:
             flush=True,
         )
         try:
-            self.session.reopen_network_sockets()
+            self.session.reopen_network_sockets(libtorrent.session.reopen_map_ports)
         except Exception as e:
             print(f"web torrent: reopen_network_sockets failed: {e}", flush=True)
         try:

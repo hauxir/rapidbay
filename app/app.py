@@ -61,6 +61,10 @@ class FileStatusResponse(BaseModel):
     peers: int | None = None
     source: str | None = None
     download_rate: int | None = None
+    hls_filename: str | None = None
+    hls_subtitles: List[str] | None = None
+    hls_pending: bool | None = None
+    can_stream: bool | None = None
 
 
 class NextFileResponse(BaseModel):
@@ -91,7 +95,7 @@ class StatusResponse(BaseModel):
     torrent_downloads: Any
     session_torrents: List[str]
     conversions: Any
-    http_downloads: Any
+    hls_streams: Any
 
 # Global daemon instance
 daemon: RapidBayDaemon
@@ -666,9 +670,14 @@ def magnet_download(
     if not magnet_link or not filename:
         raise HTTPException(status_code=400, detail="magnet_link and filename required")
     magnet_hash: str = torrent.get_hash(magnet_link)
-    if daemon.get_file_status(magnet_hash, filename)["status"] != FileStatus.READY:
+    if daemon.get_file_status(magnet_hash, filename)["status"] not in (FileStatus.READY, FileStatus.CONVERTING):
         daemon.download_file(magnet_link, filename)
     return {"magnet_hash": magnet_hash}
+
+
+@app.post("/api/magnet/{magnet_hash}/{filename}/stream")
+def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
+    return daemon.start_hls_stream(magnet_hash, filename)
 
 
 def _file_status(magnet_hash: str, filename: str) -> Dict[str, Any]:
@@ -813,11 +822,14 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "filelist_dir": path_hierarchy(settings.FILELIST_DIR),
         "torrents_dir": path_hierarchy(settings.TORRENTS_DIR),
         "downloads_dir": path_hierarchy(settings.DOWNLOAD_DIR),
-        "subtitle_downloads": daemon.subtitle_downloads,
+        # Snapshot the live worker-thread dicts (dict()/list()) so response
+        # serialization can't trip over a concurrent mutation from a daemon or
+        # conversion thread ("dictionary changed size during iteration").
+        "subtitle_downloads": dict(daemon.subtitle_downloads),
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
-        "conversions": daemon.video_converter.file_conversions,
-        "http_downloads": daemon.http_downloader.downloads,
+        "conversions": dict(daemon.video_converter.file_conversions),
+        "hls_streams": list(daemon.hls_streamer.active_streams.keys()),
     }
 
 

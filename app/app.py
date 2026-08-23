@@ -14,7 +14,7 @@ import subprocess
 import urllib.parse
 from collections.abc import Generator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, AsyncIterator, Dict, List, override
+from typing import Annotated, Any, AsyncIterator, Dict, List, cast, override
 
 import diskcache
 import http_cache
@@ -24,6 +24,7 @@ import prowlarr
 import PTN
 import requests
 import requests.adapters
+import requests.utils
 import settings
 import torrent
 from common import path_hierarchy
@@ -716,7 +717,8 @@ class _PinnedIPAdapter(requests.adapters.HTTPAdapter):
         if proxies and requests.utils.select_proxy(url_str, proxies):
             # The proxy is the egress point and resolves the name itself;
             # pinning here would only bypass it.
-            return super().get_connection(url, proxies)
+            # types-requests leaves get_connection unannotated, hence the cast.
+            return cast(Any, super().get_connection(url, proxies))
         parsed: urllib.parse.ParseResult = urllib.parse.urlparse(url_str)
         # server_hostname drives both SNI and the certificate hostname match.
         pool_kwargs: Dict[str, Any] = (

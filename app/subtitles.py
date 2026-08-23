@@ -1,4 +1,6 @@
+import contextlib
 import os
+import subprocess
 import time
 from typing import Any, Dict, Generator, List
 from xmlrpc.client import ProtocolError
@@ -95,8 +97,17 @@ def download_all_subtitles(filepath: str, skip: List[str] | None = None) -> None
     for sub_filename in sub_filenames:
         tmp_path = os.path.join(dirname, "fixed_" + sub_filename)
         output_path = os.path.join(dirname, sub_filename)
-        os.system(f"timeout 5m alass '{filepath}' '{output_path}' '{tmp_path}'")
-        os.system(f"mv '{tmp_path}' '{output_path}'")
+        # Argument-list form: these paths come from torrent file names and
+        # subtitle file names, both attacker-controlled.
+        with contextlib.suppress(subprocess.TimeoutExpired, OSError):
+            subprocess.run(
+                ["alass", filepath, output_path, tmp_path],
+                timeout=300,
+                check=False,
+            )
+        # alass leaves no output file when it fails; keep the unsynced original.
+        if os.path.isfile(tmp_path):
+            os.replace(tmp_path, output_path)
 
 
 def get_subtitle_language(subtitle_filename: str) -> str | None:

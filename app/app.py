@@ -14,7 +14,7 @@ import subprocess
 import urllib.parse
 from collections.abc import Generator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, AsyncIterator, Dict, List
+from typing import Annotated, Any, AsyncIterator, Dict, List, override
 
 import diskcache
 import http_cache
@@ -23,6 +23,7 @@ import log
 import prowlarr
 import PTN
 import requests
+import requests.adapters
 import settings
 import torrent
 from common import path_hierarchy
@@ -636,43 +637,118 @@ def _get_cached_magnet(torrent_url: str) -> str | None:
 MAX_TORRENT_FILE_BYTES: int = 10 * 1024 * 1024
 
 
-def _indexer_hostnames() -> set[str]:
-    hostnames: set[str] = set()
+def _origin(parsed: urllib.parse.ParseResult) -> tuple[str, str, int] | None:
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    default_port: int = 443 if parsed.scheme == "https" else 80
+    return (parsed.scheme, parsed.hostname.lower(), parsed.port or default_port)
+
+
+def _indexer_origins() -> set[tuple[str, str, int]]:
+    """Scheme/host/port of the configured indexers.
+
+    Matching the whole origin rather than just the hostname keeps the exemption
+    to the indexer itself - another service on the same box, on a different
+    port, is not covered by it."""
+    origins: set[tuple[str, str, int]] = set()
     for host in (settings.JACKETT_HOST, settings.PROWLARR_HOST):
         if not host:
             continue
-        hostname = urllib.parse.urlparse(host).hostname
-        if hostname:
-            hostnames.add(hostname.lower())
-    return hostnames
+        origin = _origin(urllib.parse.urlparse(host))
+        if origin:
+            origins.add(origin)
+    return origins
 
 
-def _is_fetchable_url(url: str) -> bool:
-    """SSRF guard for operator-supplied torrent URLs.
+def _fetch_target_ip(torrent_url: str) -> str | None:
+    """SSRF guard for torrent URLs: returns the IP to connect to, or None when
+    the URL must not be fetched at all.
 
-    Only http(s), and nothing that resolves onto the local network - cloud
-    metadata at 169.254.169.254, internal admin panels, loopback. The
-    configured indexers are exempt: Jackett/Prowlarr normally run on a private
-    docker network, and their download links are the main legitimate input."""
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return False
-    hostname: str | None = parsed.hostname
-    if not hostname:
-        return False
-    if hostname.lower() in _indexer_hostnames():
-        return True
+    Only http(s), and nothing on the local network - cloud metadata at
+    169.254.169.254, internal admin panels, loopback. Jackett/Prowlarr normally
+    run on a private docker network and their download links are the main
+    legitimate input, so the configured indexer origins skip that check.
+
+    The address is returned so the caller can pin the connection to it. Letting
+    requests resolve the hostname a second time would leave a window in which
+    DNS can rebind to an internal address after this check has passed."""
+    parsed = urllib.parse.urlparse(torrent_url)
+    origin = _origin(parsed)
+    if not origin:
+        return None
     try:
-        addrinfo = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError, ValueError):
-        return False
-    if not addrinfo:
-        return False
-    for info in addrinfo:
-        address = ipaddress.ip_address(info[4][0])
-        if not address.is_global or address.is_multicast:
-            return False
-    return True
+        addrinfo = socket.getaddrinfo(parsed.hostname, origin[2], proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    addresses = [ipaddress.ip_address(info[4][0]) for info in addrinfo]
+    if not addresses:
+        return None
+    if origin not in _indexer_origins():
+        for address in addresses:
+            if not address.is_global or address.is_multicast:
+                return None
+    return str(addresses[0])
+
+
+class _PinnedIPAdapter(requests.adapters.HTTPAdapter):
+    """Connects to an already-validated IP instead of re-resolving the host.
+
+    The request URL is left untouched, so the Host header, SNI and certificate
+    validation all still use the real hostname - only the address the socket
+    connects to is pinned.
+
+    get_connection is the hook requests 2.31 (the pinned version) routes every
+    send() through. requests 2.32 moved it to get_connection_with_tls_context,
+    so on a newer requests the pinning would quietly stop applying and the SSRF
+    guard would fall back to its pre-pinning strength - still blocking direct
+    internal targets, but with the DNS-rebinding window reopened.
+    test_connection_is_pinned_and_keeps_the_real_host_header fails loudly if
+    that happens, so a dependency bump cannot land silently."""
+
+    def __init__(self, ip: str) -> None:
+        self._ip: str = ip
+        super().__init__(max_retries=0)
+
+    @override
+    def get_connection(self, url: Any, proxies: Any = None) -> Any:
+        # The base signature accepts str | bytes.
+        url_str: str = url.decode("utf-8") if isinstance(url, bytes) else str(url)
+        if proxies and requests.utils.select_proxy(url_str, proxies):
+            # The proxy is the egress point and resolves the name itself;
+            # pinning here would only bypass it.
+            return super().get_connection(url, proxies)
+        parsed: urllib.parse.ParseResult = urllib.parse.urlparse(url_str)
+        # server_hostname drives both SNI and the certificate hostname match.
+        pool_kwargs: Dict[str, Any] = (
+            {"server_hostname": parsed.hostname} if parsed.scheme == "https" else {}
+        )
+        return self.poolmanager.connection_from_host(
+            self._ip, port=parsed.port, scheme=parsed.scheme, pool_kwargs=pool_kwargs
+        )
+
+
+def _host_header(parsed: urllib.parse.ParseResult) -> str:
+    hostname: str = parsed.hostname or ""
+    if ":" in hostname:  # IPv6 literal
+        hostname = f"[{hostname}]"
+    return f"{hostname}:{parsed.port}" if parsed.port else hostname
+
+
+def _get_pinned(url: str, ip: str, **kwargs: Any) -> requests.Response:
+    """GET `url` with the connection pinned to `ip`."""
+    # urllib3 derives the Host header from the address it connected to, which
+    # is the pinned IP - set it explicitly so name-based virtual hosts still
+    # see the real hostname.
+    headers: Dict[str, str] = {"Host": _host_header(urllib.parse.urlparse(url))}
+    headers.update(kwargs.pop("headers", None) or {})
+    session = requests.Session()
+    session.mount("http://", _PinnedIPAdapter(ip))
+    session.mount("https://", _PinnedIPAdapter(ip))
+    try:
+        return session.get(url, headers=headers, **kwargs)
+    except BaseException:
+        session.close()
+        raise
 
 
 def _torrent_url_to_magnet(torrent_url: str) -> str | None:
@@ -681,14 +757,15 @@ def _torrent_url_to_magnet(torrent_url: str) -> str | None:
     if cached:
         return cached
 
-    if not _is_fetchable_url(torrent_url):
+    target_ip = _fetch_target_ip(torrent_url)
+    if not target_ip:
         log.debug(f"Refusing to fetch torrent url: {torrent_url}")
         return None
 
     filepath: str = os.path.join(settings.DATA_DIR, ''.join(random.choices(string.ascii_uppercase + string.digits, k=10)) + ".torrent")
     magnet_link: str | None = None
     try:
-        with requests.get(torrent_url, allow_redirects=False, timeout=30, stream=True) as r:
+        with _get_pinned(torrent_url, target_ip, allow_redirects=False, timeout=30, stream=True) as r:
             if r.status_code in (301, 302, 303, 307, 308):
                 location: str | None = r.headers.get("Location")
                 if location and location.startswith("magnet"):

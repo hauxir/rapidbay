@@ -199,6 +199,9 @@ class RapidBayDaemon:
         # download/player screen is open, so this doubles as the
         # viewer-liveness signal used to reap abandoned HLS streams.
         self._file_poll_times: Dict[Tuple[str, str], float] = {}
+        # Last deadline-rush of a file's head window, keyed like
+        # _file_poll_times; throttles _rush_hls_head.
+        self._head_rushes: Dict[Tuple[str, str], float] = {}
         # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
         # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
         # the file from the web seed and/or peers transparently; tracked only so
@@ -355,6 +358,14 @@ class RapidBayDaemon:
                 # faststart — see video_conversion.is_pipe_streamable).
                 if self._hls_can_stream(magnet_hash, filename):
                     hls_info = {'can_stream': True}
+                else:
+                    # A viewer is looking at this file (only their status polls
+                    # reach this branch) but the streamable prefix hasn't formed
+                    # yet — deadline-rush the head window so it does. This is
+                    # the file-scoped replacement for torrent-wide
+                    # sequential_download, which slowed every download and
+                    # punished the swarm for files nobody streams.
+                    self._rush_hls_head(magnet_hash, filename)
 
         # Check if MP4 output file exists (READY - primary output)
         if os.path.isfile(output_filepath):
@@ -497,6 +508,14 @@ class RapidBayDaemon:
             last = self._file_poll_times.get(poll_key, started_at)
             return time.monotonic() - last > settings.HLS_VIEWER_TIMEOUT
 
+        # Rolling prefetch: the feeder keeps a deadline-rushed window ahead of
+        # its position so contiguous data keeps forming under rarest-first
+        # piece picking (no torrent-wide sequential_download).
+        def request_window(offset: int) -> None:
+            self.torrent_client.prioritize_byte_range(
+                magnet_hash, filename, offset, offset + settings.HLS_PREFETCH_BYTES
+            )
+
         os.makedirs(output_dir, exist_ok=True)
         started = self.hls_streamer.start_stream(
             filepath,
@@ -507,6 +526,7 @@ class RapidBayDaemon:
             remux_mdat=remux_mdat,
             is_range_downloaded=is_range_downloaded,
             is_abandoned=is_abandoned,
+            request_window=request_window,
         )
         return {"started": True} if started else {"started": False, "reason": "capacity"}
 
@@ -530,6 +550,26 @@ class RapidBayDaemon:
         """Contiguous bytes available from the start of the file for pipe
         feeding — the count of verified contiguous pieces from file start."""
         return self.torrent_client.get_sequential_bytes(magnet_hash, filename)
+
+    def _rush_hls_head(self, magnet_hash: str, filename: str) -> None:
+        """Deadline-rush the head window of a file a viewer is waiting on so a
+        contiguous, streamable prefix forms under rarest-first piece picking.
+        Deadlines persist on the handle; the 30s re-rush is a cheap safety net
+        for deadlines libtorrent dropped (e.g. after piece timeouts)."""
+        key = (magnet_hash, filename)
+        now = time.monotonic()
+        if now - self._head_rushes.get(key, 0.0) < 30:
+            return
+        h = self.torrent_client.torrents.get(magnet_hash)
+        if not h or not h.has_metadata():
+            return
+        i, f = torrent.get_index_and_file_from_files(h, filename)
+        if i is None or f is None:
+            return
+        self._head_rushes[key] = now
+        self.torrent_client.prioritize_byte_range(
+            magnet_hash, filename, 0, _hls_effective_threshold(f.size)
+        )
 
     def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:
         # Test-and-set the dedup marker synchronously so racing callers (heartbeats
@@ -628,6 +668,7 @@ class RapidBayDaemon:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                 self.subtitle_downloads.pop(filepath, None)
                 self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
+                self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
             video_conversion.clear_master_playlist_cache_under(output_dir)
@@ -689,6 +730,7 @@ class RapidBayDaemon:
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                         self.subtitle_downloads.pop(filepath, None)
                         self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
+                        self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
                     self._web_seeded.pop(magnet_hash, None)
                     web_seed_proxy.unregister(magnet_hash)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

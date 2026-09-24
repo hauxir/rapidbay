@@ -917,6 +917,7 @@ class HLSStreamer:
         # Re-request a fresh prefetch window once the previous one is half
         # consumed (0 → the first window is requested immediately).
         next_window_request_at = 0
+        last_stall_rerush = 0.0
         try:
             while not os.path.isfile(filepath):
                 if proc.poll() is not None:
@@ -952,12 +953,24 @@ class HLSStreamer:
                         available = min(available, os.path.getsize(filepath))
 
                     if available <= bytes_written:
+                        now = time.monotonic()
+                        # Piece deadlines are best-effort — libtorrent drops
+                        # ones it can't meet. Without a re-rush, one dropped
+                        # deadline stalls the frontier until the watchdog kills
+                        # the stream; re-request the window while stalled.
+                        if (
+                            request_window is not None
+                            and now - last_progress_time > 15
+                            and now - last_stall_rerush > 15
+                        ):
+                            request_window(bytes_written)
+                            last_stall_rerush = now
                         # Watchdog: if the torrent has been making no progress
                         # for HLS_STALL_TIMEOUT, free the slot. Routed through
                         # self.stop() so _run_stream's intentional-exit path
                         # handles cleanup (no .failed marker — torrent might
                         # recover later and the user can ▶ again).
-                        if time.monotonic() - last_progress_time > settings.HLS_STALL_TIMEOUT:
+                        if now - last_progress_time > settings.HLS_STALL_TIMEOUT:
                             log.debug(f"HLS stream stalled ({settings.HLS_STALL_TIMEOUT}s no progress): {m3u8_path}")
                             self.stop(m3u8_path)
                             return
@@ -1056,6 +1069,7 @@ class HLSStreamer:
             file_pos = mdat_start
             # See _pipe_feeder: rolling prefetch window, keyed on file_pos.
             next_window_request_at = 0
+            last_stall_rerush = 0.0
             last_progress_time = time.monotonic()
             with open(filepath, "rb") as f:
                 f.seek(mdat_start)
@@ -1081,7 +1095,16 @@ class HLSStreamer:
                     target = min(available, mdat_end)
 
                     if target <= file_pos:
-                        if time.monotonic() - last_progress_time > settings.HLS_STALL_TIMEOUT:
+                        now = time.monotonic()
+                        # Same dropped-deadline recovery as _pipe_feeder.
+                        if (
+                            request_window is not None
+                            and now - last_progress_time > 15
+                            and now - last_stall_rerush > 15
+                        ):
+                            request_window(file_pos)
+                            last_stall_rerush = now
+                        if now - last_progress_time > settings.HLS_STALL_TIMEOUT:
                             log.debug(f"HLS remux stream stalled ({settings.HLS_STALL_TIMEOUT}s no progress): {m3u8_path}")
                             self.stop(m3u8_path)
                             return

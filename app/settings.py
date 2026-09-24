@@ -65,14 +65,16 @@ OPENSUBTITLES_PASSWORD: str | None = None
 
 # HLS STREAMING
 # Enable early HLS playback while downloading; forces sequential_download on
-# the libtorrent handle. Note: the sequential_download flag is set at
-# torrent-add time, so toggling this at runtime only affects torrents added
-# after the change — restart the daemon to apply it to existing torrents.
+# the libtorrent handle. The flag is applied in download_file() — i.e. every
+# time a client requests a file, existing torrents included — so toggling it
+# at runtime takes effect on a torrent the next time one of its files is
+# requested, not on transfers already in flight.
 HLS_STREAMING: bool = False
 HLS_SEGMENT_DURATION: int = 6  # seconds per HLS segment
 HLS_START_THRESHOLD: int = 50 * 1024 * 1024  # bytes of sequential data before starting HLS
 MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent HLS ffmpeg processes (independent of MAX_PARALLEL_CONVERSIONS)
 HLS_STALL_TIMEOUT: int = 180  # seconds without progress before an HLS stream is killed and its slot freed
+HLS_VIEWER_TIMEOUT: int = 300  # seconds without any client polling the file's status before an active HLS stream is stopped and its slot freed
 
 # Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:

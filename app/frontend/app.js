@@ -367,12 +367,17 @@
             var video = document.getElementsByTagName("video")[0];
             var videoUrl = window.location.origin + self.url;
             var isHLS = self.url.indexOf(".m3u8") !== -1;
+            var savedPosition = getVideoPosition(self.magnet, self.filename);
 
             if (isHLS && typeof Hls !== "undefined" && Hls.isSupported()) {
                 var errorRecoveries = 0;
                 var maxRecoveries = 5;
                 self.hls = new Hls({
-                    startPosition: 0,
+                    // Resume through hls.js itself: setting video.currentTime
+                    // before the manifest is parsed races hls.js's own initial
+                    // seek (whose default for EVENT playlists is the live
+                    // edge). 0 = explicit start-at-beginning.
+                    startPosition: savedPosition > 0 ? savedPosition : 0,
                     maxBufferHole: 0.5,
                     nudgeOffset: 0.2,
                     nudgeMaxRetry: 10,
@@ -445,9 +450,9 @@
             });
             video.play();
 
-            // Restore saved position
-            var savedPosition = getVideoPosition(self.magnet, self.filename);
-            if (savedPosition > 0) {
+            // Restore saved position (the hls.js path resumes via the
+            // startPosition config above instead).
+            if (savedPosition > 0 && !self.hls) {
                 video.currentTime = savedPosition;
             }
 
@@ -1316,6 +1321,13 @@
                 }
                 // Show stream button when backend confirms enough data is available
                 self.canStream = !!data.can_stream;
+                // Stream accepted but ffmpeg hasn't produced a playlist yet —
+                // say so instead of showing a bare progress screen.
+                if (data.hls_pending) {
+                    self.streamMessage = "Starting stream\u2026";
+                } else if (self.streamMessage === "Starting stream\u2026") {
+                    self.streamMessage = null;
+                }
             }
             function pollFileInfo() {
                 (function get_file_info() {

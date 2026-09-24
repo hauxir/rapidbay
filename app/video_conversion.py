@@ -689,6 +689,7 @@ class HLSStreamer:
         m3u8_filename: str = "stream.m3u8",
         remux_mdat: Tuple[int, int] | None = None,
         is_range_downloaded: Callable[[int, int], bool] | None = None,
+        is_abandoned: Callable[[], bool] | None = None,
     ) -> bool:
         """Reserve a stream slot synchronously and kick off ffmpeg in a thread.
 
@@ -699,6 +700,11 @@ class HLSStreamer:
         moov-at-end MP4: the streamer waits for the trailing moov to download
         (probed via `is_range_downloaded`), relocates it ahead of mdat, and
         feeds the synthesized faststart stream into ffmpeg.
+
+        `is_abandoned` (optional) is polled by the feeder; when it returns True
+        the stream is stopped and its slot freed — used to reap streams whose
+        viewers have all gone away (no .failed marker, so a later viewer can
+        restart it).
         """
         m3u8_path = os.path.join(output_dir, m3u8_filename)
         if self.is_failed(m3u8_path):
@@ -722,6 +728,7 @@ class HLSStreamer:
             m3u8_path,
             remux_mdat,
             is_range_downloaded,
+            is_abandoned,
         )
         return True
 
@@ -737,6 +744,7 @@ class HLSStreamer:
         m3u8_path: str,
         remux_mdat: Tuple[int, int] | None = None,
         is_range_downloaded: Callable[[int, int], bool] | None = None,
+        is_abandoned: Callable[[], bool] | None = None,
     ) -> None:
         try:
             os.makedirs(output_dir, exist_ok=True)
@@ -815,12 +823,12 @@ class HLSStreamer:
                     feeder = threading.Thread(
                         target=self._remux_feeder,
                         args=(input_filepath, proc, get_sequential_bytes, preamble,
-                              remux_mdat[0], remux_mdat[1], m3u8_path),
+                              remux_mdat[0], remux_mdat[1], m3u8_path, is_abandoned),
                     )
                 else:
                     feeder = threading.Thread(
                         target=self._pipe_feeder,
-                        args=(input_filepath, proc, get_sequential_bytes, total_file_size, m3u8_path),
+                        args=(input_filepath, proc, get_sequential_bytes, total_file_size, m3u8_path, is_abandoned),
                     )
                 feeder.start()
                 feeder.join()
@@ -893,6 +901,7 @@ class HLSStreamer:
         get_sequential_bytes: Callable[[], int],
         total_file_size: int,
         m3u8_path: str,
+        is_abandoned: Callable[[], bool] | None = None,
     ) -> None:
         bytes_written = 0
         try:
@@ -909,6 +918,14 @@ class HLSStreamer:
                 while True:
                     if proc.poll() is not None:
                         break
+
+                    # No viewer has polled this file's status for a while —
+                    # stop and free the slot instead of feeding a stream
+                    # nobody is watching for the rest of the download.
+                    if is_abandoned is not None and is_abandoned():
+                        log.debug(f"HLS stream abandoned (no viewer polls for {settings.HLS_VIEWER_TIMEOUT}s): {m3u8_path}")
+                        self.stop(m3u8_path)
+                        return
 
                     available = get_sequential_bytes()
                     # Cap by current on-disk size: the piece estimator can run
@@ -1005,6 +1022,7 @@ class HLSStreamer:
         mdat_start: int,
         mdat_end: int,
         m3u8_path: str,
+        is_abandoned: Callable[[], bool] | None = None,
     ) -> None:
         """Feed ffmpeg a synthesized faststart stream: the relocated
         ftyp+moov' preamble, then the original mdat box streamed sequentially as
@@ -1024,6 +1042,12 @@ class HLSStreamer:
                 while True:
                     if proc.poll() is not None:
                         break
+
+                    # Same viewer-liveness reaping as _pipe_feeder.
+                    if is_abandoned is not None and is_abandoned():
+                        log.debug(f"HLS remux stream abandoned (no viewer polls for {settings.HLS_VIEWER_TIMEOUT}s): {m3u8_path}")
+                        self.stop(m3u8_path)
+                        return
 
                     available = get_sequential_bytes()
                     with contextlib.suppress(OSError):

@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import time
 from threading import Event, Lock, Thread
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 import http_cache
 import log
@@ -194,6 +194,11 @@ class RapidBayDaemon:
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
         self.hls_streamer: video_conversion.HLSStreamer = video_conversion.HLSStreamer()
         self._subtitle_gate: Lock = Lock()
+        # Last time any client polled a file's status, keyed by
+        # (magnet_hash, filename). The frontend polls ~1/s while a
+        # download/player screen is open, so this doubles as the
+        # viewer-liveness signal used to reap abandoned HLS streams.
+        self._file_poll_times: Dict[Tuple[str, str], float] = {}
         # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
         # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
         # the file from the web seed and/or peers transparently; tracked only so
@@ -233,8 +238,10 @@ class RapidBayDaemon:
                 filename = os.path.basename(f.path)
                 if priority == 0:
                     continue
+                # include_hls=False: the admin /status endpoint shouldn't
+                # (re)generate master playlists as a side effect of scraping.
                 result[magnet_hash][filename] = self.get_file_status(
-                    magnet_hash, filename
+                    magnet_hash, filename, include_hls=False
                 )
         return result
 
@@ -305,7 +312,12 @@ class RapidBayDaemon:
 
         self._notify_state_change()
 
-    def get_file_status(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
+    def note_file_poll(self, magnet_hash: str, filename: str) -> None:
+        """Record that a client is watching this file's status — the
+        viewer-liveness signal used to reap abandoned HLS streams."""
+        self._file_poll_times[(magnet_hash, filename)] = time.monotonic()
+
+    def get_file_status(self, magnet_hash: str, filename: str, include_hls: bool = True) -> Dict[str, Any]:
         assert self.thread.is_alive()
         filename_extension = os.path.splitext(filename)[1]
         is_video = filename_extension[1:] in settings.VIDEO_EXTENSIONS
@@ -315,7 +327,7 @@ class RapidBayDaemon:
 
         # Determine if HLS stream is available for early playback
         hls_info: Dict[str, Any] = {}
-        if is_video and settings.HLS_STREAMING:
+        if is_video and settings.HLS_STREAMING and include_hls:
             m3u8 = _m3u8_path(magnet_hash, filename)
             if os.path.isfile(m3u8):
                 vtt_subtitles = _get_vtt_subtitles(output_dir, filename)
@@ -473,6 +485,18 @@ class RapidBayDaemon:
             is_range_downloaded = functools.partial(
                 self.torrent_client.is_range_downloaded, magnet_hash, filename
             )
+        # Viewer-liveness: if no client has polled this file's status for
+        # HLS_VIEWER_TIMEOUT, the stream has no audience — the feeder stops it
+        # and frees the slot (no .failed marker; ▶ resurfaces for the next
+        # viewer). Fall back to stream start time so the stream can't be
+        # killed before the first poll lands.
+        started_at = time.monotonic()
+        poll_key = (magnet_hash, filename)
+
+        def is_abandoned() -> bool:
+            last = self._file_poll_times.get(poll_key, started_at)
+            return time.monotonic() - last > settings.HLS_VIEWER_TIMEOUT
+
         os.makedirs(output_dir, exist_ok=True)
         started = self.hls_streamer.start_stream(
             filepath,
@@ -482,6 +506,7 @@ class RapidBayDaemon:
             m3u8_filename=_m3u8_filename(filename),
             remux_mdat=remux_mdat,
             is_range_downloaded=is_range_downloaded,
+            is_abandoned=is_abandoned,
         )
         return {"started": True} if started else {"started": False, "reason": "capacity"}
 
@@ -519,7 +544,18 @@ class RapidBayDaemon:
     @threaded
     @log.catch_and_log_exceptions
     def _run_subtitle_download(self, filepath: str, output_dir: str, skip: List[str]) -> None:
-        subtitles.download_all_subtitles(filepath, skip=skip)
+        try:
+            subtitles.download_all_subtitles(filepath, skip=skip)
+            self._emit_vtts_for_hls(filepath, output_dir)
+        finally:
+            # Always mark FINISHED, even when the fetch or SRT→VTT step threw:
+            # nothing retries a wedged DOWNLOADING marker, so the file would
+            # otherwise sit in DOWNLOADING_SUBTITLES until the torrent ages out.
+            self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
+            self._notify_state_change()
+
+    @staticmethod
+    def _emit_vtts_for_hls(filepath: str, output_dir: str) -> None:
         # Copy downloaded .srt files to output dir as .vtt for HLS playback
         dirname = os.path.dirname(filepath)
         basename = os.path.basename(filepath)
@@ -549,12 +585,13 @@ class RapidBayDaemon:
                             check=False,
                             timeout=60,
                         )
-                    except subprocess.TimeoutExpired:
-                        log.debug(f"ffmpeg SRT→VTT timed out for {srt_path}")
+                    # OSError covers a missing/broken ffmpeg binary
+                    # (FileNotFoundError), which TimeoutExpired alone lets
+                    # escape and kill the remaining conversions.
+                    except (subprocess.TimeoutExpired, OSError):
+                        log.debug(f"ffmpeg SRT→VTT failed for {srt_path}")
                         with contextlib.suppress(OSError):
                             os.remove(vtt_path)
-        self.subtitle_downloads[filepath] = SubtitleDownloadStatus.FINISHED
-        self._notify_state_change()
 
     def _handle_torrent(self, magnet_hash: str) -> None:
         h = self.torrent_client.torrents.get(magnet_hash)
@@ -590,6 +627,7 @@ class RapidBayDaemon:
             for f in files:
                 filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                 self.subtitle_downloads.pop(filepath, None)
+                self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
             video_conversion.clear_master_playlist_cache_under(output_dir)
@@ -650,6 +688,7 @@ class RapidBayDaemon:
                     for f in torrent.get_torrent_info(h).files():
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                         self.subtitle_downloads.pop(filepath, None)
+                        self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
                     self._web_seeded.pop(magnet_hash, None)
                     web_seed_proxy.unregister(magnet_hash)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

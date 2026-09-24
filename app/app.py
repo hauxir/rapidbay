@@ -831,6 +831,9 @@ def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) 
 
 
 def _file_status(magnet_hash: str, filename: str) -> Dict[str, Any]:
+    # Viewer-liveness heartbeat: active HLS streams are reaped when no client
+    # has polled the file's status for HLS_VIEWER_TIMEOUT.
+    daemon.note_file_poll(magnet_hash, filename)
     status = daemon.get_file_status(magnet_hash, filename)
     # Reset expiration timer when file is accessed
     if status.get("status") == FileStatus.READY:

@@ -690,6 +690,7 @@ class HLSStreamer:
         remux_mdat: Tuple[int, int] | None = None,
         is_range_downloaded: Callable[[int, int], bool] | None = None,
         is_abandoned: Callable[[], bool] | None = None,
+        request_window: Callable[[int], None] | None = None,
     ) -> bool:
         """Reserve a stream slot synchronously and kick off ffmpeg in a thread.
 
@@ -705,6 +706,11 @@ class HLSStreamer:
         the stream is stopped and its slot freed — used to reap streams whose
         viewers have all gone away (no .failed marker, so a later viewer can
         restart it).
+
+        `request_window(offset)` (optional) asks the torrent layer to
+        deadline-rush the byte window starting at `offset`; the feeders call it
+        as they advance so contiguous data keeps forming without torrent-wide
+        sequential downloading.
         """
         m3u8_path = os.path.join(output_dir, m3u8_filename)
         if self.is_failed(m3u8_path):
@@ -729,6 +735,7 @@ class HLSStreamer:
             remux_mdat,
             is_range_downloaded,
             is_abandoned,
+            request_window,
         )
         return True
 
@@ -745,6 +752,7 @@ class HLSStreamer:
         remux_mdat: Tuple[int, int] | None = None,
         is_range_downloaded: Callable[[int, int], bool] | None = None,
         is_abandoned: Callable[[], bool] | None = None,
+        request_window: Callable[[int], None] | None = None,
     ) -> None:
         try:
             os.makedirs(output_dir, exist_ok=True)
@@ -823,12 +831,13 @@ class HLSStreamer:
                     feeder = threading.Thread(
                         target=self._remux_feeder,
                         args=(input_filepath, proc, get_sequential_bytes, preamble,
-                              remux_mdat[0], remux_mdat[1], m3u8_path, is_abandoned),
+                              remux_mdat[0], remux_mdat[1], m3u8_path, is_abandoned,
+                              request_window),
                     )
                 else:
                     feeder = threading.Thread(
                         target=self._pipe_feeder,
-                        args=(input_filepath, proc, get_sequential_bytes, total_file_size, m3u8_path, is_abandoned),
+                        args=(input_filepath, proc, get_sequential_bytes, total_file_size, m3u8_path, is_abandoned, request_window),
                     )
                 feeder.start()
                 feeder.join()
@@ -902,8 +911,12 @@ class HLSStreamer:
         total_file_size: int,
         m3u8_path: str,
         is_abandoned: Callable[[], bool] | None = None,
+        request_window: Callable[[int], None] | None = None,
     ) -> None:
         bytes_written = 0
+        # Re-request a fresh prefetch window once the previous one is half
+        # consumed (0 → the first window is requested immediately).
+        next_window_request_at = 0
         try:
             while not os.path.isfile(filepath):
                 if proc.poll() is not None:
@@ -926,6 +939,10 @@ class HLSStreamer:
                         log.debug(f"HLS stream abandoned (no viewer polls for {settings.HLS_VIEWER_TIMEOUT}s): {m3u8_path}")
                         self.stop(m3u8_path)
                         return
+
+                    if request_window is not None and bytes_written >= next_window_request_at:
+                        request_window(bytes_written)
+                        next_window_request_at = bytes_written + settings.HLS_PREFETCH_BYTES // 2
 
                     available = get_sequential_bytes()
                     # Cap by current on-disk size: the piece estimator can run
@@ -1023,6 +1040,7 @@ class HLSStreamer:
         mdat_end: int,
         m3u8_path: str,
         is_abandoned: Callable[[], bool] | None = None,
+        request_window: Callable[[int], None] | None = None,
     ) -> None:
         """Feed ffmpeg a synthesized faststart stream: the relocated
         ftyp+moov' preamble, then the original mdat box streamed sequentially as
@@ -1036,6 +1054,8 @@ class HLSStreamer:
                 return
 
             file_pos = mdat_start
+            # See _pipe_feeder: rolling prefetch window, keyed on file_pos.
+            next_window_request_at = 0
             last_progress_time = time.monotonic()
             with open(filepath, "rb") as f:
                 f.seek(mdat_start)
@@ -1048,6 +1068,10 @@ class HLSStreamer:
                         log.debug(f"HLS remux stream abandoned (no viewer polls for {settings.HLS_VIEWER_TIMEOUT}s): {m3u8_path}")
                         self.stop(m3u8_path)
                         return
+
+                    if request_window is not None and file_pos >= next_window_request_at:
+                        request_window(file_pos)
+                        next_window_request_at = file_pos + settings.HLS_PREFETCH_BYTES // 2
 
                     available = get_sequential_bytes()
                     with contextlib.suppress(OSError):

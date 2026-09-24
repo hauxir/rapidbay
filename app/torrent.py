@@ -10,7 +10,6 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import bencodepy
 import libtorrent
-import settings
 from common import normalize_filename
 from locking import LockManager
 
@@ -273,8 +272,6 @@ class TorrentClient:
                     file_priorities[i] = 4
                     break
             prioritize_files(h, file_priorities)
-            if settings.HLS_STREAMING:
-                h.set_flags(libtorrent.torrent_flags.sequential_download)
             self._write_filelist_to_disk(magnet_link)
 
     def add_web_seed(self, magnet_hash: str, url: str) -> None:

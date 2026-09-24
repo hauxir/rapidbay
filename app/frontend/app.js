@@ -1321,6 +1321,13 @@
                 }
                 // Show stream button when backend confirms enough data is available
                 self.canStream = !!data.can_stream;
+                // can_stream means no stream is running (no playlist, no active
+                // ffmpeg, not marked failed) — so a previously requested stream
+                // was reaped (stall or viewer timeout). Re-arm the button so
+                // the user can request it again without reloading.
+                if (self.canStream && self.streamRequested) {
+                    self.streamRequested = false;
+                }
                 // Stream accepted but ffmpeg hasn't produced a playlist yet —
                 // say so instead of showing a bare progress screen.
                 if (data.hls_pending) {

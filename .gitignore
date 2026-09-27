@@ -1,5 +1,6 @@
 .pyc
 __pycache__/
+.env
 tmp/
 filelists/
 creds.json
@@ -10,3 +11,7 @@ creds.json
 data/
 # Local pyright config (for venv path override)
 pyrightconfig.json
+
+.jackett/
+RapidBay.egg-info/
+*.sock

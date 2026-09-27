@@ -25,13 +25,16 @@ import PTN
 import requests
 import requests.adapters
 import requests.utils
+import library
+from result_grouping import enrich_search_results, season_episode_details
+from tmdb import TMDBClient
 import settings
 import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -47,6 +50,150 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseModel):
     results: List[SearchResult]
+
+
+class RichSearchEpisodeItem(BaseModel):
+    title: str
+    seeds: int
+    magnet: str | None = None
+    torrent_link: str | None = None
+    status: str | None = None
+
+
+class RichSearchSeason(BaseModel):
+    season: int
+    episodes: list[RichSearchEpisodeItem]
+
+
+class RichSearchLatestEpisode(BaseModel):
+    name: str | None = None
+    overview: str | None = None
+    season_number: int
+    episode_number: int
+    air_date: str | None = None
+    runtime: int | None = None
+    vote_average: float | None = None
+    still_url: str | None = None
+
+
+class RichSearchGroup(BaseModel):
+    tmdb_id: int | None = None
+    title: str
+    year: int | None = None
+    poster_url: str | None = None
+    media_type: str | None = None
+    overview: str | None = None
+    genres: list[str] = Field(default_factory=list)
+    vote_average: float | None = None
+    backdrop_url: str | None = None
+    runtime: int | None = None
+    latest_episode: RichSearchLatestEpisode | None = None
+    seasons: list[RichSearchSeason]
+    results: list[RichSearchEpisodeItem] = Field(default_factory=list)
+
+
+class RichSearchResultItem(BaseModel):
+    title: str
+    seeds: int
+    magnet: str | None = None
+    torrent_link: str | None = None
+    status: str | None = None
+    parsed_title: str | None = None
+
+
+class RichSearchResponse(BaseModel):
+    groups: list[RichSearchGroup]
+    other: list[RichSearchResultItem]
+
+
+class TvSeasonEpisode(BaseModel):
+    episode_number: int
+    name: str | None = None
+    overview: str | None = None
+    air_date: str | None = None
+    runtime: int | None = None
+    vote_average: float | None = None
+    still_url: str | None = None
+
+
+class TvSeasonResponse(BaseModel):
+    episodes: list[TvSeasonEpisode] = Field(default_factory=list)
+
+
+class TvLookupResponse(BaseModel):
+    tmdb_id: int | None = None
+    title: str | None = None
+
+
+class LibraryEvent(BaseModel):
+    event: str
+    magnet: str | None = None
+    title: str = ""
+    filename: str | None = None
+    ts: int | None = None
+    position: float | None = None
+    duration: float | None = None
+
+
+class LibraryObserveRequest(BaseModel):
+    events: list[LibraryEvent] = Field(default_factory=list)
+
+
+class LibraryObserveResponse(BaseModel):
+    queued: int
+
+
+class LibraryWatchedEpisode(BaseModel):
+    season: int
+    episode: int
+    filename: str | None = None
+    at: int | None = None
+
+
+class LibraryDownload(BaseModel):
+    hash: str
+    label: str | None = None
+    at: int | None = None
+
+
+class LibraryTitle(BaseModel):
+    tmdb_id: int
+    media_type: str
+    title: str
+    year: int | None = None
+    poster_url: str | None = None
+    updated_at: int | None = None
+    watched_at: int | None = None
+    watched_episodes: list[LibraryWatchedEpisode] = Field(default_factory=list)
+    downloads: list[LibraryDownload] = Field(default_factory=list)
+
+
+class LibraryResponse(BaseModel):
+    titles: list[LibraryTitle]
+
+
+class HomeCard(BaseModel):
+    tmdb_id: int
+    media_type: str
+    title: str
+    year: int | None = None
+    poster_url: str | None = None
+    backdrop_url: str | None = None
+    subtitle: str | None = None
+    rank: int | None = None
+    next_air_date: str | None = None
+    minutes_left: int | None = None
+    magnet: str | None = None
+    filename: str | None = None
+    watched_at: int | None = None
+    watched_episodes: list[LibraryWatchedEpisode] = Field(default_factory=list)
+
+
+class HomeResponse(BaseModel):
+    keep_watching: list[HomeCard] = Field(default_factory=list)
+    recent: list[HomeCard] = Field(default_factory=list)
+    series: list[HomeCard] = Field(default_factory=list)
+    movies: list[HomeCard] = Field(default_factory=list)
 
 
 class MagnetLinkResponse(BaseModel):
@@ -151,6 +298,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     daemon = RapidBayDaemon()
     daemon.on_state_change = _state_notifier.notify
     daemon.start()
+    library.start()
     try:
         yield
     finally:
@@ -461,6 +609,94 @@ def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]
     else:
         results = _NO_BACKEND_RESULTS
     return {"results": _finalize_results(results, searchterm)}
+
+
+@app.get("/api/rich_search/", response_model=RichSearchResponse)
+@app.get("/api/rich_search/{searchterm}", response_model=RichSearchResponse)
+def rich_search(
+    searchterm: str = "",
+    media: str | None = None,
+    tmdb: int | None = None,
+    _: None = Depends(authorize),
+) -> Dict[str, Any]:
+    if not (settings.JACKETT_HOST or settings.PROWLARR_HOST):
+        return {"groups": [], "other": []}
+
+    results = _indexer_search(searchterm)
+    results = _add_status_to_results(results)
+    focus = (media, tmdb) if media in ("tv", "movie") and tmdb is not None and tmdb > 0 else None
+    if focus is None:
+        return enrich_search_results(results, settings.TMDB_API_KEY)
+    return enrich_search_results(results, settings.TMDB_API_KEY, focus, query_title=searchterm)
+
+
+@app.get("/api/tv/lookup/", response_model=TvLookupResponse)
+def tv_lookup(q: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Best TMDB TV match for a show name taken from a playing filename."""
+    query = q.strip()
+    if not settings.TMDB_API_KEY or not query:
+        return {"tmdb_id": None, "title": None}
+    client = TMDBClient(settings.TMDB_API_KEY)
+    response = client.search_multi(query)
+    results = response.get("results") if isinstance(response, dict) else None
+    if not isinstance(results, list):
+        return {"tmdb_id": None, "title": None}
+    folded = query.casefold()
+    chosen: Dict[str, Any] | None = None
+    for candidate in results:
+        if not isinstance(candidate, dict) or candidate.get("media_type") != "tv":
+            continue
+        name = candidate.get("name") or candidate.get("original_name") or ""
+        if isinstance(name, str) and name.casefold() == folded:
+            chosen = candidate
+            break
+        if chosen is None:
+            chosen = candidate
+    if not isinstance(chosen, dict) or not isinstance(chosen.get("id"), int):
+        return {"tmdb_id": None, "title": None}
+    name = chosen.get("name") or chosen.get("original_name") or query
+    return {"tmdb_id": chosen["id"], "title": name if isinstance(name, str) else query}
+
+
+@app.get("/api/tv/{tmdb_id}/season/{season_number}/", response_model=TvSeasonResponse)
+def tv_season(tmdb_id: int, season_number: int, _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Episode details for one season. Used when a season is opened, not during search."""
+    if not settings.TMDB_API_KEY or tmdb_id <= 0 or season_number < 0:
+        return {"episodes": []}
+    client = TMDBClient(settings.TMDB_API_KEY)
+    payload = client.get_tv_season(tmdb_id, season_number)
+    return {"episodes": season_episode_details(client, payload)}
+
+
+@app.post("/api/library/observe/", response_model=LibraryObserveResponse)
+def observe_library(request: LibraryObserveRequest, _: None = Depends(authorize)) -> Dict[str, int]:
+    """Queue download and watch events. TMDB lookup happens on a background thread."""
+    return {
+        "queued": library.enqueue(
+            [
+                {
+                    "event": event.event,
+                    "magnet": event.magnet,
+                    "title": event.title,
+                    "filename": event.filename,
+                    "ts": event.ts,
+                    "position": event.position,
+                    "duration": event.duration,
+                }
+                for event in request.events
+            ]
+        )
+    }
+
+
+@app.get("/api/library/", response_model=LibraryResponse)
+def get_library(_: None = Depends(authorize)) -> Dict[str, Any]:
+    return {"titles": library.catalog()}
+
+
+@app.get("/api/home/", response_model=HomeResponse)
+def get_home(_: None = Depends(authorize)) -> Dict[str, Any]:
+    return library.home()
 
 
 def _serialize_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

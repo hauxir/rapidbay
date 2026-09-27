@@ -18,7 +18,7 @@
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
         <link rel="manifest" href="/manifest.json" />
         <link href="/style.css" rel="stylesheet" />
-        <link rel="icon" type="image/png" href="/favicon.png" />
+        <link rel="icon" type="image/png" href="/favicon.png?v=3" />
     </head>
 
     <body class="text-center">
@@ -46,9 +46,25 @@
             </div>
         </script>
 
+        <script type="text/x-template" id="rank-mark-template">
+            <svg class="rank-svg" :viewBox="'0 0 ' + art.w + ' ' + art.h" fill="none" :opacity="art.opacity" preserveAspectRatio="xMaxYMid meet" aria-hidden="true">
+              <g :clip-path="'url(#' + clipId + ')'">
+                <path v-for="(mark, index) in art.paths" :key="index" :d="mark.d" :transform="mark.translate ? ('translate(' + mark.translate + ')') : null" fill-rule="evenodd" clip-rule="evenodd" :fill="mark.fill ? ('url(#' + fadeId + ')') : 'none'" :stroke="mark.fill ? 'none' : ('url(#' + fadeId + ')')" :stroke-width="mark.fill ? 0 : 2.5" stroke-linejoin="miter" stroke-linecap="butt"></path>
+              </g>
+              <defs>
+                <linearGradient :id="fadeId" :x1="art.x1" :y1="art.y1" :x2="art.x2" :y2="art.y2" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="white"></stop>
+                  <stop offset="1" stop-color="white" stop-opacity="0"></stop>
+                </linearGradient>
+                <clipPath :id="clipId"><rect :width="art.w" :height="art.h" fill="white"></rect></clipPath>
+              </defs>
+            </svg>
+        </script>
+
         <script type="text/x-template" id="search-screen-template">
-            <div class="root">
-              <div class="topbar topbar-home">
+            <div class="root" :class="richContentEnabled ? 'home-root' : 'classic-root'">
+              <template v-if="!richContentEnabled">
+                <div class="topbar topbar-classic">
                   <button tabindex="0" @click="goHistory()" class="btn btn-dark backarrow">
                     <div class="icon history_icon"/>
                   </button>
@@ -62,20 +78,151 @@
                       <div class="icon favorites_icon"/>
                     </button>
                   </div>
-              </div>
-              <div class="wrapper">
-                <form @submit="onSubmit">
-                  <div class="input-group mb-3">
-                    <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
-                    <div class="input-group-append">
-                      <button class="btn btn-light" type="submit" tabindex="-1"><div class="icon search_icon"/></button>
+                </div>
+                <div class="wrapper">
+                  <div class="classic-search">
+                    <form @submit="onSubmit">
+                      <div class="input-group">
+                        <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
+                        <div class="input-group-append">
+                          <button class="btn btn-light" type="submit" tabindex="-1"><div class="icon search_icon"/></button>
+                        </div>
+                      </div>
+                    </form>
+                    <label class="rich-toggle-label classic-rich-toggle">
+                      <input type="checkbox" v-model="richContentEnabled" @change="onRichToggle" class="rich-toggle-input">
+                      <span class="rich-toggle-text">View with rich media content</span>
+                    </label>
+                    <div v-if="searchHistory.length > 0" class="search-history">
+                      <div tabindex="0" v-for="term in searchHistory.slice(0, 4)" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
                     </div>
                   </div>
-                  <div v-if="searchHistory.length > 0" class="search-history">
-                    <div tabindex="0" v-for="term in searchHistory" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
-                  </div>
-                </form>
+                </div>
+              </template>
+              <template v-else>
+              <div class="topbar topbar-home">
+                  <a class="home-logo-link" href="/" @click.prevent="goHome()">
+                    <img class="home-logo" src="/lib/rapidbay-logo.png" alt="RapidBay">
+                  </a>
+                  <form class="home-search" @submit="onSubmit">
+                    <span class="home-search-icon" aria-hidden="true"></span>
+                    <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none" placeholder="Search">
+                  </form>
               </div>
+              <div class="home-rows">
+                <section v-if="keepWatching.length" class="home-row">
+                  <h2 class="home-row-heading">Keep watching</h2>
+                  <div v-if="richContentEnabled" class="home-row-rail">
+                    <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+                    <div class="billboard-scroller" @scroll="refreshRails">
+                    <button type="button" class="billboard-card" v-for="title in keepWatching" :key="'keep-' + title.media_type + ':' + title.tmdb_id" @click="resumeTitle(title)">
+                      <img v-if="title.backdrop_url || title.poster_url" :src="title.backdrop_url || title.poster_url" :alt="title.title">
+                      <span class="billboard-card-shade">
+                        <span class="billboard-card-copy">
+                          <span class="billboard-card-title">{{ title.title }}</span>
+                          <span v-if="cardSubtitle(title)" class="billboard-card-sub">{{ cardSubtitle(title) }}</span>
+                        </span>
+                        <span v-if="title.minutes_left" class="card-remaining">{{ title.minutes_left }} min left</span>
+                      </span>
+                    </button>
+                    </div>
+                    <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+                  </div>
+                  <div v-else class="home-basic-list">
+                    <button type="button" class="home-basic-item" v-for="title in keepWatching" :key="'keep-basic-' + title.media_type + ':' + title.tmdb_id" @click="resumeTitle(title)">{{ title.title }}<template v-if="cardSubtitle(title)"> · {{ cardSubtitle(title) }}</template><template v-if="title.minutes_left"> · {{ title.minutes_left }} min left</template></button>
+                  </div>
+                </section>
+                <section v-if="recentTitles.length" class="home-row">
+                  <h2 class="home-row-heading">Recently watched</h2>
+                  <div v-if="richContentEnabled" class="home-row-rail">
+                    <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+                    <div class="billboard-scroller" @scroll="refreshRails">
+                    <button type="button" class="billboard-card" v-for="title in recentTitles" :key="'recent-' + title.media_type + ':' + title.tmdb_id" @click="openTitle(title)">
+                      <img v-if="title.backdrop_url || title.poster_url" :src="title.backdrop_url || title.poster_url" :alt="title.title">
+                      <span class="billboard-card-shade">
+                        <span class="billboard-card-copy">
+                          <span class="billboard-card-title">{{ title.title }}</span>
+                          <span v-if="cardSubtitle(title)" class="billboard-card-sub">{{ cardSubtitle(title) }}</span>
+                        </span>
+                        <span v-if="title.next_air_date" class="card-next-air"><small>Next</small>{{ formatAirDate(title.next_air_date) }}</span>
+                      </span>
+                    </button>
+                    </div>
+                    <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+                  </div>
+                  <div v-else class="home-basic-list">
+                    <button type="button" class="home-basic-item" v-for="title in recentTitles" :key="'recent-basic-' + title.media_type + ':' + title.tmdb_id" @click="openTitle(title)">{{ title.title }}<template v-if="cardSubtitle(title)"> · {{ cardSubtitle(title) }}</template><template v-if="title.next_air_date"> · Next {{ formatAirDate(title.next_air_date) }}</template></button>
+                  </div>
+                </section>
+                <section v-if="topSeries.length" class="home-row">
+                  <h2 class="home-row-heading">Top 10 series trending</h2>
+                  <div v-if="richContentEnabled" class="home-row-rail">
+                    <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+                    <div class="billboard-scroller poster-scroller" @scroll="refreshRails">
+                    <div class="rank-item" v-for="title in topSeries" :key="'series-' + title.tmdb_id">
+                      <rank-mark :rank="title.rank" :uid="'tv-' + title.tmdb_id"></rank-mark>
+                      <button type="button" class="poster-card" @click="openTitle(title)" :aria-label="title.title">
+                        <img v-if="title.poster_url || title.backdrop_url" :src="title.poster_url || title.backdrop_url" :alt="title.title">
+                        <span v-if="title.next_air_date" class="card-next-air"><small>Next</small>{{ formatAirDate(title.next_air_date) }}</span>
+                      </button>
+                    </div>
+                    </div>
+                    <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+                  </div>
+                  <div v-else class="home-basic-list">
+                    <button type="button" class="home-basic-item" v-for="title in topSeries" :key="'series-basic-' + title.tmdb_id" @click="openTitle(title)"><span class="home-basic-rank">{{ title.rank }}</span>{{ title.title }}<template v-if="title.next_air_date"> · Next {{ formatAirDate(title.next_air_date) }}</template></button>
+                  </div>
+                </section>
+                <section v-if="topMovies.length" class="home-row">
+                  <h2 class="home-row-heading">Top 10 movies trending</h2>
+                  <div v-if="richContentEnabled" class="home-row-rail">
+                    <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+                    <div class="billboard-scroller poster-scroller" @scroll="refreshRails">
+                    <div class="rank-item" v-for="title in topMovies" :key="'movie-' + title.tmdb_id">
+                      <rank-mark :rank="title.rank" :uid="'movie-' + title.tmdb_id"></rank-mark>
+                      <button type="button" class="poster-card" @click="openTitle(title)" :aria-label="title.title">
+                        <img v-if="title.poster_url || title.backdrop_url" :src="title.poster_url || title.backdrop_url" :alt="title.title">
+                      </button>
+                    </div>
+                    </div>
+                    <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+                  </div>
+                  <div v-else class="home-basic-list">
+                    <button type="button" class="home-basic-item" v-for="title in topMovies" :key="'movie-basic-' + title.tmdb_id" @click="openTitle(title)"><span class="home-basic-rank">{{ title.rank }}</span>{{ title.title }}</button>
+                  </div>
+                </section>
+                <section v-if="searchHistory.length" class="home-row">
+                  <h2 class="home-row-heading">Recent searches</h2>
+                  <div class="home-row-rail">
+                    <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
+                    <div class="billboard-scroller" @scroll="refreshRails">
+                      <button type="button" class="search-chip" v-for="term in searchHistory" :key="'search-' + term" @click="onHistoryClick(term)">{{ term }}</button>
+                    </div>
+                    <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+                  </div>
+                  <button type="button" class="search-history-clear" @click="clearSearches">Clear search history</button>
+                </section>
+                <nav class="home-shortcuts">
+                  <button type="button" class="home-shortcut" @click="goHistory()">
+                    <span class="icon history_icon"></span>
+                    <span>History</span>
+                  </button>
+                  <button type="button" class="home-shortcut" @click="goTrending()">
+                    <span class="icon trending_icon"></span>
+                    <span>Community Searches</span>
+                  </button>
+                  <button type="button" class="home-shortcut" @click="goFavorites()">
+                    <span class="icon favorites_icon"></span>
+                    <span>Favorites</span>
+                  </button>
+                  <label class="rich-toggle-label home-rich-toggle">
+                    <input type="checkbox" v-model="richContentEnabled" @change="onRichToggle" class="rich-toggle-input">
+                    <span class="rich-toggle-mark" aria-hidden="true"></span>
+                    <span class="rich-toggle-text">Rich Content</span>
+                  </label>
+                </nav>
+              </div>
+              </template>
             </div>
         </script>
 
@@ -85,7 +232,16 @@
 
         <script type="text/x-template" id="search-results-screen-template">
             <div class="root">
-              <div class="topbar">
+              <div v-if="richContentEnabled" class="topbar topbar-home">
+                  <a class="home-logo-link" href="/" @click.prevent="goHome()">
+                    <img class="home-logo" src="/lib/rapidbay-logo.png" alt="RapidBay">
+                  </a>
+                  <form class="home-search" @submit.prevent="onSearchSubmit">
+                    <span class="home-search-icon" aria-hidden="true"></span>
+                    <input type="text" class="form-control" v-model="query" autocorrect="off" autocapitalize="none" placeholder="Search">
+                  </form>
+              </div>
+              <div v-else class="topbar">
                       <button @click="back()" class="btn btn-dark backarrow">
                         <div class="icon back_icon"/>
                       </button>
@@ -95,28 +251,134 @@
                       <div v-else-if="searchterm === '[favorites]'">
                           <div class="icon favorites_icon" style="display:inline-block;vertical-align:middle;"/>
                       </div>
-                      <div v-else-if="searchterm">
+                      <div v-else-if="searchterm" class="search-results-title">
                           &#128270;
                           {{ searchterm }}
                       </div>
                       <div v-else>
                           <div class="icon trending_icon" style="display:inline-block;vertical-align:middle;"/>
                       </div>
-                  <div class="buttons">
-                      <fullscreen-button/>
-                  </div>
               </div>
               <loading-spinner v-if="results === null"/>
               <div v-else class="tablewrapper">
-                  <div>
+                  <div v-if="(richContentEnabled || pinnedTitle) && groups.length > 0" class="rich-results-content">
+                      <div class="grouped-results">
+                          <section v-for="group in groups" :key="group.tmdb_id || group.title" class="group-card" :class="{ 'group-card-backed': group.backdrop_url }">
+                              <div v-if="group.backdrop_url" class="group-backdrop" :style="{ backgroundImage: 'url(' + JSON.stringify(group.backdrop_url) + ')' }"></div>
+                              <div class="group-side" v-if="group.poster_url || (group.genres && group.genres.length) || group.vote_average || group.runtime">
+                                  <img v-if="group.poster_url" :src="group.poster_url" class="group-poster" :alt="group.title + ' poster'">
+                                  <div v-if="(group.genres && group.genres.length) || group.vote_average || group.runtime" class="group-side-meta">
+                                      <div v-if="group.genres && group.genres.length" class="group-genres">
+                                          <span v-for="genre in group.genres" :key="genre" class="group-genre">{{ genre }}</span>
+                                      </div>
+                                      <div v-if="group.runtime" class="group-runtime">{{ formatRuntime(group.runtime) }}</div>
+                                      <div v-if="group.vote_average" class="group-rating">{{ formatRating(group.vote_average) }}<span>/10</span></div>
+                                  </div>
+                              </div>
+                              <div class="group-info">
+                                  <h2 class="group-title">{{ group.title }}<span v-if="group.year" class="group-year"> ({{ group.year }})</span><span v-if="group.media_type === 'movie' && isMovieWatched(group)" class="watched-mark" title="Watched">&#x2713;</span></h2>
+                                  <p v-if="group.overview" class="group-plot">{{ group.overview }}</p>
+                                  <div v-if="group.media_type === 'tv'">
+                                      <section v-if="group.latest_episode" class="latest-episode">
+                                          <h3 class="latest-heading">Latest</h3>
+                                          <div class="episode-card" tabindex="0" @click="toggleLatest(group)">
+                                              <div class="latest-body">
+                                                  <img v-if="group.latest_episode.still_url" class="latest-still" :src="group.latest_episode.still_url" :alt="group.latest_episode.name || 'Latest episode'">
+                                                  <div class="latest-copy">
+                                                      <div class="latest-title">{{ episodeCode(group.latest_episode.season_number, group.latest_episode.episode_number) }}<template v-if="group.latest_episode.name"> · {{ group.latest_episode.name }}</template><span v-if="isEpisodeNumberWatched(group, group.latest_episode.season_number, group.latest_episode.episode_number)" class="watched-mark" title="Watched">&#x2713;</span></div>
+                                                      <div class="latest-meta" v-if="group.latest_episode.air_date || group.latest_episode.runtime || group.latest_episode.vote_average">
+                                                          <span v-if="group.latest_episode.air_date">{{ formatAirDate(group.latest_episode.air_date) }}</span>
+                                                          <span v-if="group.latest_episode.runtime">{{ formatRuntime(group.latest_episode.runtime) }}</span>
+                                                          <span v-if="group.latest_episode.vote_average">{{ formatRating(group.latest_episode.vote_average) }}/10</span>
+                                                      </div>
+                                                      <p v-if="group.latest_episode.overview" class="latest-plot">{{ group.latest_episode.overview }}</p>
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <table v-if="isLatestOpen(group) && latestEpisodeResults(group).length" class="table table-hover latest-variations">
+                                              <tbody>
+                                                  <tr v-for="result in latestEpisodeResults(group)" :key="result.magnet || result.torrent_link || result.title" tabindex="0" @click.stop="onResultClick(result, group.latest_episode.season_number, group.latest_episode.episode_number)">
+                                                      <td :title="result.title"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ episodeVariationLabel(group, {season: group.latest_episode.season_number}, {episode: group.latest_episode.episode_number}, result) }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
+                                                  </tr>
+                                              </tbody>
+                                          </table>
+                                      </section>
+                                      <div v-for="season in group.seasons" :key="season.season" class="season-block">
+                                          <h3
+                                              class="season-header"
+                                              :class="{ 'season-header-toggle': group.seasons.length > 1 }"
+                                              :tabindex="group.seasons.length > 1 ? 0 : null"
+                                              @click="toggleSeason(group, season)"
+                                          >Season {{ season.season }}</h3>
+                                          <div v-if="isSeasonOpen(group, season)" class="episode-list">
+                                          <div v-if="isSeasonLoading(group, season)" class="episode-loading">Loading episodes</div>
+                                          <div v-else v-for="episode in seasonEpisodes(group, season)" :key="episode.key" class="episode-block">
+                                              <div
+                                                  class="episode-card"
+                                                  tabindex="0"
+                                                  @click="toggleEpisode(group, season, episode)"
+                                              >
+                                                  <div class="latest-body">
+                                                      <img v-if="episode.details && episode.details.still_url" class="latest-still" :src="episode.details.still_url" :alt="episode.details.name || episode.label">
+                                                      <div v-else class="latest-still latest-still-empty"></div>
+                                                      <div class="latest-copy">
+                                                          <div class="latest-title">
+                                                              <template v-if="episode.episode !== null">{{ episodeCode(season.season, episode.episode) }}<template v-if="episode.details && episode.details.name"> · {{ episode.details.name }}</template></template>
+                                                              <template v-else>{{ episode.label }}</template>
+                                                              <span v-if="isEpisodeWatched(group, season, episode)" class="watched-mark" title="Watched">&#x2713;</span>
+                                                          </div>
+                                                          <div class="latest-meta" v-if="episode.details && (episode.details.air_date || episode.details.runtime || episode.details.vote_average)">
+                                                              <span v-if="episode.details.air_date">{{ formatAirDate(episode.details.air_date) }}</span>
+                                                              <span v-if="episode.details.runtime">{{ formatRuntime(episode.details.runtime) }}</span>
+                                                              <span v-if="episode.details.vote_average">{{ formatRating(episode.details.vote_average) }}/10</span>
+                                                          </div>
+                                                          <p v-if="episode.details && episode.details.overview" class="latest-plot">{{ episode.details.overview }}</p>
+                                                      </div>
+                                                  </div>
+                                              </div>
+                                              <table v-if="isEpisodeOpen(group, season, episode)" class="table table-hover episode-variations">
+                                                  <tbody>
+                                                      <tr v-for="result in episode.results" :key="(result.magnet || result.torrent_link || result.title) + (result.seasonPack ? ':pack' : '')" tabindex="0" @click.stop="onResultClick(result, season.season, episode.episode)">
+                                                          <td :title="result.title"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ episodeVariationLabel(group, season, episode, result) }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
+                                                      </tr>
+                                                  </tbody>
+                                              </table>
+                                          </div>
+                                          </div>
+                                      </div>
+                                  </div>
+                                  <div v-else>
+                                      <table class="table table-hover group-table">
+                                          <tbody>
+                                              <tr v-for="row in movieResultRows(group)" :key="row.key" tabindex="0" @click="onMovieRowClick(group, row)">
+                                                  <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span></template></td>
+                                              </tr>
+                                          </tbody>
+                                      </table>
+                                  </div>
+                              </div>
+                          </section>
+                      </div>
+                      <section v-if="other.length > 0" class="other-results">
+                          <h2 class="other-results-title">Other results</h2>
+                          <table class="table table-hover other-results-table">
+                              <tbody>
+                                  <tr v-for="result in other" :key="result.magnet || result.torrent_link || result.title" tabindex="0" @click="onResultClick(result)">
+                                      <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
+                                  </tr>
+                              </tbody>
+                          </table>
+                      </section>
+                  </div>
+                  <div v-else class="flat-results">
                       <table class="table table-hover">
                           <tbody>
                               <tr
                               tabindex="0"
-                              v-for="result in results"
+                              v-for="result in (richContentEnabled ? other : results)"
                               @click="onResultClick(result)"
                               >
-                                  <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}</td>
+                                  <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="richContentEnabled && result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
                               </tr>
                           </tbody>
                       </table>
@@ -185,40 +447,107 @@
         </script>
 
         <script type="text/x-template" id="player-template">
-                 <div class="video_wrapper">
-                   <div class="topbar topbar-flex" v-if="hovering">
-                       <button @click="back()" class="btn btn-dark backarrow">
+                 <div class="video_wrapper" :class="{ 'controls-hidden': !controlsOn }">
+                   <div class="topbar topbar-flex player-top" v-show="controlsOn">
+                       <button @click="back()" class="btn btn-dark backarrow" aria-label="Back">
                          <div class="icon back_icon"/>
                        </button>
-                       <div class="filename-truncate">
-                           <a tabindex="-1" :href="window.location.origin + url" class="video_url">
-                               {{decodeURIComponent(url.split("/").pop())}}
-                           </a>
-                       </div>
                        <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
                            {{Math.round(downloadProgress * 100)}}%
                            <span v-if="downloadStatusLabel" class="download-progress-tooltip">{{downloadStatusLabel}}</span>
                        </span>
                        <div class="buttons" v-if="supported">
                            <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>
-            	<caption-button v-if="url"/>
                            <favorite-button :magnet="magnet" :filename="filename"/>
-                           <fullscreen-button/>
                        </div>
                    </div>
                    <video
                 poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                 disablepictureinpicture
-                       controlslist="nodownload noplaybackrate"
-                v-if="supported && url" controls autoplay playsinline tabindex="0"
+                v-if="supported && url" autoplay playsinline tabindex="0"
+                @click="togglePlay"
             >
                        <track v-for="subtitle in subtitles"
-                           :label="subtitle.language" kind="subtitles"
+                           :label="languageName(subtitle.language)" kind="subtitles"
                            :srclang="subtitle.language"
                            :src="subtitle.url"
                            :id="subtitle.url"
                        >
                    </video>
+                   <div class="player-controls" v-show="controlsOn && supported" @click.stop>
+                       <div class="player-progress">
+                           <input class="player-scrub" type="range" min="0" max="1000" :value="scrubValue" :style="{ '--progress': progressPercent }" @input="onScrub" aria-label="Seek">
+                           <span class="player-remaining">{{ remainingLabel }}</span>
+                       </div>
+                       <div class="player-row">
+                           <button type="button" class="player-btn" @click="togglePlay" :aria-label="paused ? 'Play' : 'Pause'">
+                               <svg v-if="paused" class="solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+                               <svg v-else class="solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3v14H7zM14 5h3v14h-3z"></path></svg>
+                           </button>
+                           <button type="button" class="player-btn" @click="seekBy(-10)" aria-label="Back 10 seconds">
+                               <svg class="player-skip" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="18" fill="none" stroke-dasharray="96 18" stroke-linecap="round" transform="rotate(200 32 32)"></circle><polygon class="arrow" points="30,8 42,14 30,20"></polygon><text x="32" y="38" text-anchor="middle">10</text></svg>
+                           </button>
+                           <button type="button" class="player-btn" @click="seekBy(10)" aria-label="Forward 10 seconds">
+                               <svg class="player-skip" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="18" fill="none" stroke-dasharray="96 18" stroke-linecap="round" transform="rotate(-20 32 32)"></circle><polygon class="arrow" points="34,8 22,14 34,20"></polygon><text x="32" y="38" text-anchor="middle">10</text></svg>
+                           </button>
+                           <div class="player-volume">
+                               <button type="button" class="player-btn" @click="toggleMute" :aria-label="muted ? 'Unmute' : 'Mute'">
+                                   <svg v-if="muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10H4zM16 9l5 6M21 9l-5 6"></path></svg>
+                                   <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10H4zM16 9a4 4 0 0 1 0 6M18.5 7a7 7 0 0 1 0 10"></path></svg>
+                               </button>
+                               <input class="player-volume-slider" type="range" min="0" max="1" step="0.05" :value="muted ? 0 : volume" @input="setVolume" aria-label="Volume">
+                           </div>
+                           <div class="player-title">{{ displayTitle }}</div>
+                           <button v-if="nextFilename" type="button" class="player-btn" @click="playNext" aria-label="Next episode">
+                               <svg class="solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14l9-7zM17 5h2v14h-2z"></path></svg>
+                           </button>
+                           <div class="player-pop">
+                               <button type="button" class="player-btn" @click="toggleMenu('episodes')" aria-label="Episodes" :aria-expanded="openMenu === 'episodes'">
+                                   <svg class="solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14v3H5zM5 11h14v3H5zM5 15h14v3H5z"></path></svg>
+                               </button>
+                               <div class="player-menu player-episodes" v-if="openMenu === 'episodes'">
+                                   <p class="player-episode-show" v-if="episodeShowTitle">{{ episodeShowTitle }}</p>
+                                   <div class="player-episode-scroll" @keydown="onEpisodeKeydown">
+                                       <p v-if="episodesLoading" class="player-menu-empty">Loading episodes</p>
+                                       <div v-for="group in episodeGroups" :key="'season-' + group.season">
+                                           <p class="player-episode-season" v-if="episodeGroups.length > 1">Season {{ group.season }}</p>
+                                           <button type="button" class="player-episode" v-for="episode in group.episodes" :key="episode.season + '-' + episode.episode" :data-season="episode.season" :data-episode="episode.episode" :class="{ current: episode.current, focused: isEpisodeFocused(episode) }" @mouseenter="focusEpisode(episode, $event)" @focus="focusEpisode(episode)" @click="playEpisode(episode)">
+                                               <span class="player-episode-line">
+                                                   <span class="player-episode-num">{{ episode.episode }}</span>
+                                                   <span class="player-episode-name">{{ episode.name || ('Episode ' + episode.episode) }}</span>
+                                               </span>
+                                               <span class="player-episode-detail" v-if="(episode.current || isEpisodeFocused(episode)) && (episode.stillUrl || episode.overview)">
+                                                   <span class="player-episode-still" v-if="episode.stillUrl" :style="{ backgroundImage: 'url(' + episode.stillUrl + ')' }">
+                                                       <span v-if="episode.current" class="player-episode-now"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="7" width="2" height="7"></rect><rect x="5" y="4" width="2" height="10"></rect><rect x="9" y="6" width="2" height="8"></rect><rect x="13" y="2" width="2" height="12"></rect></svg>Now playing</span>
+                                                       <span v-else class="player-episode-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6v12l10-6z"></path></svg></span>
+                                                   </span>
+                                                   <span class="player-episode-plot" v-if="episode.overview">{{ episode.overview }}</span>
+                                               </span>
+                                           </button>
+                                       </div>
+                                       <p v-if="!episodesLoading && !episodeChoices.length" class="player-menu-empty">No other episodes</p>
+                                   </div>
+                               </div>
+                           </div>
+                           <div class="player-pop">
+                               <button type="button" class="player-btn" @click="toggleMenu('tracks')" aria-label="Audio and subtitles" :aria-expanded="openMenu === 'tracks'">
+                                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"></path><path d="M8 11h2M12 11h4M8 14h5"></path></svg>
+                               </button>
+                               <div class="player-menu player-tracks" v-if="openMenu === 'tracks'">
+                                   <p class="player-menu-label">Audio</p>
+                                   <button type="button" v-for="track in audioChoices" :key="'aud-' + track.index" :class="{ selected: activeAudio === track.index }" @click="selectAudio(track.index)">{{ track.label }}</button>
+                                   <button v-if="!audioChoices.length" type="button" class="selected">Original</button>
+                                   <p class="player-menu-label">Subtitles</p>
+                                   <button type="button" :class="{ selected: activeCaption === null }" @click="selectCaption(null)">Off</button>
+                                   <button type="button" v-for="track in captionChoices" :key="'cap-' + track.index" :class="{ selected: activeCaption === track.index }" @click="selectCaption(track.index)">{{ track.label }}</button>
+                                   <p v-if="!captionChoices.length" class="player-menu-empty">No subtitles</p>
+                               </div>
+                           </div>
+                           <button type="button" class="player-btn" @click="toggleFullscreen" aria-label="Full screen">
+                               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg>
+                           </button>
+                       </div>
+                   </div>
                  </div>
         </script>
 

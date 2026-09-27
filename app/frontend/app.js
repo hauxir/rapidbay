@@ -2426,34 +2426,29 @@
                 var labelled = labelWithResolution(cleaned);
                 return labelled.text || result.title;
             },
-            groupResults: function (group) {
-                return (group.results || []).slice().sort(function (a, b) {
-                    var rankA = labelWithResolution(stripKnownMovieTitle(a.title || "", group && group.title, group && group.year)).rank;
-                    var rankB = labelWithResolution(stripKnownMovieTitle(b.title || "", group && group.title, group && group.year)).rank;
-                    if (rankA !== rankB) {
-                        return rankB - rankA;
+            sortByResolutionAndSeeds: function (results, describe) {
+                return (results || []).slice().sort(function (a, b) {
+                    var left = describe(a);
+                    var right = describe(b);
+                    if (left.rank !== right.rank) {
+                        return right.rank - left.rank;
                     }
                     return (b.seeds || 0) - (a.seeds || 0);
+                }).map(function (result) {
+                    var info = describe(result);
+                    return {
+                        result: result,
+                        label: info.text || result.title,
+                        rank: info.rank,
+                    };
                 });
             },
-            resolutionOpenKey: function (group, rank) {
-                return [group.tmdb_id || group.title, group.year || "", rank].join(":");
-            },
-            isResolutionOpen: function (group, rank) {
-                return !!this.openResolutions[this.resolutionOpenKey(group, rank)];
-            },
-            showResolution: function (group, rank) {
-                this.$set(this.openResolutions, this.resolutionOpenKey(group, rank), true);
-            },
-            movieResultRows: function (group) {
-                var results = this.groupResults(group);
-                var collapse = results.length > 10;
+            buildResolutionRows: function (labelledResults, isRankOpen, alwaysCollapse) {
+                var collapse = alwaysCollapse || labelledResults.length > 10;
                 var buckets = [];
                 var indexByRank = {};
-                results.forEach(function (result) {
-                    var cleaned = stripKnownMovieTitle(result.title || "", group && group.title, group && group.year);
-                    var labelled = labelWithResolution(cleaned);
-                    var rank = labelled.rank;
+                labelledResults.forEach(function (item) {
+                    var rank = item.rank;
                     if (indexByRank[rank] === undefined) {
                         indexByRank[rank] = buckets.length;
                         buckets.push({
@@ -2462,15 +2457,11 @@
                             results: [],
                         });
                     }
-                    buckets[indexByRank[rank]].results.push({
-                        result: result,
-                        label: labelled.text || result.title,
-                    });
+                    buckets[indexByRank[rank]].results.push(item);
                 });
                 var rows = [];
-                var self = this;
                 buckets.forEach(function (bucket) {
-                    var hidden = collapse && bucket.results.length > 4 && !self.isResolutionOpen(group, bucket.rank);
+                    var hidden = collapse && bucket.results.length > 4 && !isRankOpen(bucket.rank);
                     var visible = hidden ? bucket.results.slice(0, 3) : bucket.results;
                     visible.forEach(function (item, index) {
                         rows.push({
@@ -2491,6 +2482,64 @@
                     }
                 });
                 return rows;
+            },
+            resolutionOpenKey: function (group, rank) {
+                return [group.tmdb_id || group.title, group.year || "", rank].join(":");
+            },
+            isResolutionOpen: function (group, rank) {
+                return !!this.openResolutions[this.resolutionOpenKey(group, rank)];
+            },
+            showResolution: function (group, rank) {
+                this.$set(this.openResolutions, this.resolutionOpenKey(group, rank), true);
+            },
+            movieResultRows: function (group) {
+                var self = this;
+                var labelled = this.sortByResolutionAndSeeds(group.results || [], function (result) {
+                    var cleaned = stripKnownMovieTitle(result.title || "", group && group.title, group && group.year);
+                    var info = labelWithResolution(cleaned);
+                    return { text: info.text || result.title, rank: info.rank };
+                });
+                return this.buildResolutionRows(labelled, function (rank) {
+                    return self.isResolutionOpen(group, rank);
+                });
+            },
+            episodeResolutionOpenKey: function (group, season, episode, rank) {
+                return ["episode", group.tmdb_id || group.title, season && season.season, episode && (episode.key || episode.episode), rank].join(":");
+            },
+            episodeResultRows: function (group, season, episode, results) {
+                var self = this;
+                var list = results || (episode && episode.results) || [];
+                var labelled = this.sortByResolutionAndSeeds(list, function (result) {
+                    return self.episodeVariation(group, season, episode, result);
+                });
+                return this.buildResolutionRows(labelled, function (rank) {
+                    return !!self.openResolutions[self.episodeResolutionOpenKey(group, season, episode, rank)];
+                }, true);
+            },
+            latestEpisodeRows: function (group) {
+                var latest = group.latest_episode;
+                if (!latest) {
+                    return [];
+                }
+                return this.episodeResultRows(
+                    group,
+                    { season: latest.season_number },
+                    { episode: latest.episode_number, key: String(latest.episode_number) },
+                    this.latestEpisodeResults(group)
+                );
+            },
+            onEpisodeRowClick: function (group, season, episode, row) {
+                if (row.type === "more") {
+                    this.$set(this.openResolutions, this.episodeResolutionOpenKey(group, season, episode, row.rank), true);
+                    return;
+                }
+                var seasonNumber = season && season.season;
+                var episodeNumber = episode && episode.episode;
+                if (group.latest_episode && seasonNumber === undefined) {
+                    seasonNumber = group.latest_episode.season_number;
+                    episodeNumber = group.latest_episode.episode_number;
+                }
+                this.onResultClick(row.result, seasonNumber, episodeNumber);
             },
             onMovieRowClick: function (group, row) {
                 if (row.type === "more") {
@@ -2736,7 +2785,7 @@
                 var key = this.latestOpenKey(group);
                 this.$set(this.openEpisodes, key, !this.openEpisodes[key]);
             },
-            episodeVariationLabel: function (group, season, episode, result) {
+            episodeVariation: function (group, season, episode, result) {
                 var title = result.title || "";
                 var cleaned = title;
                 var showPattern = flexibleShowPattern(group && group.title);
@@ -2759,7 +2808,13 @@
                 cleaned = cleaned.replace(/[\[\]()]/g, " ");
                 cleaned = cleaned.replace(/^[\s._:-]+/, "").replace(/[\s._:-]+$/, "").replace(/\s{2,}/g, " ").trim();
                 var labelled = labelWithResolution(cleaned);
-                return labelled.text || title;
+                return {
+                    text: labelled.text || title,
+                    rank: labelled.rank,
+                };
+            },
+            episodeVariationLabel: function (group, season, episode, result) {
+                return this.episodeVariation(group, season, episode, result).text;
             },
             loadRichSearch: function () {
                 var self = this;

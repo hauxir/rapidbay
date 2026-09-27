@@ -297,8 +297,8 @@
                                           </div>
                                           <table v-if="isLatestOpen(group) && latestEpisodeResults(group).length" class="table table-hover latest-variations">
                                               <tbody>
-                                                  <tr v-for="result in latestEpisodeResults(group)" :key="result.magnet || result.torrent_link || result.title" tabindex="0" @click.stop="onResultClick(result, group.latest_episode.season_number, group.latest_episode.episode_number)">
-                                                      <td :title="result.title"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ episodeVariationLabel(group, {season: group.latest_episode.season_number}, {episode: group.latest_episode.episode_number}, result) }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
+                                                  <tr v-for="row in latestEpisodeRows(group)" :key="row.key" tabindex="0" @click.stop="onEpisodeRowClick(group, {season: group.latest_episode.season_number}, {episode: group.latest_episode.episode_number, key: String(group.latest_episode.episode_number)}, row)">
+                                                      <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span></template></td>
                                                   </tr>
                                               </tbody>
                                           </table>
@@ -338,8 +338,8 @@
                                               </div>
                                               <table v-if="isEpisodeOpen(group, season, episode)" class="table table-hover episode-variations">
                                                   <tbody>
-                                                      <tr v-for="result in episode.results" :key="(result.magnet || result.torrent_link || result.title) + (result.seasonPack ? ':pack' : '')" tabindex="0" @click.stop="onResultClick(result, season.season, episode.episode)">
-                                                          <td :title="result.title"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ episodeVariationLabel(group, season, episode, result) }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
+                                                      <tr v-for="row in episodeResultRows(group, season, episode)" :key="row.key" tabindex="0" @click.stop="onEpisodeRowClick(group, season, episode, row)">
+                                                          <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span></template></td>
                                                       </tr>
                                                   </tbody>
                                               </table>

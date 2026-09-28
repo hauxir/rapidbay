@@ -188,6 +188,20 @@ class HeaderMiddleware(BaseHTTPMiddleware):
 app.add_middleware(HeaderMiddleware)
 
 
+def _first_episode(value: int | List[int] | None) -> int | None:
+    """parse-torrent-title returns a list for multi-episode files (S01E01-E02); use the first."""
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
+def _last_episode(value: int | List[int] | None) -> int | None:
+    """parse-torrent-title returns a list for multi-episode files (S01E01-E02); use the last."""
+    if isinstance(value, list):
+        return value[-1] if value else None
+    return value
+
+
 def _get_files(magnet_hash: str) -> List[str] | None:
     filepaths: List[str] | None = get_filepaths(magnet_hash)
 
@@ -208,8 +222,8 @@ def _get_files(magnet_hash: str) -> List[str] | None:
         def get_episode_info(fn: str) -> List[int | str | None]:
             try:
                 parsed: Any = PTN.parse(fn)
-                episode_num: int | str | None = parsed.get("episode")
-                season_num: int | str | None = parsed.get("season")
+                episode_num: int | str | None = _first_episode(parsed.get("episode"))
+                season_num: int | str | None = _first_episode(parsed.get("season"))
                 year: int | str | None = parsed.get("year")
                 return [season_num, episode_num, year]
             except TypeError:
@@ -874,10 +888,12 @@ def next_file(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> 
         # If no next file in torrent, search for next episode
         if not next_filename:
             try:
-                parsed: Any = PTN.parse(filename)
+                # standardise=False keeps the raw resolution/codec tokens (e.g. "x264")
+                # so the search term matches how releases are actually named.
+                parsed: Any = PTN.parse(filename, standardise=False)
                 title: str | None = parsed.get("title")
-                season: int | None = parsed.get("season")
-                episode: int | None = parsed.get("episode")
+                season: int | None = _last_episode(parsed.get("season"))
+                episode: int | None = _last_episode(parsed.get("episode"))
                 resolution: str | None = parsed.get("resolution")
                 codec: str | None = parsed.get("codec")
                 if title and season is not None and episode is not None:

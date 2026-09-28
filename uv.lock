@@ -569,10 +569,13 @@ wheels = [
 ]
 
 [[package]]
-name = "parse-torrent-name"
-version = "1.1.1"
+name = "parse-torrent-title"
+version = "2.8.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1a/c9/fbafe4f215ff24a1209e848763699cb8831d459c138fe164ea45b04c02ea/parse-torrent-name-1.1.1.tar.gz", hash = "sha256:ada6fa9d9f27dee0dece96cbd845962e3d22ec70239fecdc5b71e776c0ec31c4", size = 8976, upload-time = "2016-09-03T14:56:08.96Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5b/c2/895f0bcfbf989c63da2c5d31819044d97169eba1aadd5720f0b346283f39/parse_torrent_title-2.8.2.tar.gz", hash = "sha256:fc35c8e8491bf5dce9a466713003013b2a3a27674792fc64e3a43eb7c4b2d805", size = 49132, upload-time = "2026-01-28T18:08:11.404Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/60/2027afee840bac28833c28002b6816a551e824ec156484dcbe404b2a91e2/parse_torrent_title-2.8.2-py3-none-any.whl", hash = "sha256:2f663b5db508a9aec060e0ad73ec789e46664f848b2c79f3b46202aff35ca7b5", size = 20318, upload-time = "2026-01-28T18:08:12.581Z" },
+]
 
 [[package]]
 name = "pluggy"
@@ -875,7 +878,7 @@ dependencies = [
     { name = "iso-639" },
     { name = "libtorrent" },
     { name = "lxml" },
-    { name = "parse-torrent-name" },
+    { name = "parse-torrent-title" },
     { name = "pymediainfo" },
     { name = "python-dateutil" },
     { name = "python-multipart" },
@@ -913,7 +916,7 @@ requires-dist = [
     { name = "iso-639", specifier = "==0.4.5" },
     { name = "libtorrent", specifier = "==2.0.11" },
     { name = "lxml", specifier = "==5.4.0" },
-    { name = "parse-torrent-name", specifier = "==1.1.1" },
+    { name = "parse-torrent-title", specifier = "==2.8.2" },
     { name = "pymediainfo", specifier = "==4.2.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==8.3.4" },
     { name = "python-dateutil", specifier = "==2.9.0.post0" },

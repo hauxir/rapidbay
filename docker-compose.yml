@@ -1,6 +1,12 @@
-rapidbay:
-    ports:
-        - "5000:5000"
-    build: .
-    volumes:
-        - ./app:/app
+services:
+    rapidbay:
+        ports:
+            - "5000:5000"
+        build: .
+        env_file:
+            - .env
+        environment:
+            LIBRARY_PATH: /data/library.json
+        volumes:
+            - ./app:/app
+            - ./data:/data

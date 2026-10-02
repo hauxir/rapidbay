@@ -25,13 +25,24 @@ import PTN
 import requests
 import requests.adapters
 import requests.utils
+import library
+from result_grouping import (
+    FIRST_RENDER_LOOKUPS,
+    MAX_TMDB_LOOKUPS,
+    SearchAssembler,
+    enrich_search_results,
+    prepare_search,
+    resolve_title,
+    season_episode_details,
+)
+from tmdb import TMDBClient, tmdb_disk_cache
 import settings
 import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -47,6 +58,150 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseModel):
     results: List[SearchResult]
+
+
+class RichSearchEpisodeItem(BaseModel):
+    title: str
+    seeds: int
+    magnet: str | None = None
+    torrent_link: str | None = None
+    status: str | None = None
+
+
+class RichSearchSeason(BaseModel):
+    season: int
+    episodes: list[RichSearchEpisodeItem]
+
+
+class RichSearchLatestEpisode(BaseModel):
+    name: str | None = None
+    overview: str | None = None
+    season_number: int
+    episode_number: int
+    air_date: str | None = None
+    runtime: int | None = None
+    vote_average: float | None = None
+    still_url: str | None = None
+
+
+class RichSearchGroup(BaseModel):
+    tmdb_id: int | None = None
+    title: str
+    year: int | None = None
+    poster_url: str | None = None
+    media_type: str | None = None
+    overview: str | None = None
+    genres: list[str] = Field(default_factory=list)
+    vote_average: float | None = None
+    backdrop_url: str | None = None
+    runtime: int | None = None
+    latest_episode: RichSearchLatestEpisode | None = None
+    seasons: list[RichSearchSeason]
+    results: list[RichSearchEpisodeItem] = Field(default_factory=list)
+
+
+class RichSearchResultItem(BaseModel):
+    title: str
+    seeds: int
+    magnet: str | None = None
+    torrent_link: str | None = None
+    status: str | None = None
+    parsed_title: str | None = None
+
+
+class RichSearchResponse(BaseModel):
+    groups: list[RichSearchGroup]
+    other: list[RichSearchResultItem]
+
+
+class TvSeasonEpisode(BaseModel):
+    episode_number: int
+    name: str | None = None
+    overview: str | None = None
+    air_date: str | None = None
+    runtime: int | None = None
+    vote_average: float | None = None
+    still_url: str | None = None
+
+
+class TvSeasonResponse(BaseModel):
+    episodes: list[TvSeasonEpisode] = Field(default_factory=list)
+
+
+class TvLookupResponse(BaseModel):
+    tmdb_id: int | None = None
+    title: str | None = None
+
+
+class LibraryEvent(BaseModel):
+    event: str
+    magnet: str | None = None
+    title: str = ""
+    filename: str | None = None
+    ts: int | None = None
+    position: float | None = None
+    duration: float | None = None
+
+
+class LibraryObserveRequest(BaseModel):
+    events: list[LibraryEvent] = Field(default_factory=list)
+
+
+class LibraryObserveResponse(BaseModel):
+    queued: int
+
+
+class LibraryWatchedEpisode(BaseModel):
+    season: int
+    episode: int
+    filename: str | None = None
+    at: int | None = None
+
+
+class LibraryDownload(BaseModel):
+    hash: str
+    label: str | None = None
+    at: int | None = None
+
+
+class LibraryTitle(BaseModel):
+    tmdb_id: int
+    media_type: str
+    title: str
+    year: int | None = None
+    poster_url: str | None = None
+    updated_at: int | None = None
+    watched_at: int | None = None
+    watched_episodes: list[LibraryWatchedEpisode] = Field(default_factory=list)
+    downloads: list[LibraryDownload] = Field(default_factory=list)
+
+
+class LibraryResponse(BaseModel):
+    titles: list[LibraryTitle]
+
+
+class HomeCard(BaseModel):
+    tmdb_id: int
+    media_type: str
+    title: str
+    year: int | None = None
+    poster_url: str | None = None
+    backdrop_url: str | None = None
+    subtitle: str | None = None
+    rank: int | None = None
+    next_air_date: str | None = None
+    minutes_left: int | None = None
+    magnet: str | None = None
+    filename: str | None = None
+    watched_at: int | None = None
+    watched_episodes: list[LibraryWatchedEpisode] = Field(default_factory=list)
+
+
+class HomeResponse(BaseModel):
+    keep_watching: list[HomeCard] = Field(default_factory=list)
+    recent: list[HomeCard] = Field(default_factory=list)
+    series: list[HomeCard] = Field(default_factory=list)
+    movies: list[HomeCard] = Field(default_factory=list)
 
 
 class MagnetLinkResponse(BaseModel):
@@ -151,6 +306,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     daemon = RapidBayDaemon()
     daemon.on_state_change = _state_notifier.notify
     daemon.start()
+    library.start()
     try:
         yield
     finally:
@@ -461,6 +617,241 @@ def search(searchterm: str = "", _: None = Depends(authorize)) -> Dict[str, Any]
     else:
         results = _NO_BACKEND_RESULTS
     return {"results": _finalize_results(results, searchterm)}
+
+
+@app.get("/api/rich_search/", response_model=RichSearchResponse)
+@app.get("/api/rich_search/{searchterm}", response_model=RichSearchResponse)
+def rich_search(
+    searchterm: str = "",
+    media: str | None = None,
+    tmdb: int | None = None,
+    _: None = Depends(authorize),
+) -> Dict[str, Any]:
+    if not (settings.JACKETT_HOST or settings.PROWLARR_HOST):
+        return {"groups": [], "other": []}
+
+    results = _indexer_search(searchterm)
+    results = _add_status_to_results(results)
+    focus = (media, tmdb) if media in ("tv", "movie") and tmdb is not None and tmdb > 0 else None
+    if focus is None:
+        return enrich_search_results(results, settings.TMDB_API_KEY)
+    return enrich_search_results(results, settings.TMDB_API_KEY, focus, query_title=searchterm)
+
+
+_TMDB_LOOKUP_CONCURRENCY = 4
+
+
+@app.get("/api/rich_search_events/")
+@app.get("/api/rich_search_events/{searchterm}")
+async def rich_search_events(searchterm: str = "", _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream grouped results: the largest titles render before the rest of TMDB returns."""
+
+    async def generate() -> AsyncIterator[str]:
+        def event(payload: Dict[str, Any]) -> str:
+            return f"data: {json.dumps(payload, default=str)}\n\n"
+
+        if not (settings.JACKETT_HOST or settings.PROWLARR_HOST):
+            yield event({"groups": [], "other": [], "done": True})
+            return
+
+        results = await asyncio.to_thread(_indexer_search, searchterm)
+        results = _add_status_to_results(results)
+        prepared = prepare_search(results)
+        assembler = SearchAssembler(prepared)
+        if not settings.TMDB_API_KEY:
+            snap = assembler.snapshot(final=True)
+            snap["done"] = True
+            yield event(snap)
+            return
+
+        client = TMDBClient(settings.TMDB_API_KEY, cache=tmdb_disk_cache())
+        lookups = prepared.lookups[:MAX_TMDB_LOOKUPS]
+        last_signature: str | None = None
+
+        def take(done: bool) -> Dict[str, Any] | None:
+            nonlocal last_signature
+            snap = assembler.snapshot(final=done)
+            signature = json.dumps(snap, default=str)
+            snap["done"] = done
+            if done:
+                return snap
+            if signature == last_signature or (not snap["groups"] and not snap["other"]):
+                return None
+            last_signature = signature
+            return snap
+
+        async def lookup_one(
+            lookup: Any, fetch_details: bool, search_response: Dict[str, Any] | None
+        ) -> tuple[list[tuple[tuple[str, int], Dict[str, Any]]], Dict[str, Any] | None]:
+            try:
+                return await asyncio.to_thread(resolve_title, client, lookup, fetch_details, search_response)
+            except Exception:
+                return [], search_response
+
+        first = lookups[:FIRST_RENDER_LOOKUPS]
+        rest = lookups[FIRST_RENDER_LOOKUPS:]
+        previews = await asyncio.gather(*[lookup_one(lookup, False, None) for lookup in first]) if first else []
+        search_responses: Dict[str, Dict[str, Any] | None] = {}
+        for lookup, (groups, search_response) in zip(first, previews):
+            search_responses[lookup.normalized] = search_response
+            if groups:
+                assembler.apply(lookup.normalized, groups)
+        partial = take(False)
+        if partial is not None:
+            yield event(partial)
+
+        details = (
+            await asyncio.gather(
+                *[lookup_one(lookup, True, search_responses.get(lookup.normalized)) for lookup in first]
+            )
+            if first
+            else []
+        )
+        for lookup, (groups, _search_response) in zip(first, details):
+            if groups:
+                assembler.apply(lookup.normalized, groups)
+            elif lookup.normalized not in assembler.resolved:
+                assembler.apply(lookup.normalized, [])
+        partial = take(False)
+        if partial is not None:
+            yield event(partial)
+
+        queue: asyncio.Queue[tuple[Any, list[tuple[tuple[str, int], Dict[str, Any]]], bool] | None] = asyncio.Queue()
+        semaphore = asyncio.Semaphore(_TMDB_LOOKUP_CONCURRENCY)
+
+        async def resolve_rest(lookup: Any) -> None:
+            async with semaphore:
+                groups, search_response = await lookup_one(lookup, False, None)
+                await queue.put((lookup, groups, False))
+                detailed, _search_response = await lookup_one(lookup, True, search_response)
+                await queue.put((lookup, detailed, True))
+
+        async def feed() -> None:
+            try:
+                if rest:
+                    await asyncio.gather(*[resolve_rest(lookup) for lookup in rest])
+            finally:
+                await queue.put(None)
+
+        feeder = asyncio.create_task(feed()) if rest else None
+        try:
+            if feeder is not None:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    lookup, groups, is_detail = item
+                    if groups:
+                        assembler.apply(lookup.normalized, groups)
+                    elif is_detail and lookup.normalized not in assembler.resolved:
+                        assembler.apply(lookup.normalized, [])
+                    partial = take(False)
+                    if partial is not None:
+                        yield event(partial)
+            final = assembler.snapshot(final=True)
+            final["done"] = True
+            yield event(final)
+        finally:
+            if feeder is not None:
+                feeder.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await feeder
+
+    return _sse_response(generate())
+
+
+@app.get("/api/tv/lookup/", response_model=TvLookupResponse)
+def tv_lookup(q: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Best TMDB TV match for a show name taken from a playing filename."""
+    query = q.strip()
+    if not settings.TMDB_API_KEY or not query:
+        return {"tmdb_id": None, "title": None}
+    client = TMDBClient(settings.TMDB_API_KEY)
+    response = client.search_multi(query)
+    results = response.get("results") if isinstance(response, dict) else None
+    if not isinstance(results, list):
+        return {"tmdb_id": None, "title": None}
+    folded = query.casefold()
+    chosen: Dict[str, Any] | None = None
+    for candidate in results:
+        if not isinstance(candidate, dict) or candidate.get("media_type") != "tv":
+            continue
+        name = candidate.get("name") or candidate.get("original_name") or ""
+        if isinstance(name, str) and name.casefold() == folded:
+            chosen = candidate
+            break
+        if chosen is None:
+            chosen = candidate
+    if not isinstance(chosen, dict) or not isinstance(chosen.get("id"), int):
+        return {"tmdb_id": None, "title": None}
+    name = chosen.get("name") or chosen.get("original_name") or query
+    return {"tmdb_id": chosen["id"], "title": name if isinstance(name, str) else query}
+
+
+@app.get("/api/tv/{tmdb_id}/season/{season_number}/", response_model=TvSeasonResponse)
+def tv_season(tmdb_id: int, season_number: int, _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Episode details for one season. Used when a season is opened, not during search."""
+    if not settings.TMDB_API_KEY or tmdb_id <= 0 or season_number < 0:
+        return {"episodes": []}
+    client = TMDBClient(settings.TMDB_API_KEY)
+    payload = client.get_tv_season(tmdb_id, season_number)
+    return {"episodes": season_episode_details(client, payload)}
+
+
+@app.post("/api/library/observe/", response_model=LibraryObserveResponse)
+def observe_library(request: LibraryObserveRequest, _: None = Depends(authorize)) -> Dict[str, int]:
+    """Queue download and watch events. TMDB lookup happens on a background thread."""
+    return {
+        "queued": library.enqueue(
+            [
+                {
+                    "event": event.event,
+                    "magnet": event.magnet,
+                    "title": event.title,
+                    "filename": event.filename,
+                    "ts": event.ts,
+                    "position": event.position,
+                    "duration": event.duration,
+                }
+                for event in request.events
+            ]
+        )
+    }
+
+
+@app.get("/api/library/", response_model=LibraryResponse)
+def get_library(_: None = Depends(authorize)) -> Dict[str, Any]:
+    return {"titles": library.catalog()}
+
+
+@app.get("/api/home/", response_model=HomeResponse)
+def get_home(_: None = Depends(authorize)) -> Dict[str, Any]:
+    return library.home()
+
+
+@app.post("/api/watch_rows/", response_model=HomeResponse)
+def post_watch_rows(request: LibraryObserveRequest, _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Draw one browser's Keep watching and Recently watched rows. Not stored."""
+    rows = library.watch_rows(
+        [
+            {
+                "event": event.event,
+                "magnet": event.magnet,
+                "title": event.title,
+                "filename": event.filename,
+                "ts": event.ts,
+                "position": event.position,
+                "duration": event.duration,
+            }
+            for event in request.events
+        ]
+    )
+    return {
+        "keep_watching": rows["keep_watching"],
+        "recent": rows["recent"],
+        "series": [],
+        "movies": [],
+    }
 
 
 def _serialize_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

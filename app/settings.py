@@ -62,6 +62,7 @@ MAX_PARALLEL_CONVERSIONS: int = 2
 
 OPENSUBTITLES_USERNAME: str | None = None
 OPENSUBTITLES_PASSWORD: str | None = None
+TMDB_API_KEY: str | None = None
 
 # HLS STREAMING
 # Enable early HLS playback while downloading. The contiguous head a stream
@@ -101,6 +102,8 @@ _kodi_addon_dir = os.getenv("KODI_ADDON_DIR", _kodi_addon_dir)
 
 # Compute final path constants (assigned once)
 DATA_DIR: str = _data_dir
+# Watch history is not disposable download data, so it can live outside DATA_DIR.
+LIBRARY_PATH: str = os.getenv("LIBRARY_PATH", os.path.join(DATA_DIR, "library.json"))
 CACHE_DIR: str = _cache_dir if _cache_dir else os.path.join(_data_dir, "cache")
 LOGFILE: str = _logfile if _logfile else os.path.join(_data_dir, "rapidbay_errors.log")
 DOWNLOAD_DIR: str = _download_dir if _download_dir else os.path.join(_data_dir, "downloads") + "/"

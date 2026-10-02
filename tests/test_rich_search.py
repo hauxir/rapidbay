@@ -243,7 +243,7 @@ def test_search_more_than_lookup_limit_enriches_all_results_but_tmdb_caps_lookup
     monkeypatch.setattr(app_module, "_add_status_to_results", lambda items: items)
 
     class FakeTMDBClient:
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, cache: object = None) -> None:
             assert api_key == "tmdb-key"
             self.lookups: list[str] = []
 
@@ -266,3 +266,78 @@ def test_search_more_than_lookup_limit_enriches_all_results_but_tmdb_caps_lookup
     assert len(response.json()["other"]) == 35
     assert len(clients) == 1
     assert len(clients[0].lookups) == result_grouping.MAX_TMDB_LOOKUPS == 30
+
+
+def test_rich_search_events_sends_the_first_titles_before_the_rest(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    import json
+    import threading
+
+    from app.result_grouping import PreparedSearch, TitleLookup
+
+    _configure_indexers(monkeypatch)
+    monkeypatch.setattr(app_module.settings, "TMDB_API_KEY", "tmdb-key")
+    monkeypatch.setattr(app_module, "_indexer_search", lambda term: [])
+    monkeypatch.setattr(app_module, "_add_status_to_results", lambda results: results)
+
+    names = ["Alpha", "Beta", "Gamma", "Later"]
+    lookups = [
+        TitleLookup(name.casefold(), name, frozenset(), False, index, 10 - index)
+        for index, name in enumerate(names)
+    ]
+    parsed = [
+        ({"title": name, "seeds": 10 - index, "magnet": f"magnet:?xt={name}"}, {}, name)
+        for index, name in enumerate(names)
+    ]
+    monkeypatch.setattr(
+        app_module,
+        "prepare_search",
+        lambda results: PreparedSearch(parsed, lookups),
+    )
+
+    release = threading.Event()
+
+    def fake_resolve(
+        client: object,
+        lookup: TitleLookup,
+        fetch_details: bool = True,
+        search_response: dict[str, Any] | None = None,
+    ) -> tuple[list[tuple[tuple[str, int], dict[str, Any]]], dict[str, Any]]:
+        if lookup.title == "Later" and not fetch_details:
+            release.wait(2)
+        group = {
+            "tmdb_id": lookup.order + 1,
+            "title": lookup.title,
+            "year": 2020,
+            "poster_url": None,
+            "media_type": "movie",
+            "seasons": [],
+            "results": [],
+            "overview": lookup.title,
+            "genres": [],
+            "vote_average": None,
+            "backdrop_url": None,
+            "runtime": 90 if fetch_details else None,
+            "adult": False,
+        }
+        return [(("movie", lookup.order + 1), group)], {"results": []}
+
+    monkeypatch.setattr(app_module, "resolve_title", fake_resolve)
+
+    async def first_chunk() -> str:
+        response = await app_module.rich_search_events("test")
+        iterator = response.body_iterator
+        raw = await iterator.__anext__()
+        text = raw.decode() if isinstance(raw, bytes) else raw
+        release.set()
+        async for _chunk in iterator:
+            pass
+        return text
+
+    text = asyncio.run(first_chunk())
+    payload = json.loads(text.removeprefix("data: ").strip())
+    assert [group["title"] for group in payload["groups"]] == ["Alpha", "Beta", "Gamma"]
+    assert payload["done"] is False
+    assert "Later" not in text

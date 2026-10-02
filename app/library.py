@@ -215,62 +215,51 @@ def _touch_episode(item: dict[str, Any], season: int, episode: int, filename: st
     episodes.sort(key=lambda entry: (entry["season"], entry["episode"]))
 
 
-def process_event(event: dict[str, Any]) -> None:
-    """Resolve one download or watch event and merge it into the library."""
-    raw_title, identity_parsed, episode_parsed = _choose_parse(event)
+def _remember_identity(raw_title: str, identity_parsed: dict[str, Any]) -> dict[str, Any] | None:
+    """Cache a torrent name's TMDB match. This is not anyone's watch history."""
     if not identity_parsed.get("title"):
-        return
+        return None
     key = _identity_key(identity_parsed)
     data = _load()
     identities: dict[str, Any] = data["identities"]
     cached = identities.get(key)
     if isinstance(cached, dict) and cached.get("unmatched"):
-        return
-    if not isinstance(cached, dict) or not cached.get("tmdb_id"):
-        resolved = _resolve_identity(raw_title)
-        if resolved is None:
-            if settings.TMDB_API_KEY:
-                identities[key] = {"unmatched": True}
-                _save(data)
-            return
-        cached = resolved
-        identities[key] = resolved
+        return None
+    if isinstance(cached, dict) and cached.get("tmdb_id"):
+        return cached
+    resolved = _resolve_identity(raw_title)
+    if resolved is None:
+        if settings.TMDB_API_KEY:
+            identities[key] = {"unmatched": True}
+            _save(data)
+        return None
+    identities[key] = resolved
+    _save(data)
+    return resolved
 
-    when = _as_int(event.get("ts")) or 0
-    kind = event.get("event")
-    if kind == "search":
-        _save(data)
-        _record_activity(kind, cached, event, when, episode_parsed)
-        return
 
-    catalog_key = f"{cached['media_type']}:{cached['tmdb_id']}"
-    titles: dict[str, Any] = data["titles"]
-    item = titles.get(catalog_key)
-    if not isinstance(item, dict):
-        item = {
-            "tmdb_id": cached["tmdb_id"],
-            "media_type": cached["media_type"],
-            "title": cached["title"],
-            "year": cached.get("year"),
-            "poster_url": cached.get("poster_url"),
-            "backdrop_url": cached.get("backdrop_url"),
-            "updated_at": 0,
-            "watched_at": None,
-            "watched_episodes": [],
-            "downloads": [],
-        }
-        titles[catalog_key] = item
+def _blank_item(cached: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tmdb_id": cached["tmdb_id"],
+        "media_type": cached["media_type"],
+        "title": cached["title"],
+        "year": cached.get("year"),
+        "poster_url": cached.get("poster_url"),
+        "backdrop_url": cached.get("backdrop_url"),
+        "updated_at": 0,
+        "watched_at": None,
+        "watched_episodes": [],
+        "downloads": [],
+    }
 
+
+def _apply_personal(item: dict[str, Any], event: dict[str, Any], episode_parsed: dict[str, Any], when: int) -> None:
+    """Apply one browser's progress or finish onto an in-memory title."""
     label = event.get("filename") or event.get("title") or item["title"]
     label_text = label if isinstance(label, str) else item["title"]
-    if cached.get("backdrop_url") and not item.get("backdrop_url"):
-        item["backdrop_url"] = cached.get("backdrop_url")
+    kind = event.get("event")
     if kind == "progress":
         _touch_progress(item, event, episode_parsed, label_text, when)
-        _save(data)
-        return
-    if kind == "download":
-        _touch_download(item, _magnet_hash(event.get("magnet")), label_text, when)
     elif kind == "watched":
         if item["media_type"] == "movie":
             item["watched_at"] = max(int(item.get("watched_at") or 0), when)
@@ -280,6 +269,43 @@ def process_event(event: dict[str, Any]) -> None:
             if len(seasons) == 1 and episode_number is not None:
                 _touch_episode(item, seasons[0], episode_number, label_text, when)
         _drop_progress(item, episode_parsed, label_text)
+    else:
+        return
+    if when >= int(item.get("updated_at") or 0):
+        item["updated_at"] = when
+
+
+def process_event(event: dict[str, Any]) -> None:
+    """Resolve a download, search, or finish for the shared trending chart.
+
+    Personal progress and watch lists are not stored here. Each browser keeps
+    those locally and asks watch_rows to draw them.
+    """
+    raw_title, identity_parsed, episode_parsed = _choose_parse(event)
+    cached = _remember_identity(raw_title, identity_parsed)
+    if not cached:
+        return
+    when = _as_int(event.get("ts")) or 0
+    kind = event.get("event")
+    if kind in ("search", "watched", "progress"):
+        if kind != "progress":
+            _record_activity(kind, cached, event, when, episode_parsed)
+        return
+
+    if kind != "download":
+        return
+    catalog_key = f"{cached['media_type']}:{cached['tmdb_id']}"
+    data = _load()
+    titles: dict[str, Any] = data["titles"]
+    item = titles.get(catalog_key)
+    if not isinstance(item, dict):
+        item = _blank_item(cached)
+        titles[catalog_key] = item
+    label = event.get("filename") or event.get("title") or item["title"]
+    label_text = label if isinstance(label, str) else item["title"]
+    if cached.get("backdrop_url") and not item.get("backdrop_url"):
+        item["backdrop_url"] = cached.get("backdrop_url")
+    _touch_download(item, _magnet_hash(event.get("magnet")), label_text, when)
     if when >= int(item.get("updated_at") or 0):
         item["updated_at"] = when
     _save(data)
@@ -623,46 +649,66 @@ def _classify_adult_activity(client: TMDBClient) -> None:
         _save(data)
 
 
-def _prune_superseded_progress() -> None:
-    """Drop unfinished plays that a later finish already replaced."""
-    data = _load()
-    titles = data.get("titles")
-    if not isinstance(titles, dict):
-        return
-    changed = False
-    for item in titles.values():
-        if not isinstance(item, dict) or not isinstance(item.get("progress"), list):
+def _recent_stamp(item: dict[str, Any]) -> int:
+    stamp = _as_int(item.get("watched_at")) or 0
+    for episode in item.get("watched_episodes") or []:
+        if isinstance(episode, dict):
+            stamp = max(stamp, _as_int(episode.get("at")) or 0)
+    return stamp
+
+
+def present_watch_rows(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Turn one browser's titles into Keep watching and Recently watched cards."""
+    client = TMDBClient(settings.TMDB_API_KEY) if settings.TMDB_API_KEY else None
+    recent = [
+        _card(item)
+        for item in items
+        if item.get("watched_at") or item.get("watched_episodes")
+    ]
+    recent.sort(key=_recent_stamp, reverse=True)
+    keep_watching = _keep_watching(items, client)
+    if client is not None:
+        _annotate_next_air(recent, client, {}, caught_up_only=True)
+    return {"keep_watching": keep_watching, "recent": recent}
+
+
+def watch_rows(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build personal rows from events stored in one browser. Nothing is saved."""
+    usable = [
+        event
+        for event in events
+        if isinstance(event, dict) and event.get("event") in ("progress", "watched")
+    ]
+    usable.sort(key=lambda event: _as_int(event.get("ts")) or 0)
+    if len(usable) > 200:
+        usable = usable[-200:]
+    titles: dict[str, dict[str, Any]] = {}
+    for event in usable:
+        raw_title, identity_parsed, episode_parsed = _choose_parse(event)
+        cached = _remember_identity(raw_title, identity_parsed)
+        if not cached:
             continue
-        kept = [
-            entry for entry in item["progress"]
-            if isinstance(entry, dict) and not _progress_superseded(item, entry)
-        ]
-        if len(kept) != len(item["progress"]):
-            item["progress"] = kept
-            changed = True
-    if changed:
-        _save(data)
+        catalog_key = f"{cached['media_type']}:{cached['tmdb_id']}"
+        item = titles.get(catalog_key)
+        if item is None:
+            item = _blank_item(cached)
+            titles[catalog_key] = item
+        elif cached.get("backdrop_url") and not item.get("backdrop_url"):
+            item["backdrop_url"] = cached.get("backdrop_url")
+        _apply_personal(item, event, episode_parsed, _as_int(event.get("ts")) or 0)
+    return present_watch_rows(list(titles.values()))
 
 
 def home() -> dict[str, Any]:
-    """Recently watched titles plus trending series and movie charts."""
-    _prune_superseded_progress()
-    titles = catalog()
-    recent = []
-    for item in titles:
-        if item.get("watched_at") or item.get("watched_episodes"):
-            recent.append(_card(item))
+    """Trending series and movie charts. Personal rows stay in the browser."""
     client = TMDBClient(settings.TMDB_API_KEY) if settings.TMDB_API_KEY else None
-    keep_watching = _keep_watching(titles, client)
     if client is not None:
         _classify_adult_activity(client)
     series = stats.top("tv")
     movies = stats.top("movie")
     if client is not None:
-        cache: dict[int, dict[str, Any] | None] = {}
-        _annotate_next_air(recent, client, cache, caught_up_only=True)
-        _annotate_next_air(series, client, cache, caught_up_only=False)
-    return {"keep_watching": keep_watching, "recent": recent, "series": series, "movies": movies}
+        _annotate_next_air(series, client, {}, caught_up_only=False)
+    return {"keep_watching": [], "recent": [], "series": series, "movies": movies}
 
 
 def refresh_artwork() -> None:

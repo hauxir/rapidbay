@@ -1,18 +1,25 @@
 (function () {
     var keylistener = function (e) {
         var keycode = e.keyCode ? e.keyCode : e.which;
-        var name = e.key;
+        var name = e.key || "";
         var lowername = name.toLowerCase();
-        if (lowername === "enter") {
+        var direction = arrowDirection(e);
+        var isSelect = lowername === "enter" || lowername === "select" || keycode === 13 || keycode === 23;
+        if (isSelect) {
+            if (document.activeElement && document.activeElement.tagName === "INPUT") {
+                return;
+            }
             e.preventDefault();
-            document.activeElement.click();
+            if (document.activeElement && document.activeElement.click) {
+                document.activeElement.click();
+            }
         }
-        if (lowername === "arrowdown" || lowername === "arrowright") {
+        if (direction === "down" || direction === "right") {
             document.body.onmouseover = null;
             e.preventDefault();
             focusNextElement();
         }
-        if (lowername === "arrowup" || lowername === "arrowleft") {
+        if (direction === "up" || direction === "left") {
             document.body.onmouseover = null;
             e.preventDefault();
             focusPrevElement();
@@ -36,6 +43,200 @@
         var currentIndex = selectables.index($(":focus"));
         document.activeElement.blur();
         selectables.eq(currentIndex - 1).focus();
+    }
+
+    function homeFocusTargets() {
+        return Array.prototype.filter.call(
+            document.querySelectorAll(".form-control, .rich-toggle-label input, .billboard-card, .poster-card, .home-basic-item, .search-chip, .search-history-item, .search-history-clear, .home-shortcut"),
+            function (el) {
+                if (el.disabled) {
+                    return false;
+                }
+                var rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            }
+        );
+    }
+
+    function revealHomeTarget(el) {
+        var scroller = el.closest && el.closest(".billboard-scroller");
+        if (scroller) {
+            var item = (el.closest && el.closest(".rank-item")) || el;
+            var itemRect = item.getBoundingClientRect();
+            var scrollerRect = scroller.getBoundingClientRect();
+            if (itemRect.left < scrollerRect.left + 28) {
+                scroller.scrollLeft -= (scrollerRect.left + 28) - itemRect.left;
+            } else if (itemRect.right > scrollerRect.right - 28) {
+                scroller.scrollLeft += itemRect.right - (scrollerRect.right - 28);
+            }
+        }
+        var rows = document.querySelector(".home-rows");
+        if (rows && rows.contains(el)) {
+            var section = (el.closest && el.closest(".home-row, .home-shortcuts")) || el;
+            var heading = section.querySelector && section.querySelector(".home-row-heading");
+            var rowsRect = rows.getBoundingClientRect();
+            var sectionRect = section.getBoundingClientRect();
+            var desiredMid = rowsRect.top + rowsRect.height * 0.4;
+            var delta = (sectionRect.top + sectionRect.height / 2) - desiredMid;
+            if (heading) {
+                var headingTop = heading.getBoundingClientRect().top - delta;
+                var minTop = rowsRect.top + 12;
+                if (headingTop < minTop) {
+                    delta -= minTop - headingTop;
+                }
+            }
+            var next = rows.scrollTop + delta;
+            var maxScroll = Math.max(0, rows.scrollHeight - rows.clientHeight);
+            if (next < 0) {
+                next = 0;
+            } else if (next > maxScroll) {
+                next = maxScroll;
+            }
+            rows.scrollTop = next;
+        }
+    }
+
+    function arrowDirection(e) {
+        var code = e.keyCode || e.which || 0;
+        // Android TV and Google TV remotes use these codes for the D-pad.
+        if (code === 19) return "up";
+        if (code === 20) return "down";
+        if (code === 21) return "left";
+        if (code === 22) return "right";
+        var key = String(e.key || "").toLowerCase();
+        if (key === "arrowup" || key === "up") return "up";
+        if (key === "arrowdown" || key === "down") return "down";
+        if (key === "arrowleft" || key === "left") return "left";
+        if (key === "arrowright" || key === "right") return "right";
+        if (code === 38) return "up";
+        if (code === 40) return "down";
+        if (code === 37) return "left";
+        if (code === 39) return "right";
+        var domCode = String(e.code || "").toLowerCase();
+        if (domCode === "arrowup") return "up";
+        if (domCode === "arrowdown") return "down";
+        if (domCode === "arrowleft") return "left";
+        if (domCode === "arrowright") return "right";
+        return "";
+    }
+
+    function firstFocusableInNextRow(current, targets) {
+        var rows = document.querySelector(".home-rows");
+        if (!rows) {
+            return null;
+        }
+        var fromBottom = current.getBoundingClientRect().bottom;
+        var sections = rows.querySelectorAll(".home-row, .home-shortcuts");
+        for (var i = 0; i < sections.length; i++) {
+            var section = sections[i];
+            if (section.getBoundingClientRect().top < fromBottom - 8) {
+                continue;
+            }
+            for (var t = 0; t < targets.length; t++) {
+                if (section.contains(targets[t])) {
+                    return targets[t];
+                }
+            }
+        }
+        return null;
+    }
+
+    function focusByDirection(direction) {
+        var current = document.activeElement;
+        var targets = homeFocusTargets();
+        if (!current || targets.indexOf(current) === -1) {
+            if (targets[0]) {
+                targets[0].focus();
+                revealHomeTarget(targets[0]);
+            }
+            return;
+        }
+        if (direction === "down" && current.classList.contains("form-control")) {
+            var nextRowFirst = firstFocusableInNextRow(current, targets);
+            if (nextRowFirst) {
+                nextRowFirst.focus();
+                revealHomeTarget(nextRowFirst);
+                return;
+            }
+        }
+        var from = current.getBoundingClientRect();
+        var fromX = from.left + from.width / 2;
+        var fromY = from.top + from.height / 2;
+        var places = targets.filter(function (el) {
+            return el !== current;
+        }).map(function (el) {
+            var rect = el.getBoundingClientRect();
+            return {
+                el: el,
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+            };
+        });
+        var rows = document.querySelector(".home-rows");
+        if (rows && rows.contains(current) && (direction === "up" || direction === "down")) {
+            var inRows = places.filter(function (place) {
+                return rows.contains(place.el);
+            });
+            var hasRowTarget = inRows.some(function (place) {
+                var dy = place.y - fromY;
+                return direction === "down" ? dy >= 24 : dy <= -24;
+            });
+            if (hasRowTarget) {
+                places = inRows;
+            }
+        }
+        var best = null;
+        var bestScore = Infinity;
+        if (direction === "down" || direction === "up") {
+            var band = null;
+            places.forEach(function (place) {
+                var dy = place.y - fromY;
+                if (direction === "down" && dy < 24) {
+                    return;
+                }
+                if (direction === "up" && dy > -24) {
+                    return;
+                }
+                if (band === null || (direction === "down" && place.y < band) || (direction === "up" && place.y > band)) {
+                    band = place.y;
+                }
+            });
+            if (band !== null) {
+                places.forEach(function (place) {
+                    if (Math.abs(place.y - band) > 36) {
+                        return;
+                    }
+                    var score = Math.abs(place.x - fromX);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = place.el;
+                    }
+                });
+            }
+        } else {
+            places.forEach(function (place) {
+                if (Math.abs(place.y - fromY) > 36) {
+                    return;
+                }
+                var dx = place.x - fromX;
+                if (direction === "right" && dx < 24) {
+                    return;
+                }
+                if (direction === "left" && dx > -24) {
+                    return;
+                }
+                var score = Math.abs(dx);
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = place.el;
+                }
+            });
+        }
+        if (!best) {
+            return;
+        }
+        best.focus();
+        revealHomeTarget(best);
     }
 
     document.addEventListener("mousemove", function () {
@@ -221,7 +422,10 @@
     function clearHistory() {
         localStorage.removeItem("downloadHistory");
         localStorage.removeItem("completedFiles");
+        localStorage.removeItem("completedAt");
         localStorage.removeItem("searchHistory");
+        localStorage.removeItem("watchLog");
+        localStorage.removeItem("localTitles");
     }
 
     function saveSearchTerm(term) {
@@ -262,6 +466,7 @@
         var completedAt = JSON.parse(localStorage.getItem("completedAt") || "{}");
         completedAt[hash + "\n" + filename] = Date.now();
         localStorage.setItem("completedAt", JSON.stringify(completedAt));
+        rememberWatched(magnet, filename);
         reportLibraryEvents([{
             event: "watched",
             magnet: magnet,
@@ -333,11 +538,13 @@
 
     function saveVideoPosition(magnet, filename, position, duration) {
         var previous = readStoredProgress(getVideoPositionKey(magnet, filename));
+        var storedDuration = duration || previous.duration || 0;
         localStorage.setItem(getVideoPositionKey(magnet, filename), JSON.stringify({
             position: position,
-            duration: duration || previous.duration || 0,
+            duration: storedDuration,
             ts: Date.now(),
         }));
+        rememberProgress(magnet, filename, position, storedDuration);
     }
 
     function getVideoPosition(magnet, filename) {
@@ -439,6 +646,166 @@
             });
         }
         return events;
+    }
+
+    function readWatchLog() {
+        var raw = localStorage.getItem("watchLog");
+        if (raw === null) {
+            return seedWatchLog();
+        }
+        try {
+            var log = JSON.parse(raw);
+            return Array.isArray(log) ? log : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function writeWatchLog(log) {
+        if (log.length > 200) {
+            log = log.slice(0, 200);
+        }
+        localStorage.setItem("watchLog", JSON.stringify(log));
+    }
+
+    function watchFileKey(magnet, filename) {
+        return get_hash(magnet || "") + "\n" + (filename || "");
+    }
+
+    function rememberProgress(magnet, filename, position, duration) {
+        if (!magnet || !filename || !(position > 120) || progressCountsAsWatched(position, duration)) {
+            return;
+        }
+        var key = watchFileKey(magnet, filename);
+        var log = readWatchLog().filter(function (item) {
+            return !(item && item.event === "progress" && watchFileKey(item.magnet, item.filename) === key);
+        });
+        log.unshift({
+            event: "progress",
+            magnet: magnet,
+            title: filename,
+            filename: filename,
+            ts: Date.now(),
+            position: Math.round(position),
+            duration: Math.round(duration || 0),
+        });
+        writeWatchLog(log);
+    }
+
+    function rememberWatched(magnet, filename) {
+        if (!magnet || !filename) {
+            return;
+        }
+        var key = watchFileKey(magnet, filename);
+        var log = readWatchLog().filter(function (item) {
+            if (!item) {
+                return false;
+            }
+            var same = watchFileKey(item.magnet, item.filename) === key;
+            return !(same && (item.event === "progress" || item.event === "watched"));
+        });
+        log.unshift({
+            event: "watched",
+            magnet: magnet,
+            title: filename,
+            filename: filename,
+            ts: Date.now(),
+        });
+        writeWatchLog(log);
+    }
+
+    function seedWatchLog() {
+        var events = collectInProgressEvents();
+        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        var completedAt = JSON.parse(localStorage.getItem("completedAt") || "{}");
+        Object.keys(completed).forEach(function (hash) {
+            var magnet = magnetForHash(hash);
+            (completed[hash] || []).forEach(function (filename) {
+                events.push({
+                    event: "watched",
+                    magnet: magnet,
+                    title: filename,
+                    filename: filename,
+                    ts: parseInt(completedAt[hash + "\n" + filename], 10) || 0,
+                });
+            });
+        });
+        writeWatchLog(events);
+        return events;
+    }
+
+    function readLocalTitles() {
+        try {
+            var titles = JSON.parse(localStorage.getItem("localTitles") || "[]");
+            return Array.isArray(titles) ? titles : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function saveLocalTitles(cards) {
+        var byKey = {};
+        readLocalTitles().forEach(function (title) {
+            if (title && title.tmdb_id && title.media_type) {
+                byKey[title.media_type + ":" + title.tmdb_id] = title;
+            }
+        });
+        (cards || []).forEach(function (card) {
+            if (!card || !card.tmdb_id || !card.media_type) {
+                return;
+            }
+            var key = card.media_type + ":" + card.tmdb_id;
+            var current = byKey[key] || {
+                tmdb_id: card.tmdb_id,
+                media_type: card.media_type,
+                title: card.title || "",
+                watched_at: null,
+                watched_episodes: [],
+            };
+            if (card.title) {
+                current.title = card.title;
+            }
+            if (card.watched_at) {
+                current.watched_at = card.watched_at;
+            }
+            (card.watched_episodes || []).forEach(function (episode) {
+                if (!episode) {
+                    return;
+                }
+                var known = (current.watched_episodes || []).some(function (item) {
+                    return Number(item.season) === Number(episode.season) && Number(item.episode) === Number(episode.episode);
+                });
+                if (!known) {
+                    current.watched_episodes.push(episode);
+                }
+            });
+            byKey[key] = current;
+        });
+        localStorage.setItem("localTitles", JSON.stringify(Object.values(byKey)));
+    }
+
+    function fetchWatchRows(callback) {
+        var events = readWatchLog();
+        if (!events.length) {
+            callback({ keep_watching: [], recent: [] });
+            return;
+        }
+        if (!document.cookie) {
+            document.cookie = localStorage.getItem("cookie");
+        }
+        $.ajax({
+            url: "/api/watch_rows/",
+            method: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({ events: events }),
+            success: function (data) {
+                saveLocalTitles((data && data.recent ? data.recent : []).concat(data && data.keep_watching ? data.keep_watching : []));
+                callback(data || { keep_watching: [], recent: [] });
+            },
+            error: function () {
+                callback({ keep_watching: [], recent: [] });
+            },
+        });
     }
 
     function clearVideoPosition(magnet, filename) {
@@ -658,12 +1025,15 @@
     function releaseSignature(display) {
         var text = String(display || "");
         var quality = text.match(/\b\d{3,4}p\b[\s\S]*$/i);
-        if (quality) {
-            return quality[0].replace(/\s+/g, " ").trim().toLowerCase();
-        }
-        return text
-            .replace(/S0*\d{1,2}[\s._-]*E0*\d{1,3}/ig, " ")
-            .replace(/\bS0*\d{1,2}\b/ig, " ")
+        var tail = quality
+            ? quality[0]
+            : text
+                .replace(/S0*\d{1,2}[\s._-]*E0*\d{1,3}/ig, " ")
+                .replace(/\bS0*\d{1,2}\b/ig, " ");
+        // A stray tag such as "(C)" on one file must not split it from the rest of the pack.
+        return tail
+            .replace(/\([^)]*\)/g, " ")
+            .replace(/[()[\]]/g, " ")
             .replace(/\s+/g, " ")
             .trim()
             .toLowerCase();
@@ -2058,10 +2428,16 @@
             loadHome: function () {
                 var self = this;
                 get("/api/home/", function (data) {
-                    self.keepWatching = data && data.keep_watching ? data.keep_watching : [];
-                    self.recentTitles = data && data.recent ? data.recent : [];
                     self.topSeries = data && data.series ? data.series : [];
                     self.topMovies = data && data.movies ? data.movies : [];
+                    self.loadLocalRows();
+                });
+            },
+            loadLocalRows: function () {
+                var self = this;
+                fetchWatchRows(function (data) {
+                    self.keepWatching = data && data.keep_watching ? data.keep_watching : [];
+                    self.recentTitles = data && data.recent ? data.recent : [];
                     self.$nextTick(function () {
                         var scrollers = document.querySelectorAll(".poster-scroller");
                         Array.prototype.forEach.call(scrollers, function (scroller) {
@@ -2075,7 +2451,7 @@
                     if (missingArtwork && !self.homeRetried) {
                         self.homeRetried = true;
                         setTimeout(function () {
-                            self.loadHome();
+                            self.loadLocalRows();
                         }, 2500);
                     }
                 });
@@ -2141,14 +2517,6 @@
             this.searchHistory = getSearchHistory();
             syncLibraryFromLocalHistory();
             this.loadHome();
-            var progressEvents = collectInProgressEvents();
-            if (progressEvents.length) {
-                reportLibraryEvents(progressEvents);
-                var home = this;
-                setTimeout(function () {
-                    home.loadHome();
-                }, 2500);
-            }
             var self = this;
             this.onHomeResize = function () {
                 self.refreshRails();
@@ -2167,17 +2535,29 @@
             }
 
             this.keylistener = function (e) {
-                var name = e.key;
-                var lowername = name.toLowerCase();
+                var direction = arrowDirection(e);
+                var lowername = direction ? "arrow" + direction : String(e.key || "").toLowerCase();
+                if (!lowername) {
+                    var code = e.keyCode || e.which;
+                    if (code === 13) lowername = "enter";
+                }
                 var isTopbarButton = document.activeElement && document.activeElement.classList.contains("home-shortcut");
                 var isHistoryItem = document.activeElement && (document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item"));
                 var isRecentItem = document.activeElement && (document.activeElement.classList.contains("billboard-card") || document.activeElement.classList.contains("poster-card") || document.activeElement.classList.contains("home-basic-item") || document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item") || document.activeElement.classList.contains("search-history-clear") || document.activeElement.classList.contains("home-shortcut") || document.activeElement.classList.contains("row-nudge"));
                 var isHomeToggle = document.activeElement && document.activeElement.closest(".rich-toggle-label");
                 var isSearchInput = document.activeElement && document.activeElement.classList.contains("form-control");
                 var homeStops = document.querySelectorAll(".rich-toggle-label input, .billboard-card, .poster-card, .home-basic-item, .search-chip, .search-history-item, .search-history-clear, .home-shortcut, .row-nudge:not([hidden])");
+                var spatial = !!document.querySelector(".home-root");
                 if (lowername === "enter" && !isSearchInput && (isTopbarButton || isHistoryItem || isRecentItem)) {
                     e.preventDefault();
                     document.activeElement.click();
+                } else if (spatial && (lowername === "arrowdown" || lowername === "arrowup" || ((lowername === "arrowleft" || lowername === "arrowright") && !isSearchInput))) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.stopImmediatePropagation) {
+                        e.stopImmediatePropagation();
+                    }
+                    focusByDirection(lowername.replace("arrow", ""));
                 } else if (lowername === "arrowdown") {
                     if (isSearchInput) {
                         return;
@@ -2212,7 +2592,7 @@
                 }
             };
 
-            document.addEventListener("keydown", this.keylistener);
+            document.addEventListener("keydown", this.keylistener, true);
         },
         updated: function () {
             this.refreshRails();
@@ -2220,7 +2600,7 @@
         destroyed: function () {
             document.documentElement.style.backgroundColor = "";
             document.body.style.backgroundColor = "";
-            document.removeEventListener("keydown", this.keylistener);
+            document.removeEventListener("keydown", this.keylistener, true);
             window.removeEventListener("resize", this.onHomeResize);
         },
     });
@@ -2316,12 +2696,14 @@
                 groups: [],
                 other: [],
                 openEpisodes: {},
+                openGroups: {},
                 openSeasons: {},
                 openResolutions: {},
                 seasonDetails: {},
                 seasonDetailsLoading: {},
                 libraryTitles: [],
                 pinnedTitle: null,
+                richSearchPending: false,
             };
         },
         methods: {
@@ -2584,8 +2966,9 @@
             },
             loadLibrary: function () {
                 var self = this;
-                get("/api/library/", function (data) {
-                    self.libraryTitles = data && data.titles ? data.titles : [];
+                self.libraryTitles = readLocalTitles();
+                fetchWatchRows(function () {
+                    self.libraryTitles = readLocalTitles();
                 });
             },
             episodeGroups: function (season) {
@@ -2613,6 +2996,45 @@
                 });
                 return groups;
             },
+            groupOpenKey: function (group) {
+                return String((group && (group.tmdb_id || group.title)) || "");
+            },
+            isGroupOpen: function (group) {
+                return !!this.openGroups[this.groupOpenKey(group)];
+            },
+            openGroup: function (group, event) {
+                if (!group || this.isGroupOpen(group)) {
+                    return;
+                }
+                var card = event && event.currentTarget;
+                this.$set(this.openGroups, this.groupOpenKey(group), true);
+                var self = this;
+                if (group.media_type === "tv") {
+                    (group.seasons || []).forEach(function (season) {
+                        if (self.isSeasonOpen(group, season)) {
+                            self.ensureSeasonDetails(group, season);
+                        }
+                    });
+                }
+                this.$nextTick(function () {
+                    self.focusGroupContents(group);
+                });
+            },
+            focusGroupContents: function (group) {
+                var key = this.groupOpenKey(group);
+                var card = document.querySelector('.group-card[data-group-key="' + key.replace(/"/g, "") + '"]');
+                if (!card) {
+                    return;
+                }
+                var first = card.querySelector(".episode-card[tabindex='0'], h3.season-header[tabindex='0'], tr[tabindex='0']");
+                if (!first) {
+                    return;
+                }
+                var active = document.activeElement;
+                if (active === card || !card.contains(active)) {
+                    first.focus();
+                }
+            },
             seasonOpenKey: function (group, season) {
                 return [group.tmdb_id || group.title, season.season].join(":");
             },
@@ -2636,6 +3058,9 @@
             prefetchOpenSeasons: function () {
                 var self = this;
                 (this.groups || []).forEach(function (group) {
+                    if (!self.isGroupOpen(group)) {
+                        return;
+                    }
                     (group.seasons || []).forEach(function (season) {
                         if (self.isSeasonOpen(group, season)) {
                             self.ensureSeasonDetails(group, season);
@@ -2660,6 +3085,9 @@
                     }
                     self.$set(self.seasonDetails, key, episodes);
                     self.$set(self.seasonDetailsLoading, key, false);
+                    self.$nextTick(function () {
+                        self.focusGroupContents(group);
+                    });
                 }
                 var request = get(
                     "/api/tv/" + encodeURIComponent(group.tmdb_id) + "/season/" + encodeURIComponent(season.season) + "/",
@@ -2816,18 +3244,82 @@
             episodeVariationLabel: function (group, season, episode, result) {
                 return this.episodeVariation(group, season, episode, result).text;
             },
+            expandPinnedGroup: function () {
+                if (!this.pinnedTitle || !this.groups || !this.groups.length) {
+                    return;
+                }
+                var pinned = this.pinnedTitle;
+                var match = null;
+                for (var i = 0; i < this.groups.length; i++) {
+                    var group = this.groups[i];
+                    if (String(group.tmdb_id) === String(pinned.tmdb) && group.media_type === pinned.media) {
+                        match = group;
+                        break;
+                    }
+                }
+                if (!match && this.groups.length === 1) {
+                    match = this.groups[0];
+                }
+                if (match && !this.isGroupOpen(match)) {
+                    this.$set(this.openGroups, this.groupOpenKey(match), true);
+                }
+            },
             loadRichSearch: function () {
-                var self = this;
-                var generation = this.richSearchGeneration;
+                if (this.pinnedTitle) {
+                    this.loadBlockingRichSearch();
+                    return;
+                }
+                this.startRichSearch();
+            },
+            resetRichSearch: function () {
                 this.results = null;
                 this.groups = [];
                 this.other = [];
                 this.openEpisodes = {};
+                this.openGroups = {};
                 this.openSeasons = {};
                 this.openResolutions = {};
                 this.seasonDetails = {};
                 this.seasonDetailsLoading = {};
+                this.richSearchPending = false;
+                this.richStreamSettled = false;
                 this.seasonRequestGeneration = (this.seasonRequestGeneration || 0) + 1;
+            },
+            applyRichPayload: function (data, generation) {
+                if (generation !== this.richSearchGeneration) {
+                    return;
+                }
+                this.groups = Array.isArray(data.groups) ? data.groups : [];
+                this.other = Array.isArray(data.other) ? data.other : [];
+                this.expandPinnedGroup();
+                var visible = this.groups.length > 0 || this.other.length > 0;
+                if (visible) {
+                    if (this.results === null) {
+                        this.results = [];
+                        this.focusFirstResult();
+                    }
+                    this.prefetchOpenSeasons();
+                }
+                if (!data.done) {
+                    return;
+                }
+                this.richSearchPending = false;
+                this.richStreamSettled = true;
+                if (this.results !== null) {
+                    return;
+                }
+                if (this.pinnedTitle || visible) {
+                    this.results = [];
+                    this.focusFirstResult();
+                    return;
+                }
+                this.richContentEnabled = false;
+                this.startFlatSearch();
+            },
+            loadBlockingRichSearch: function () {
+                var self = this;
+                var generation = this.richSearchGeneration;
+                this.resetRichSearch();
                 var endpoint = "/api/rich_search/" + encodeURIComponent(this.searchterm);
                 if (this.pinnedTitle) {
                     endpoint += "?media=" + encodeURIComponent(this.pinnedTitle.media) + "&tmdb=" + encodeURIComponent(this.pinnedTitle.tmdb);
@@ -2837,41 +3329,80 @@
                         return;
                     }
                     self.richRequest = null;
-                    self.groups = Array.isArray(data.groups) ? data.groups : [];
-                    self.other = Array.isArray(data.other) ? data.other : [];
-                    self.prefetchOpenSeasons();
-                    if (self.groups.length === 0 && self.other.length === 0) {
-                        if (self.pinnedTitle) {
-                            self.results = [];
-                            return;
-                        }
-                        self.richContentEnabled = false;
-                        self.startFlatSearch();
-                        return;
-                    }
-                    self.results = [];
-                    self.focusFirstResult();
+                    self.applyRichPayload(Object.assign({ done: true }, data), generation);
                 });
                 this.richRequest.fail(function (request, status) {
                     if (status === "abort" || generation !== self.richSearchGeneration) {
                         return;
                     }
                     self.richRequest = null;
+                    self.richSearchPending = false;
                     if (self.pinnedTitle) {
                         self.groups = [];
                         self.other = [];
                         self.results = [];
                         return;
                     }
+                    if (self.results !== null) {
+                        return;
+                    }
                     self.richContentEnabled = false;
                     self.startFlatSearch();
                 });
             },
+            startRichSearch: function () {
+                var self = this;
+                var generation = this.richSearchGeneration;
+                this.resetRichSearch();
+                this.richSearchPending = true;
+                if (!window.EventSource) {
+                    this.loadBlockingRichSearch();
+                    return;
+                }
+                if (!document.cookie) {
+                    document.cookie = localStorage.getItem("cookie");
+                }
+                var focused = false;
+                var source = new EventSource("/api/rich_search_events/" + encodeURIComponent(this.searchterm));
+                this.eventsource = source;
+                source.onmessage = function (e) {
+                    if (generation !== self.richSearchGeneration) {
+                        source.close();
+                        return;
+                    }
+                    var data;
+                    try {
+                        data = JSON.parse(e.data);
+                    } catch (error) {
+                        return;
+                    }
+                    self.applyRichPayload(data, generation);
+                    if (data.done) {
+                        self.richStreamSettled = true;
+                        source.close();
+                        self.eventsource = null;
+                    } else if (!focused && self.results !== null) {
+                        focused = true;
+                    }
+                };
+                source.onerror = function () {
+                    source.close();
+                    if (self.eventsource === source) {
+                        self.eventsource = null;
+                    }
+                    if (generation !== self.richSearchGeneration || self.richStreamSettled || self.results !== null) {
+                        self.richSearchPending = false;
+                        self.richStreamSettled = true;
+                        return;
+                    }
+                    self.loadBlockingRichSearch();
+                };
+            },
             focusFirstResult: function () {
                 rbsetTimeout(function () {
-                    var firstTr = document.getElementsByTagName("tr")[0];
-                    if (firstTr) {
-                        firstTr.focus();
+                    var first = document.querySelector(".group-card-collapsed, .group-card .episode-card[tabindex='0'], .group-card h3.season-header[tabindex='0'], .group-card tr[tabindex='0'], .tablewrapper tr[tabindex='0']");
+                    if (first) {
+                        first.focus();
                     }
                 });
             },
@@ -3348,7 +3879,7 @@
 
     var vm = new Vue({
         el: "#app",
-        data: { screen: null, params: {} },
+        data: { screen: null, params: {}, routeKey: "" },
     });
 
     function display_view(view_name) {
@@ -3362,6 +3893,7 @@
             }
             vm.screen = view_name;
             vm.params = params;
+            vm.routeKey = view_name + ":" + window.location.pathname + window.location.search;
         };
     }
 

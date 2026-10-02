@@ -155,6 +155,30 @@ def test_init_stores_api_key() -> None:
     assert TMDBClient(api_key="test-key").api_key == "test-key"
 
 
+class _MemoryCache:
+    def __init__(self) -> None:
+        self.values: dict[object, object] = {}
+
+    def get(self, key: object, default: object = None) -> object:
+        return self.values.get(key, default)
+
+    def set(self, key: object, value: object, expire: int | None = None) -> None:
+        self.values[key] = value
+
+
+def test_cached_client_reuses_a_search_without_another_request() -> None:
+    payload = {"results": [{"id": 1, "media_type": "movie", "title": "Dune"}]}
+    cache = _MemoryCache()
+    with patch("app.tmdb.requests.get", return_value=make_response(payload=payload)) as get:
+        first = TMDBClient(api_key="one", cache=cache).search_multi("Dune")
+        second = TMDBClient(api_key="two", cache=cache).search_multi("Dune")
+
+    assert first == payload
+    assert second == payload
+    assert first is not second
+    get.assert_called_once()
+
+
 def test_get_image_url_with_empty_string_path() -> None:
     assert TMDBClient(api_key="test").get_image_url("") is None
 

@@ -68,8 +68,7 @@ def test_trending_chart_counts_watches_and_downloads_not_searches() -> None:
             "download:tv:200:old",
         )
 
-        assert catalog()[0]["tmdb_id"] == 95480
-        assert all(item["tmdb_id"] != 438631 for item in catalog())
+        assert catalog() == []
         series = top("tv")
         movies = top("movie")
         assert [item["title"] for item in series] == ["Slow Horses", "Recent Show"]

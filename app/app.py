@@ -26,8 +26,16 @@ import requests
 import requests.adapters
 import requests.utils
 import library
-from result_grouping import enrich_search_results, season_episode_details
-from tmdb import TMDBClient
+from result_grouping import (
+    FIRST_RENDER_LOOKUPS,
+    MAX_TMDB_LOOKUPS,
+    SearchAssembler,
+    enrich_search_results,
+    prepare_search,
+    resolve_title,
+    season_episode_details,
+)
+from tmdb import TMDBClient, tmdb_disk_cache
 import settings
 import torrent
 from common import path_hierarchy
@@ -630,6 +638,128 @@ def rich_search(
     return enrich_search_results(results, settings.TMDB_API_KEY, focus, query_title=searchterm)
 
 
+_TMDB_LOOKUP_CONCURRENCY = 4
+
+
+@app.get("/api/rich_search_events/")
+@app.get("/api/rich_search_events/{searchterm}")
+async def rich_search_events(searchterm: str = "", _: None = Depends(authorize)) -> StreamingResponse:
+    """Stream grouped results: the largest titles render before the rest of TMDB returns."""
+
+    async def generate() -> AsyncIterator[str]:
+        def event(payload: Dict[str, Any]) -> str:
+            return f"data: {json.dumps(payload, default=str)}\n\n"
+
+        if not (settings.JACKETT_HOST or settings.PROWLARR_HOST):
+            yield event({"groups": [], "other": [], "done": True})
+            return
+
+        results = await asyncio.to_thread(_indexer_search, searchterm)
+        results = _add_status_to_results(results)
+        prepared = prepare_search(results)
+        assembler = SearchAssembler(prepared)
+        if not settings.TMDB_API_KEY:
+            snap = assembler.snapshot(final=True)
+            snap["done"] = True
+            yield event(snap)
+            return
+
+        client = TMDBClient(settings.TMDB_API_KEY, cache=tmdb_disk_cache())
+        lookups = prepared.lookups[:MAX_TMDB_LOOKUPS]
+        last_signature: str | None = None
+
+        def take(done: bool) -> Dict[str, Any] | None:
+            nonlocal last_signature
+            snap = assembler.snapshot(final=done)
+            signature = json.dumps(snap, default=str)
+            snap["done"] = done
+            if done:
+                return snap
+            if signature == last_signature or (not snap["groups"] and not snap["other"]):
+                return None
+            last_signature = signature
+            return snap
+
+        async def lookup_one(
+            lookup: Any, fetch_details: bool, search_response: Dict[str, Any] | None
+        ) -> tuple[list[tuple[tuple[str, int], Dict[str, Any]]], Dict[str, Any] | None]:
+            try:
+                return await asyncio.to_thread(resolve_title, client, lookup, fetch_details, search_response)
+            except Exception:
+                return [], search_response
+
+        first = lookups[:FIRST_RENDER_LOOKUPS]
+        rest = lookups[FIRST_RENDER_LOOKUPS:]
+        previews = await asyncio.gather(*[lookup_one(lookup, False, None) for lookup in first]) if first else []
+        search_responses: Dict[str, Dict[str, Any] | None] = {}
+        for lookup, (groups, search_response) in zip(first, previews):
+            search_responses[lookup.normalized] = search_response
+            if groups:
+                assembler.apply(lookup.normalized, groups)
+        partial = take(False)
+        if partial is not None:
+            yield event(partial)
+
+        details = (
+            await asyncio.gather(
+                *[lookup_one(lookup, True, search_responses.get(lookup.normalized)) for lookup in first]
+            )
+            if first
+            else []
+        )
+        for lookup, (groups, _search_response) in zip(first, details):
+            if groups:
+                assembler.apply(lookup.normalized, groups)
+            elif lookup.normalized not in assembler.resolved:
+                assembler.apply(lookup.normalized, [])
+        partial = take(False)
+        if partial is not None:
+            yield event(partial)
+
+        queue: asyncio.Queue[tuple[Any, list[tuple[tuple[str, int], Dict[str, Any]]], bool] | None] = asyncio.Queue()
+        semaphore = asyncio.Semaphore(_TMDB_LOOKUP_CONCURRENCY)
+
+        async def resolve_rest(lookup: Any) -> None:
+            async with semaphore:
+                groups, search_response = await lookup_one(lookup, False, None)
+                await queue.put((lookup, groups, False))
+                detailed, _search_response = await lookup_one(lookup, True, search_response)
+                await queue.put((lookup, detailed, True))
+
+        async def feed() -> None:
+            try:
+                if rest:
+                    await asyncio.gather(*[resolve_rest(lookup) for lookup in rest])
+            finally:
+                await queue.put(None)
+
+        feeder = asyncio.create_task(feed()) if rest else None
+        try:
+            if feeder is not None:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    lookup, groups, is_detail = item
+                    if groups:
+                        assembler.apply(lookup.normalized, groups)
+                    elif is_detail and lookup.normalized not in assembler.resolved:
+                        assembler.apply(lookup.normalized, [])
+                    partial = take(False)
+                    if partial is not None:
+                        yield event(partial)
+            final = assembler.snapshot(final=True)
+            final["done"] = True
+            yield event(final)
+        finally:
+            if feeder is not None:
+                feeder.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await feeder
+
+    return _sse_response(generate())
+
+
 @app.get("/api/tv/lookup/", response_model=TvLookupResponse)
 def tv_lookup(q: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
     """Best TMDB TV match for a show name taken from a playing filename."""
@@ -697,6 +827,31 @@ def get_library(_: None = Depends(authorize)) -> Dict[str, Any]:
 @app.get("/api/home/", response_model=HomeResponse)
 def get_home(_: None = Depends(authorize)) -> Dict[str, Any]:
     return library.home()
+
+
+@app.post("/api/watch_rows/", response_model=HomeResponse)
+def post_watch_rows(request: LibraryObserveRequest, _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Draw one browser's Keep watching and Recently watched rows. Not stored."""
+    rows = library.watch_rows(
+        [
+            {
+                "event": event.event,
+                "magnet": event.magnet,
+                "title": event.title,
+                "filename": event.filename,
+                "ts": event.ts,
+                "position": event.position,
+                "duration": event.duration,
+            }
+            for event in request.events
+        ]
+    )
+    return {
+        "keep_watching": rows["keep_watching"],
+        "recent": rows["recent"],
+        "series": [],
+        "movies": [],
+    }
 
 
 def _serialize_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

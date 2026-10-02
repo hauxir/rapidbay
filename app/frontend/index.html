@@ -6,6 +6,15 @@
             name="viewport"
             content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
         />
+        <script>
+            (function () {
+                var ua = navigator.userAgent || "";
+                if (!/Android/i.test(ua)) return;
+                if (/Android ?TV|Google ?TV|\bTV\b|BRAVIA|Chromecast|MiBOX|MiTV-|Nexus Player|Leanback/i.test(ua)) {
+                    document.documentElement.classList.add("tv-ui");
+                }
+            })();
+        </script>
         <title>RapidBay</title>
         <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
         <script src="/lib/jquery-3.3.1.min.js"></script>
@@ -17,13 +26,13 @@
         <script src="/lib/chromecastjs.js"></script>
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
         <link rel="manifest" href="/manifest.json" />
-        <link href="/style.css" rel="stylesheet" />
+        <link href="/style.css?v=20261002-tv-home-70" rel="stylesheet" />
         <link rel="icon" type="image/png" href="/favicon.png?v=3" />
     </head>
 
     <body class="text-center">
         <div id="app">
-            <component :is="screen" :params="params"> </component>
+            <component :is="screen" :key="routeKey" :params="params"> </component>
         </div>
 
         <script type="text/x-template" id="loading-spinner-template">
@@ -80,6 +89,10 @@
                   </div>
                 </div>
                 <div class="wrapper">
+                    <label class="rich-toggle-label classic-rich-toggle">
+                      <input type="checkbox" v-model="richContentEnabled" @change="onRichToggle" class="rich-toggle-input">
+                      <span class="rich-toggle-text">View with rich media content</span>
+                    </label>
                   <div class="classic-search">
                     <form @submit="onSubmit">
                       <div class="input-group">
@@ -89,10 +102,6 @@
                         </div>
                       </div>
                     </form>
-                    <label class="rich-toggle-label classic-rich-toggle">
-                      <input type="checkbox" v-model="richContentEnabled" @change="onRichToggle" class="rich-toggle-input">
-                      <span class="rich-toggle-text">View with rich media content</span>
-                    </label>
                     <div v-if="searchHistory.length > 0" class="search-history">
                       <div tabindex="0" v-for="term in searchHistory.slice(0, 4)" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
                     </div>
@@ -109,6 +118,7 @@
                     <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none" placeholder="Search">
                   </form>
               </div>
+              <div class="home-stage">
               <div class="home-rows">
                 <section v-if="keepWatching.length" class="home-row">
                   <h2 class="home-row-heading">Keep watching</h2>
@@ -222,6 +232,7 @@
                   </label>
                 </nav>
               </div>
+              </div>
               </template>
             </div>
         </script>
@@ -236,7 +247,7 @@
                   <a class="home-logo-link" href="/" @click.prevent="goHome()">
                     <img class="home-logo" src="/lib/rapidbay-logo.png" alt="RapidBay">
                   </a>
-                  <form class="home-search" @submit.prevent="onSearchSubmit">
+                  <form v-if="!pinnedTitle" class="home-search" @submit.prevent="onSearchSubmit">
                     <span class="home-search-icon" aria-hidden="true"></span>
                     <input type="text" class="form-control" v-model="query" autocorrect="off" autocapitalize="none" placeholder="Search">
                   </form>
@@ -263,7 +274,7 @@
               <div v-else class="tablewrapper">
                   <div v-if="(richContentEnabled || pinnedTitle) && groups.length > 0" class="rich-results-content">
                       <div class="grouped-results">
-                          <section v-for="group in groups" :key="group.tmdb_id || group.title" class="group-card" :class="{ 'group-card-backed': group.backdrop_url }">
+                          <section v-for="group in groups" :key="group.tmdb_id || group.title" class="group-card" :class="{ 'group-card-backed': group.backdrop_url, 'group-card-collapsed': !isGroupOpen(group) }" :data-group-key="groupOpenKey(group)" :tabindex="isGroupOpen(group) ? -1 : 0" @click="openGroup(group, $event)">
                               <div v-if="group.backdrop_url" class="group-backdrop" :style="{ backgroundImage: 'url(' + JSON.stringify(group.backdrop_url) + ')' }"></div>
                               <div class="group-side" v-if="group.poster_url || (group.genres && group.genres.length) || group.vote_average || group.runtime">
                                   <img v-if="group.poster_url" :src="group.poster_url" class="group-poster" :alt="group.title + ' poster'">
@@ -278,7 +289,8 @@
                               <div class="group-info">
                                   <h2 class="group-title">{{ group.title }}<span v-if="group.year" class="group-year"> ({{ group.year }})</span><span v-if="group.media_type === 'movie' && isMovieWatched(group)" class="watched-mark" title="Watched">&#x2713;</span></h2>
                                   <p v-if="group.overview" class="group-plot">{{ group.overview }}</p>
-                                  <div v-if="group.media_type === 'tv'">
+                                  <p v-if="!isGroupOpen(group)" class="group-open-hint">Show results</p>
+                                  <div v-if="group.media_type === 'tv' && isGroupOpen(group)">
                                       <section v-if="group.latest_episode" class="latest-episode">
                                           <h3 class="latest-heading">Latest</h3>
                                           <div class="episode-card" tabindex="0" @click="toggleLatest(group)">
@@ -347,7 +359,7 @@
                                           </div>
                                       </div>
                                   </div>
-                                  <div v-else>
+                                  <div v-else-if="isGroupOpen(group)">
                                       <table class="table table-hover group-table">
                                           <tbody>
                                               <tr v-for="row in movieResultRows(group)" :key="row.key" tabindex="0" @click="onMovieRowClick(group, row)">
@@ -369,8 +381,10 @@
                               </tbody>
                           </table>
                       </section>
+                      <p v-if="richSearchPending" class="rich-search-pending">Loading more results</p>
                   </div>
                   <div v-else class="flat-results">
+                      <p v-if="richSearchPending" class="rich-search-pending">Loading more results</p>
                       <table class="table table-hover">
                           <tbody>
                               <tr
@@ -485,10 +499,10 @@
                                <svg v-else class="solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3v14H7zM14 5h3v14h-3z"></path></svg>
                            </button>
                            <button type="button" class="player-btn" @click="seekBy(-10)" aria-label="Back 10 seconds">
-                               <svg class="player-skip" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="18" fill="none" stroke-dasharray="96 18" stroke-linecap="round" transform="rotate(200 32 32)"></circle><polygon class="arrow" points="30,8 42,14 30,20"></polygon><text x="32" y="38" text-anchor="middle">10</text></svg>
+                               <svg class="player-skip" viewBox="0 0 64 64" aria-hidden="true"><path d="M23.6 16.1A18 18 0 1 0 35.1 14.3"></path><polygon class="arrow" points="35,11 22,14 35,17"></polygon><text x="32" y="38" text-anchor="middle">10</text></svg>
                            </button>
                            <button type="button" class="player-btn" @click="seekBy(10)" aria-label="Forward 10 seconds">
-                               <svg class="player-skip" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="18" fill="none" stroke-dasharray="96 18" stroke-linecap="round" transform="rotate(-20 32 32)"></circle><polygon class="arrow" points="34,8 22,14 34,20"></polygon><text x="32" y="38" text-anchor="middle">10</text></svg>
+                               <svg class="player-skip" viewBox="0 0 64 64" aria-hidden="true"><path d="M40.4 16.1A18 18 0 1 1 28.9 14.3"></path><polygon class="arrow" points="29,11 42,14 29,17"></polygon><text x="32" y="38" text-anchor="middle">10</text></svg>
                            </button>
                            <div class="player-volume">
                                <button type="button" class="player-btn" @click="toggleMute" :aria-label="muted ? 'Unmute' : 'Mute'">
@@ -567,6 +581,6 @@
             <button class="btn btn-dark" @click="toggle()"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
         </script>
 
-        <script src="/app.js"></script>
+        <script src="/app.js?v=20261002-episode-pack"></script>
     </body>
 </html>

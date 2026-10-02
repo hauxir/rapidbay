@@ -1,7 +1,16 @@
 from datetime import date
 from unittest.mock import MagicMock, call, patch
 
-from app.result_grouping import MAX_TMDB_LOOKUPS, enrich_search_results, season_episode_details
+from app.result_grouping import (
+    MAX_TMDB_LOOKUPS,
+    PreparedSearch,
+    SearchAssembler,
+    TitleLookup,
+    enrich_search_results,
+    prepare_search,
+    resolve_title,
+    season_episode_details,
+)
 
 
 def parsed_title(title: str) -> dict[str, object]:
@@ -66,6 +75,7 @@ def test_movie_match_builds_group_and_preserves_original_torrent_fields() -> Non
             "vote_average": None,
             "backdrop_url": None,
             "runtime": None,
+            "adult": False,
         }
     ]
 
@@ -207,6 +217,112 @@ def test_latest_episode_older_than_two_weeks_is_omitted() -> None:
     assert recent["groups"][0]["latest_episode"]["air_date"] == "2026-09-13"
 
 
+def _show_with_episode_airing_today() -> dict[str, object]:
+    return {
+        "id": 42,
+        "name": "Example Show",
+        "first_air_date": "2020-01-01",
+        "last_episode_to_air": {
+            "name": "Song 2",
+            "season_number": 2,
+            "episode_number": 2,
+            "air_date": "2026-09-25",
+        },
+        "next_episode_to_air": {
+            "name": "Bonzo Goes to Bitburg",
+            "overview": " Maeve probes Conrad. ",
+            "season_number": 2,
+            "episode_number": 3,
+            "air_date": "2026-10-02",
+            "runtime": 45,
+            "vote_average": 10,
+            "vote_count": 4,
+        },
+    }
+
+
+def test_next_episode_airing_today_becomes_latest_when_three_releases_exist() -> None:
+    releases = [make_torrent("Example Show|2|3", seeds=index + 1) for index in range(3)]
+    releases.append(make_torrent("Example Show|2|2", seeds=8))
+    client = MagicMock()
+    client.search_multi.return_value = {"results": [{"id": 42, "media_type": "tv"}]}
+    client.get_tv_details.return_value = _show_with_episode_airing_today()
+    client.get_image_url.return_value = None
+
+    with (
+        patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)),
+        patch("app.result_grouping.TMDBClient", return_value=client),
+        patch("app.result_grouping.date") as clock,
+    ):
+        clock.today.return_value = date(2026, 10, 2)
+        clock.fromisoformat.side_effect = date.fromisoformat
+        response = enrich_search_results(releases, "api-key")
+
+    latest = response["groups"][0]["latest_episode"]
+    assert latest["episode_number"] == 3
+    assert latest["name"] == "Bonzo Goes to Bitburg"
+    assert latest["air_date"] == "2026-10-02"
+    assert "_next_episode_today" not in response["groups"][0]
+
+
+def test_next_episode_airing_today_stays_off_latest_without_three_releases() -> None:
+    releases = [make_torrent("Example Show|2|3", seeds=1), make_torrent("Example Show|2|3", seeds=2)]
+    releases.append(make_torrent("Example Show|2|", seeds=20))
+    client = MagicMock()
+    client.search_multi.return_value = {"results": [{"id": 42, "media_type": "tv"}]}
+    client.get_tv_details.return_value = _show_with_episode_airing_today()
+
+    with (
+        patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)),
+        patch("app.result_grouping.TMDBClient", return_value=client),
+        patch("app.result_grouping.date") as clock,
+    ):
+        clock.today.return_value = date(2026, 10, 2)
+        clock.fromisoformat.side_effect = date.fromisoformat
+        response = enrich_search_results(releases, "api-key")
+
+    assert response["groups"][0]["latest_episode"]["episode_number"] == 2
+
+
+def test_next_episode_on_another_day_does_not_replace_latest() -> None:
+    releases = [make_torrent("Example Show|2|3", seeds=index + 1) for index in range(3)]
+    client = MagicMock()
+    client.search_multi.return_value = {"results": [{"id": 42, "media_type": "tv"}]}
+    details = _show_with_episode_airing_today()
+    details["next_episode_to_air"]["air_date"] = "2026-10-03"
+    client.get_tv_details.return_value = details
+
+    with (
+        patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)),
+        patch("app.result_grouping.TMDBClient", return_value=client),
+        patch("app.result_grouping.date") as clock,
+    ):
+        clock.today.return_value = date(2026, 10, 2)
+        clock.fromisoformat.side_effect = date.fromisoformat
+        response = enrich_search_results(releases, "api-key")
+
+    assert response["groups"][0]["latest_episode"]["episode_number"] == 2
+
+
+def test_focused_title_promotes_today_next_episode_with_three_releases() -> None:
+    releases = [make_torrent("Example Show|2|3", seeds=index + 1) for index in range(3)]
+    client = MagicMock()
+    client.get_tv_details.return_value = _show_with_episode_airing_today()
+    client.get_image_url.return_value = None
+
+    with (
+        patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)),
+        patch("app.result_grouping.TMDBClient", return_value=client),
+        patch("app.result_grouping.date") as clock,
+    ):
+        clock.today.return_value = date(2026, 10, 2)
+        clock.fromisoformat.side_effect = date.fromisoformat
+        response = enrich_search_results(releases, "api-key", focus=("tv", 42), query_title="Example Show")
+
+    assert response["groups"][0]["latest_episode"]["episode_number"] == 3
+    assert "_next_episode_today" not in response["groups"][0]
+
+
 def test_tv_group_without_a_latest_episode_omits_the_section() -> None:
     result = make_torrent("Example Show|1|1")
     client = MagicMock()
@@ -266,10 +382,13 @@ def test_groups_are_ordered_by_number_of_torrents() -> None:
         make_torrent("Zulu Movie|", seeds=4),
     ]
     client = MagicMock()
-    client.search_multi.side_effect = [
-        {"results": [{"id": 7, "media_type": "tv", "name": "Alpha Show"}]},
-        {"results": [{"id": 8, "media_type": "movie", "title": "Zulu Movie"}]},
-    ]
+
+    def search(query: str) -> dict[str, object]:
+        if query == "Alpha Show":
+            return {"results": [{"id": 7, "media_type": "tv", "name": "Alpha Show"}]}
+        return {"results": [{"id": 8, "media_type": "movie", "title": "Zulu Movie"}]}
+
+    client.search_multi.side_effect = search
     client.get_tv_details.return_value = {"id": 7, "name": "Alpha Show"}
     client.get_movie_details.return_value = {"id": 8, "title": "Zulu Movie"}
 
@@ -542,7 +661,7 @@ def test_part_one_release_joins_the_movie_when_its_own_lookup_misses() -> None:
 def test_one_word_season_pack_joins_the_show_and_not_the_movie() -> None:
     season_pack = make_torrent("MobLand S02 1080P AMZN WEB-DL DDP5.1. X265 POOTLED", seeds=13)
     dashed = make_torrent("Mobland - S01 - Mp4 x264 AC3 1080p", seeds=572)
-    movie = make_torrent("Dune|||2021", seeds=4)
+    movie = make_torrent("Dune (2021) 1080p BluRay", seeds=4)
     dune_pack = make_torrent("Dune S01 COMPLETE 1080p", seeds=2)
     client = MagicMock()
 
@@ -714,3 +833,117 @@ def test_season_episode_details_keeps_plot_still_and_rating() -> None:
     ]
     client.get_image_url.assert_called_once_with("/still.jpg", size="w300")
     assert season_episode_details(client, None) == []
+
+
+def test_titles_are_ranked_by_how_many_releases_they_have() -> None:
+    results = [
+        make_torrent("Alpha Show|1|1"),
+        make_torrent("Zulu Movie|"),
+        make_torrent("Zulu Movie|"),
+        make_torrent("Zulu Movie|"),
+    ]
+    with patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)):
+        prepared = prepare_search(results)
+
+    assert [lookup.title for lookup in prepared.lookups] == ["Zulu Movie", "Alpha Show"]
+    assert prepared.lookups[0].count == 3
+
+
+def test_search_hit_renders_a_card_before_the_details_call() -> None:
+    lookup = TitleLookup(
+        normalized="dune",
+        title="Dune",
+        movie_years=frozenset({2021}),
+        needs_tv=False,
+        order=0,
+        count=4,
+    )
+    client = MagicMock()
+    client.search_multi.return_value = {
+        "results": [
+            {
+                "id": 438631,
+                "media_type": "movie",
+                "title": "Dune",
+                "overview": "Paul Atreides leaves Caladan.",
+                "release_date": "2021-09-15",
+                "poster_path": "/dune.jpg",
+                "vote_average": 7.8,
+                "vote_count": 20,
+                "genre_ids": [878, 12],
+            }
+        ]
+    }
+    client.get_image_url.side_effect = lambda path, size="w185": f"https://image.tmdb.org/t/p/{size}{path}"
+
+    groups, search_response = resolve_title(client, lookup, fetch_details=False)
+
+    client.get_movie_details.assert_not_called()
+    assert search_response["results"][0]["id"] == 438631
+    group = groups[0][1]
+    assert group["title"] == "Dune"
+    assert group["year"] == 2021
+    assert group["overview"] == "Paul Atreides leaves Caladan."
+    assert group["genres"] == ["Science Fiction", "Adventure"]
+    assert group["vote_average"] == 7.8
+    assert group["runtime"] is None
+
+
+def test_unresolved_titles_stay_hidden_until_the_search_is_finished() -> None:
+    dune = make_torrent("Dune|||2021")
+    other = make_torrent("Unknown Movie|")
+    with patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)):
+        prepared = prepare_search([dune, other])
+    assembler = SearchAssembler(prepared)
+    lookup = next(item for item in prepared.lookups if item.title == "Dune")
+    group = {
+        "tmdb_id": 1,
+        "title": "Dune",
+        "year": 2021,
+        "poster_url": None,
+        "media_type": "movie",
+        "seasons": [],
+        "results": [],
+        "overview": "Plot",
+        "genres": [],
+        "vote_average": None,
+        "backdrop_url": None,
+        "runtime": None,
+        "adult": False,
+    }
+    assembler.apply(lookup.normalized, [(("movie", 1), group)])
+
+    partial = assembler.snapshot()
+    assert [item["title"] for item in partial["groups"]] == ["Dune"]
+    assert partial["other"] == []
+
+    finished = assembler.snapshot(final=True)
+    assert finished["other"] == [{**other, "parsed_title": "Unknown Movie"}]
+
+
+def test_details_fill_runtime_on_the_card_already_shown() -> None:
+    lookup = TitleLookup("dune", "Dune", frozenset({2021}), False, 0, 2)
+    result = make_torrent("Dune|||2021")
+    prepared_results = [(result, {"title": "Dune", "year": 2021}, "Dune")]
+    assembler = SearchAssembler(PreparedSearch(prepared_results, [lookup]))
+    client = MagicMock()
+    client.search_multi.return_value = {
+        "results": [{"id": 5, "media_type": "movie", "title": "Dune", "release_date": "2021-09-15", "overview": "Plot"}]
+    }
+    client.get_movie_details.return_value = {
+        "id": 5,
+        "title": "Dune",
+        "release_date": "2021-09-15",
+        "overview": "Plot",
+        "runtime": 155,
+    }
+    client.get_image_url.return_value = None
+    preview, search_response = resolve_title(client, lookup, fetch_details=False)
+    assembler.apply(lookup.normalized, preview)
+    assert assembler.snapshot()["groups"][0]["runtime"] is None
+
+    detailed, _search_response = resolve_title(client, lookup, fetch_details=True, search_response=search_response)
+    assembler.apply(lookup.normalized, detailed)
+
+    assert assembler.snapshot()["groups"][0]["runtime"] == 155
+    client.search_multi.assert_called_once()

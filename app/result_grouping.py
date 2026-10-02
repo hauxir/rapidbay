@@ -1,13 +1,48 @@
 """Enrich flat torrent search results with TMDB metadata and buckets."""
 
 import re
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
 from title_parser import parse_title
-from tmdb import TMDBClient
+from tmdb import TMDBClient, tmdb_disk_cache
 
 MAX_TMDB_LOOKUPS: int = 30
+FIRST_RENDER_LOOKUPS: int = 3
+# A next episode dated today is treated as aired once this many releases exist for it.
+NEXT_EPISODE_RESULT_THRESHOLD: int = 3
+
+# TMDB genre ids are stable. Search hits carry ids; detail responses carry names.
+_GENRE_NAMES: dict[int, str] = {
+    12: "Adventure",
+    14: "Fantasy",
+    16: "Animation",
+    18: "Drama",
+    27: "Horror",
+    28: "Action",
+    35: "Comedy",
+    36: "History",
+    37: "Western",
+    53: "Thriller",
+    80: "Crime",
+    99: "Documentary",
+    878: "Science Fiction",
+    9648: "Mystery",
+    10402: "Music",
+    10749: "Romance",
+    10751: "Family",
+    10752: "War",
+    10759: "Action & Adventure",
+    10762: "Kids",
+    10763: "News",
+    10764: "Reality",
+    10765: "Sci-Fi & Fantasy",
+    10766: "Soap",
+    10767: "Talk",
+    10768: "War & Politics",
+    10770: "TV Movie",
+}
 
 
 def _clean_fallback_title(value: Any) -> str:
@@ -85,6 +120,13 @@ def _card_details(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any]
             name = genre.get("name") if isinstance(genre, dict) else None
             if isinstance(name, str) and name.strip() and name.strip() not in genres:
                 genres.append(name.strip())
+    if not genres:
+        genre_ids = details.get("genre_ids")
+        if isinstance(genre_ids, list):
+            for genre_id in genre_ids:
+                name = _GENRE_NAMES.get(_as_int(genre_id) or -1)
+                if name and name not in genres:
+                    genres.append(name)
 
     vote_average = None
     vote = details.get("vote_average")
@@ -139,15 +181,24 @@ def _aired_within_two_weeks(air_date: str | None) -> bool:
     return timedelta(0) <= age < timedelta(days=14)
 
 
-def _latest_episode(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any] | None:
-    """The latest aired episode, when it was released less than two weeks ago."""
-    episode = details.get("last_episode_to_air")
+def _aired_on(air_date: str | None, day: date) -> bool:
+    if not air_date:
+        return False
+    try:
+        released = date.fromisoformat(air_date)
+    except ValueError:
+        return False
+    return released == day
+
+
+def _episode_card(client: TMDBClient, episode: Any) -> dict[str, Any] | None:
+    """Card fields shared by last_episode_to_air and next_episode_to_air."""
     if not isinstance(episode, dict):
         return None
     season_number = _as_int(episode.get("season_number"))
     episode_number = _as_int(episode.get("episode_number"))
     air_date = _text(episode.get("air_date"))
-    if season_number is None or episode_number is None or not _aired_within_two_weeks(air_date):
+    if season_number is None or episode_number is None or not air_date:
         return None
 
     runtime = _as_int(episode.get("runtime"))
@@ -172,6 +223,43 @@ def _latest_episode(client: TMDBClient, details: dict[str, Any]) -> dict[str, An
         "vote_average": _rating(episode),
         "still_url": still_url,
     }
+
+
+def _latest_episode(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any] | None:
+    """The latest aired episode, when it was released less than two weeks ago."""
+    card = _episode_card(client, details.get("last_episode_to_air"))
+    if card is None or not _aired_within_two_weeks(card["air_date"]):
+        return None
+    return card
+
+
+def _next_episode_airing_today(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any] | None:
+    card = _episode_card(client, details.get("next_episode_to_air"))
+    if card is None or not _aired_on(card["air_date"], date.today()):
+        return None
+    return card
+
+
+def _count_episode_releases(group: dict[str, Any], season_number: int, episode_number: int) -> int:
+    """Releases parsed as this episode. Season packs are not counted."""
+    seasons = group.get("seasons")
+    if not isinstance(seasons, dict):
+        return 0
+    entries = seasons.get(season_number) or []
+    return sum(1 for episode, _, _ in entries if episode == episode_number)
+
+
+def _promote_today_next_episode(group: dict[str, Any]) -> None:
+    """Show today's next episode as Latest once enough releases for it exist."""
+    pending = group.get("_next_episode_today")
+    if not isinstance(pending, dict):
+        return
+    season_number = pending.get("season_number")
+    episode_number = pending.get("episode_number")
+    if not isinstance(season_number, int) or not isinstance(episode_number, int):
+        return
+    if _count_episode_releases(group, season_number, episode_number) >= NEXT_EPISODE_RESULT_THRESHOLD:
+        group["latest_episode"] = dict(pending)
 
 
 def season_episode_details(client: TMDBClient, payload: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -260,6 +348,9 @@ def _make_group(
         latest = _latest_episode(client, details)
         if latest is not None:
             group["latest_episode"] = latest
+        upcoming = _next_episode_airing_today(client, details)
+        if upcoming is not None:
+            group["_next_episode_today"] = upcoming
     return (media_type, tmdb_id), group
 
 
@@ -357,6 +448,8 @@ def _serialized_group(group: dict[str, Any]) -> dict[str, Any]:
     if group["media_type"] != "tv":
         return group
 
+    _promote_today_next_episode(group)
+    group.pop("_next_episode_today", None)
     seasons: dict[int, list[tuple[int | None, str, dict[str, Any]]]] = group["seasons"]
     group["seasons"] = [
         {
@@ -443,21 +536,40 @@ def _enrich_focused(
     return {"groups": [_serialized_group(group)], "other": []}
 
 
-def enrich_search_results(
-    results: list[dict[str, Any]],
-    tmdb_api_key: str | None,
-    focus: tuple[str, int] | None = None,
-    query_title: str = "",
-) -> dict[str, Any]:
-    """Return TMDB groups and unmatched results from a flat torrent list.
+@dataclass(frozen=True)
+class TitleLookup:
+    """One distinct parsed title, ordered so the largest groups are looked up first."""
 
-    Searches are deduplicated by the parsed, cleaned title and capped at
-    ``MAX_TMDB_LOOKUPS``. Movie releases join the card for the year in the
-    filename. The returned season structure is JSON-serializable and follows
-    the API shape ``[{"season": n, "episodes": [...]}]``.
-    """
+    normalized: str
+    title: str
+    movie_years: frozenset[int]
+    needs_tv: bool
+    order: int
+    count: int
+
+
+@dataclass
+class PreparedSearch:
+    parsed_results: list[tuple[dict[str, Any], dict[str, Any], str]]
+    lookups: list[TitleLookup]
+
+
+def _tmdb_client(api_key: str) -> TMDBClient:
+    try:
+        cache = tmdb_disk_cache()
+    except Exception:
+        cache = None
+    return TMDBClient(api_key, cache=cache)
+
+
+def prepare_search(results: list[dict[str, Any]]) -> PreparedSearch:
+    """Parse torrent titles and rank them by how many releases they have."""
     parsed_results: list[tuple[dict[str, Any], dict[str, Any], str]] = []
     unique_titles: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    movie_years_by_title: dict[str, set[int]] = {}
+    tv_titles: set[str] = set()
+
     for result in results:
         raw_title = result.get("title") if isinstance(result, dict) else None
         fallback_title = _clean_fallback_title(raw_title)
@@ -475,113 +587,259 @@ def enrich_search_results(
 
         parsed_results.append((result, parsed, parsed_title))
         normalized = _normalized_title(parsed_title)
-        if normalized:
-            unique_titles.setdefault(normalized, parsed_title)
-
-    if focus is not None:
-        media_type, tmdb_id = focus
-        client = TMDBClient(tmdb_api_key) if tmdb_api_key else None
-        return _enrich_focused(parsed_results, client, media_type, tmdb_id, query_title)
-
-    movie_years_by_title: dict[str, set[int]] = {}
-    tv_titles: set[str] = set()
-    for _, parsed, parsed_title in parsed_results:
-        normalized_title = _normalized_title(parsed_title)
-        if not normalized_title:
+        if not normalized:
             continue
+        unique_titles.setdefault(normalized, parsed_title)
+        counts[normalized] = counts.get(normalized, 0) + 1
         if _parsed_seasons(parsed):
-            tv_titles.add(normalized_title)
+            tv_titles.add(normalized)
             continue
         parsed_year = _as_int(parsed.get("year"))
         if parsed_year is not None:
-            movie_years_by_title.setdefault(normalized_title, set()).add(parsed_year)
+            movie_years_by_title.setdefault(normalized, set()).add(parsed_year)
 
-    groups_by_tmdb: dict[tuple[str, int], dict[str, Any]] = {}
-    matched_titles: dict[str, list[tuple[str, int]]] = {}
-    other: list[dict[str, Any]] = []
+    lookups = [
+        TitleLookup(
+            normalized=normalized,
+            title=title,
+            movie_years=frozenset(movie_years_by_title.get(normalized, set())),
+            needs_tv=normalized in tv_titles,
+            order=index,
+            count=counts.get(normalized, 0),
+        )
+        for index, (normalized, title) in enumerate(unique_titles.items())
+    ]
+    lookups.sort(key=lambda lookup: (-lookup.count, lookup.order))
+    return PreparedSearch(parsed_results=parsed_results, lookups=lookups)
 
-    if tmdb_api_key:
-        client = TMDBClient(tmdb_api_key)
-        for index, (normalized, title) in enumerate(unique_titles.items()):
-            if index >= MAX_TMDB_LOOKUPS:
-                break
-            try:
-                search_response = client.search_multi(title)
-            except Exception:
-                search_response = None
-            candidates = search_response.get("results") if isinstance(search_response, dict) else None
-            if not isinstance(candidates, list):
+
+def resolve_title(
+    client: TMDBClient,
+    lookup: TitleLookup,
+    fetch_details: bool = True,
+    search_response: dict[str, Any] | None = None,
+) -> tuple[list[tuple[tuple[str, int], dict[str, Any]]], dict[str, Any] | None]:
+    """Match one parsed title on TMDB.
+
+    ``fetch_details`` is false for the first paint: the search hit already has
+    the poster, plot, year, and rating. The detail call fills in runtime and
+    the latest episode afterwards.
+    """
+    if search_response is None:
+        try:
+            search_response = client.search_multi(lookup.title)
+        except Exception:
+            search_response = None
+    if not isinstance(search_response, dict):
+        return [], None
+    candidates = search_response.get("results")
+    if not isinstance(candidates, list):
+        return [], search_response
+
+    found: list[tuple[tuple[str, int], dict[str, Any]]] = []
+    keys: list[tuple[str, int]] = []
+    covered_years: set[int] = set()
+    have_tv = False
+    detail_lookups = 0
+    movie_years = set(lookup.movie_years)
+    for candidate in candidates:
+        if detail_lookups >= 8:
+            break
+        if not isinstance(candidate, dict):
+            continue
+        candidate_media_type = candidate.get("media_type")
+        candidate_year = _candidate_year(candidate)
+        want_default = not keys
+        uncovered_years = movie_years - covered_years
+        want_year = candidate_media_type == "movie" and bool(uncovered_years) and (
+            candidate_year is None or candidate_year in uncovered_years
+        )
+        want_tv = lookup.needs_tv and not have_tv and candidate_media_type == "tv"
+        if not (want_default or want_year or want_tv):
+            continue
+        detail_lookups += 1
+        if fetch_details:
+            resolved = _details_for_match(client, candidate)
+            if resolved is None:
                 continue
+            media_type, details = resolved
+        else:
+            if candidate_media_type not in ("tv", "movie"):
+                continue
+            media_type = candidate_media_type
+            details = candidate
+        group_data = _make_group(client, candidate, lookup.title, media_type, details)
+        if group_data is None:
+            continue
+        key, group = group_data
+        if key not in keys:
+            keys.append(key)
+            found.append((key, group))
+        if group["media_type"] == "tv":
+            have_tv = True
+        group_year = group.get("year")
+        if group["media_type"] == "movie" and isinstance(group_year, int):
+            covered_years.add(group_year)
+        if covered_years >= movie_years and (not lookup.needs_tv or have_tv):
+            break
+    return found, search_response
 
-            movie_years = movie_years_by_title.get(normalized, set())
-            needs_tv = normalized in tv_titles
-            keys: list[tuple[str, int]] = []
-            covered_years: set[int] = set()
-            have_tv = False
-            detail_lookups = 0
-            for candidate in candidates:
-                if detail_lookups >= 8:
-                    break
-                if not isinstance(candidate, dict):
-                    continue
-                candidate_media_type = candidate.get("media_type")
-                candidate_year = _candidate_year(candidate)
-                want_default = not keys
-                uncovered_years = movie_years - covered_years
-                want_year = candidate_media_type == "movie" and bool(uncovered_years) and (
-                    candidate_year is None or candidate_year in uncovered_years
-                )
-                want_tv = needs_tv and not have_tv and candidate_media_type == "tv"
-                if not (want_default or want_year or want_tv):
-                    continue
-                detail_lookups += 1
-                resolved = _details_for_match(client, candidate)
-                if resolved is None:
-                    continue
-                media_type, details = resolved
-                group_data = _make_group(client, candidate, title, media_type, details)
-                if group_data is None:
-                    continue
-                key, group = group_data
-                if key not in groups_by_tmdb:
-                    groups_by_tmdb[key] = group
-                if key not in keys:
-                    keys.append(key)
-                if group["media_type"] == "tv":
-                    have_tv = True
-                group_year = group.get("year")
-                if group["media_type"] == "movie" and isinstance(group_year, int):
-                    covered_years.add(group_year)
-                if covered_years >= movie_years and (not needs_tv or have_tv):
-                    break
+
+def _merge_metadata(current: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Copy card fields from a later lookup onto a group that already has releases."""
+    for field in (
+        "title",
+        "year",
+        "poster_url",
+        "overview",
+        "genres",
+        "vote_average",
+        "backdrop_url",
+        "runtime",
+        "adult",
+    ):
+        if field in incoming:
+            current[field] = incoming[field]
+    if "latest_episode" in incoming:
+        current["latest_episode"] = incoming["latest_episode"]
+    else:
+        current.pop("latest_episode", None)
+    pending = incoming.get("_next_episode_today")
+    if isinstance(pending, dict):
+        current["_next_episode_today"] = pending
+    else:
+        current.pop("_next_episode_today", None)
+
+
+def _public_group(group: dict[str, Any]) -> dict[str, Any]:
+    """A JSON-ready copy. The stored group keeps its season dict for the next pass."""
+    public = dict(group)
+    _promote_today_next_episode(public)
+    public.pop("_next_episode_today", None)
+    if group.get("media_type") == "tv" and isinstance(group.get("seasons"), dict):
+        seasons: dict[int, list[tuple[int | None, str, dict[str, Any]]]] = group["seasons"]
+        public["seasons"] = [
+            {
+                "season": season,
+                "episodes": [
+                    result
+                    for _, _, result in sorted(
+                        episodes,
+                        key=lambda item: (
+                            item[0] is None,
+                            item[0] if item[0] is not None else 0,
+                            item[1],
+                        ),
+                    )
+                ],
+            }
+            for season, episodes in sorted(seasons.items())
+        ]
+    elif group.get("media_type") != "tv":
+        public["results"] = list(group.get("results") or [])
+    return public
+
+
+class SearchAssembler:
+    """Build group snapshots as TMDB lookups finish.
+
+    Titles that have not been looked up yet stay out of the response, so the
+    page can draw the first cards without listing everything else as unmatched.
+    """
+
+    def __init__(self, prepared: PreparedSearch) -> None:
+        self.parsed_results = prepared.parsed_results
+        self.groups_by_tmdb: dict[tuple[str, int], dict[str, Any]] = {}
+        self.matched: dict[str, list[tuple[str, int]]] = {}
+        self.resolved: set[str] = set()
+
+    def apply(self, normalized: str, groups: list[tuple[tuple[str, int], dict[str, Any]]]) -> None:
+        previous = self.matched.get(normalized, [])
+        new_keys = [key for key, _ in groups]
+        for key in previous:
+            if key not in new_keys and not self._used_by_others(key, normalized):
+                self.groups_by_tmdb.pop(key, None)
+        stored: list[tuple[str, int]] = []
+        for key, group in groups:
+            current = self.groups_by_tmdb.get(key)
+            if current is None or current.get("media_type") != group.get("media_type"):
+                self.groups_by_tmdb[key] = group
+            elif key in previous:
+                _merge_metadata(current, group)
+            stored.append(key)
+        self.matched[normalized] = stored
+        self.resolved.add(normalized)
+
+    def _used_by_others(self, key: tuple[str, int], normalized: str) -> bool:
+        for other, keys in self.matched.items():
+            if other != normalized and key in keys:
+                return True
+        return False
+
+    def snapshot(self, *, final: bool = False) -> dict[str, Any]:
+        for group in self.groups_by_tmdb.values():
+            if group.get("media_type") == "tv":
+                group["seasons"] = {}
+            else:
+                group["results"] = []
+
+        other: list[dict[str, Any]] = []
+        for result, parsed, parsed_title in self.parsed_results:
+            normalized = _normalized_title(parsed_title)
+            pending = not final and normalized not in self.resolved
+            keys = self.matched.get(normalized)
+            group = None
             if keys:
-                matched_titles[normalized] = keys
-
-    for result, parsed, parsed_title in parsed_results:
-        normalized = _normalized_title(parsed_title)
-        keys = matched_titles.get(normalized)
-        group = None
-        if keys is not None:
-            groups = [groups_by_tmdb[key] for key in keys if key in groups_by_tmdb]
-            group = _select_group_for_result(groups, parsed)
-        if group is None:
-            alias = _part_one_alias(normalized)
-            alias_keys = matched_titles.get(alias) if alias is not None else None
-            if alias_keys is not None:
-                alias_groups = [groups_by_tmdb[key] for key in alias_keys if key in groups_by_tmdb]
-                group = _select_group_for_result(alias_groups, parsed)
-        if group is None or not _add_result_to_group(group, result, parsed):
+                groups = [self.groups_by_tmdb[key] for key in keys if key in self.groups_by_tmdb]
+                group = _select_group_for_result(groups, parsed)
+            if group is None:
+                alias = _part_one_alias(normalized)
+                alias_keys = self.matched.get(alias) if alias is not None else None
+                if alias_keys:
+                    alias_groups = [self.groups_by_tmdb[key] for key in alias_keys if key in self.groups_by_tmdb]
+                    group = _select_group_for_result(alias_groups, parsed)
+            if group is not None and _add_result_to_group(group, result, parsed):
+                continue
+            if pending and group is None:
+                continue
             unmatched = dict(result)
             unmatched["parsed_title"] = parsed_title
             other.append(unmatched)
 
-    ordered_groups = sorted(
-        groups_by_tmdb.values(),
-        key=lambda group: (-_group_result_count(group), str(group["title"]).casefold()),
-    )
-    return {
-        "groups": [
-            _serialized_group(group) for group in ordered_groups if _group_has_results(group)
-        ],
-        "other": other,
-    }
+        ordered_groups = sorted(
+            self.groups_by_tmdb.values(),
+            key=lambda group: (-_group_result_count(group), str(group.get("title", "")).casefold()),
+        )
+        return {
+            "groups": [_public_group(group) for group in ordered_groups if _group_has_results(group)],
+            "other": other,
+        }
+
+
+def enrich_search_results(
+    results: list[dict[str, Any]],
+    tmdb_api_key: str | None,
+    focus: tuple[str, int] | None = None,
+    query_title: str = "",
+) -> dict[str, Any]:
+    """Return TMDB groups and unmatched results from a flat torrent list.
+
+    Searches are deduplicated by the parsed, cleaned title and capped at
+    ``MAX_TMDB_LOOKUPS``. The largest title groups are looked up first. Movie
+    releases join the card for the year in the filename. The returned season
+    structure is JSON-serializable and follows the API shape
+    ``[{"season": n, "episodes": [...]}]``.
+    """
+    prepared = prepare_search(results)
+    if focus is not None:
+        media_type, tmdb_id = focus
+        client = _tmdb_client(tmdb_api_key) if tmdb_api_key else None
+        return _enrich_focused(prepared.parsed_results, client, media_type, tmdb_id, query_title)
+
+    assembler = SearchAssembler(prepared)
+    if tmdb_api_key:
+        client = _tmdb_client(tmdb_api_key)
+        for lookup in prepared.lookups[:MAX_TMDB_LOOKUPS]:
+            groups, _search_response = resolve_title(client, lookup, fetch_details=True)
+            assembler.apply(lookup.normalized, groups)
+    return assembler.snapshot(final=True)

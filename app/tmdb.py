@@ -1,18 +1,41 @@
 """Synchronous client for the TMDB v3 API."""
 
+import copy
 from typing import Any
 
 import requests
 
+_CACHE_TTL_SECONDS = 6 * 60 * 60
+_CACHE_MISS = object()
+_disk_cache: Any = None
+
+
+def tmdb_disk_cache() -> Any:
+    """Shared on-disk cache for TMDB responses. Repeat searches skip the network."""
+    global _disk_cache
+    if _disk_cache is None:
+        import os
+
+        import diskcache
+        import settings
+
+        _disk_cache = diskcache.Cache(os.path.join(settings.CACHE_DIR, "tmdb"))
+    return _disk_cache
+
 
 class TMDBClient:
-    """Make uncached requests to TMDB using an API key."""
+    """Make requests to TMDB using an API key.
+
+    Pass a disk cache to reuse search and detail responses. Without one, every
+    call goes to the network.
+    """
 
     BASE_URL = "https://api.themoviedb.org/3"
     IMAGE_BASE_URL = "https://image.tmdb.org/t/p/"
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, cache: Any | None = None) -> None:
         self.api_key = api_key
+        self._cache = cache
 
     def _auth(self) -> tuple[dict[str, str], dict[str, str]]:
         # TMDB v4 read tokens are JWTs and must be sent as a bearer token.
@@ -30,6 +53,14 @@ class TMDBClient:
         if headers:
             request_kwargs["headers"] = headers
 
+        cache_key = (
+            endpoint,
+            tuple(sorted((key, value) for key, value in request_params.items() if key != "api_key")),
+        )
+        cached = self._read_cache(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             response = requests.get(f"{self.BASE_URL}{endpoint}", **request_kwargs)
             if response.status_code != 200:
@@ -37,11 +68,33 @@ class TMDBClient:
 
             data = response.json()
             if isinstance(data, dict):
-                return data
+                self._write_cache(cache_key, data)
+                copied = copy.deepcopy(data)
+                return copied if isinstance(copied, dict) else data
             return None
         except Exception:
             # Network failures and invalid JSON should not interrupt search results.
             return None
+
+    def _read_cache(self, key: tuple[Any, ...]) -> dict[str, Any] | None:
+        if self._cache is None:
+            return None
+        try:
+            cached = self._cache.get(key, default=_CACHE_MISS)
+        except Exception:
+            return None
+        if cached is _CACHE_MISS or not isinstance(cached, dict):
+            return None
+        copied = copy.deepcopy(cached)
+        return copied if isinstance(copied, dict) else None
+
+    def _write_cache(self, key: tuple[Any, ...], data: dict[str, Any]) -> None:
+        if self._cache is None:
+            return
+        try:
+            self._cache.set(key, data, expire=_CACHE_TTL_SECONDS)
+        except Exception:
+            return
 
     def search_multi(self, query: str) -> dict[str, Any] | None:
         """Search movies and TV shows matching a query."""

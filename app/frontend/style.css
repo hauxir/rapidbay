@@ -816,7 +816,7 @@ video::cue {
     align-items: center;
 }
 .classic-rich-toggle {
-    margin: 24px 0 0;
+    margin: 24px 0 24px;
 }
 .search-history {
     position: absolute;

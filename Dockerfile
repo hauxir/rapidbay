@@ -61,6 +61,6 @@ RUN rm -f /etc/nginx/sites-enabled/default
 RUN chmod +x /app/run.sh
 WORKDIR /app
 
-ENV USE_NGINX=1 DATA_DIR=/tmp FRONTEND_DIR=/app/frontend KODI_ADDON_DIR=/app/kodi.addon
+ENV USE_NGINX=1 DATA_DIR=/tmp FRONTEND_DIR=/app/frontend RICH_FRONTEND_DIR=/app/frontend_rich KODI_ADDON_DIR=/app/kodi.addon
 
 CMD ["./run.sh"]

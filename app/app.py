@@ -31,7 +31,7 @@ import settings
 import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
@@ -1481,15 +1481,29 @@ def cast_play(token: str, magnet_hash: str, filename: str) -> Response:
     return _serve_output_file(magnet_hash, filename)
 
 
-# Catch-all route for frontend - MUST be defined last
-@app.get("/{path:path}", include_in_schema=False)
-def frontend(path: str, password: str | None = Cookie(default=None)) -> Response:
+def _serve_frontend(directory: str, path: str, password: str | None) -> Response:
     if path == "":
         path = "index.html"
     if not path.startswith("index.html"):
-        filepath = _resolve_within(settings.FRONTEND_DIR, path)
+        filepath = _resolve_within(directory, path)
         if filepath and os.path.isfile(filepath):
             return FileResponse(filepath)
     if not settings.PASSWORD or password == settings.PASSWORD:
-        return _send_from_directory(settings.FRONTEND_DIR, "index.html", last_modified=datetime.datetime.now())
+        return _send_from_directory(directory, "index.html", last_modified=datetime.datetime.now())
     return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())
+
+
+@app.get("/rich", include_in_schema=False)
+def rich_frontend_root() -> Response:
+    return RedirectResponse("/rich/")
+
+
+@app.get("/rich/{path:path}", include_in_schema=False)
+def rich_frontend(path: str, password: str | None = Cookie(default=None)) -> Response:
+    return _serve_frontend(settings.RICH_FRONTEND_DIR, path, password)
+
+
+# Catch-all route for frontend - MUST be defined last
+@app.get("/{path:path}", include_in_schema=False)
+def frontend(path: str, password: str | None = Cookie(default=None)) -> Response:
+    return _serve_frontend(settings.FRONTEND_DIR, path, password)

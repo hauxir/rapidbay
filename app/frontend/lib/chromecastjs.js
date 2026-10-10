@@ -40,33 +40,15 @@ var ChromecastJS = function(scope, reciever) {
                 that.Media[key] = media[key]
             }
         }
-        if (!that.Available) {
-            var unavailable = 'Chromecast is not available in this browser.'
-            if (callback) {
-                callback(unavailable)
-            }
-            return TriggerEvent('error', unavailable)
-        }
-        if (that.Connected) {
-            // A session is already open: load into it, since no connection change will fire
-            return LoadMedia(callback)
-        }
         cast.framework.CastContext.getInstance().requestSession().then(function() {
             if (callback) {
                 callback(null)
             }
         }, function(e) {
-            // Closing the device picker without choosing one is not an error
-            if (e === 'cancel') {
-                if (callback) {
-                    callback(null)
-                }
-                return
-            }
             if (callback) {
-                callback(Describe(e))
+                callback(e)
             }
-            TriggerEvent('error', 'ChromecastJS.cast(): ' + Describe(e))
+            TriggerEvent('error', 'ChromecastJS.cast(): ' + e)
         })
     }
     ChromecastJS.prototype.seek = function(percentage) {
@@ -100,7 +82,7 @@ var ChromecastJS = function(scope, reciever) {
             return TriggerEvent('error', '.changeSubtitle(): Not connected')
         }
         var tracksInfoRequest = new chrome.cast.media.EditTracksInfoRequest([index])
-        cast.framework.CastContext.getInstance().getCurrentSession().getSessionObj().media[0].editTracksInfo(tracksInfoRequest, null, null)
+        cast.framework.CastContext.getInstance().b.getSessionObj().media[0].editTracksInfo(tracksInfoRequest, null, null)
         for (var i = 0; i < that.Media.subtitles.length; i++) {
             that.Media.subtitles[i].active = false
             if (i === index) {
@@ -112,14 +94,7 @@ var ChromecastJS = function(scope, reciever) {
         cast.framework.CastContext.getInstance().endCurrentSession(true)
     }
     // Check if a chromecast is available, trigger 'Init' event
-    var castChecks = 0
     var castInterval = setInterval(function() {
-        castChecks += 1
-        if (castChecks > 240) {
-            // The cast SDK never came up (blocked or offline): stop polling
-            clearInterval(castInterval)
-            return
-        }
         if (typeof window.chrome !== 'undefined' && typeof window.chrome.cast !== 'undefined' && window.chrome.cast.isAvailable) {
             clearInterval(castInterval)
             Init()
@@ -160,6 +135,7 @@ var ChromecastJS = function(scope, reciever) {
             TriggerEvent('volume', that.Media.volume)
         })
         that.Controller.addEventListener('isMutedChanged', function() {
+            console.log(that.Player.isMuted)
             that.Media.muted = that.Player.isMuted
             TriggerEvent('muteOrUnmute', that.Media.muted)
         })
@@ -182,77 +158,6 @@ var ChromecastJS = function(scope, reciever) {
         })
         that.Available = true;
         TriggerEvent('available')
-    }
-
-    // Send the current media to the connected receiver
-    function LoadMedia(callback) {
-        that.Session = cast.framework.CastContext.getInstance().getCurrentSession()
-        if (!that.Session || !that.Media.content) {
-            if (callback) {
-                callback('No active cast session.')
-            }
-            return
-        }
-        var mediaInfo = new chrome.cast.media.MediaInfo(that.Media.content)
-        //mediaInfo.contentType = 'video/mp4' ??
-        mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata()
-        // The sexy subtitle support function <3
-        if (that.Media.subtitles.length > 0) {
-            mediaInfo.textTrackStyle = new chrome.cast.media.TextTrackStyle()
-            mediaInfo.textTrackStyle.fontFamily = 'Arial'
-            mediaInfo.textTrackStyle.foregroundColor = '#FFFFFF'
-            mediaInfo.textTrackStyle.backgroundColor = '#00000000'
-            mediaInfo.textTrackStyle.fontScale = '1.1'
-            mediaInfo.textTrackStyle.edgeColor = '#00000099'
-            mediaInfo.textTrackStyle.edgeType = chrome.cast.media.TextTrackEdgeType.DROP_SHADOW
-            var tracks = [];
-            for (var i = 0; i < that.Media.subtitles.length; i++) {
-                var track = new chrome.cast.media.Track(i, chrome.cast.media.TrackType.TEXT)
-                track.trackContentId = that.Media.subtitles[i].src
-                track.trackContentType = 'text/vtt'
-                track.subtype = chrome.cast.media.TextTrackType.CAPTIONS
-                track.name = that.Media.subtitles[i].label
-                track.language = that.Media.subtitles[i].srclang
-                tracks.push(track);
-            }
-            mediaInfo.tracks = tracks
-        }
-        if (that.Media.poster) {
-            mediaInfo.metadata.images = [{
-                'url': that.Media.poster
-            }]
-        }
-        if (that.Media.title) {
-            mediaInfo.metadata.title = that.Media.title
-        }
-        if (that.Media.description) {
-            mediaInfo.metadata.subtitle = that.Media.description
-        }
-        var request = new chrome.cast.media.LoadRequest(mediaInfo)
-        request.currentTime = that.Media.time
-        request.autoplay = !that.Media.paused
-        if (that.Media.subtitles.length > 0) {
-            for (var i = 0; i < that.Media.subtitles.length; i++) {
-                if (typeof that.Media.subtitles[i].active != 'undefined' && that.Media.subtitles[i].active) {
-                    request.activeTrackIds = [i]
-                }
-            }
-        }
-        that.Session.loadMedia(request).then(function() {
-            TriggerEvent('media', that.Media)
-            if (callback) {
-                callback(null)
-            }
-        }, function(e) {
-            TriggerEvent('error', 'ChromecastJS.cast(): ' + Describe(e))
-            if (callback) {
-                callback(Describe(e))
-            }
-        })
-    }
-
-    function Describe(e) {
-        return (e && (e.description || e.code)) || String(e)
     }
 
     function IsConnectedChanged() {
@@ -289,13 +194,65 @@ var ChromecastJS = function(scope, reciever) {
                     }
                 }
                 // Update the active subtitle
-                var activeTrackId = cast.framework.CastContext.getInstance().getCurrentSession().getSessionObj().media[0].activeTrackIds[0]
-                if (typeof activeTrackId !== 'undefined' && typeof that.Media.subtitles[activeTrackId] !== 'undefined') {
+                var activeTrackId = cast.framework.CastContext.getInstance().b.getSessionObj().media[0].activeTrackIds[0]
+                if (activeTrackId && typeof that.Media.subtitles[activeTrackId] !== 'undefined') {
                     that.Media.subtitles[activeTrackId].active = true
                 }
                 TriggerEvent('media', that.Media)
             } else {
-                LoadMedia()
+                that.Session = cast.framework.CastContext.getInstance().getCurrentSession()
+                if (that.Session && that.Media.content) {
+                    var mediaInfo = new chrome.cast.media.MediaInfo(that.Media.content)
+                    //mediaInfo.contentType = 'video/mp4' ??
+                    mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata()
+                    // The sexy subtitle support function <3
+                    if (that.Media.subtitles.length > 0) {
+                        mediaInfo.textTrackStyle = new chrome.cast.media.TextTrackStyle()
+                        mediaInfo.textTrackStyle.fontFamily = 'Arial'
+                        mediaInfo.textTrackStyle.foregroundColor = '#FFFFFF'
+                        mediaInfo.textTrackStyle.backgroundColor = '#00000000'
+                        mediaInfo.textTrackStyle.fontScale = '1.1'
+                        mediaInfo.textTrackStyle.edgeColor = '#00000099'
+                        mediaInfo.textTrackStyle.edgeType = chrome.cast.media.TextTrackEdgeType.DROP_SHADOW
+                        var tracks = [];
+                        for (var i = 0; i < that.Media.subtitles.length; i++) {
+                            var track = new chrome.cast.media.Track(i, chrome.cast.media.TrackType.TEXT)
+                            track.trackContentId = that.Media.subtitles[i].src
+                            track.trackContentType = 'text/vtt'
+                            track.subtype = chrome.cast.media.TextTrackType.CAPTIONS
+                            track.name = that.Media.subtitles[i].label
+                            track.language = that.Media.subtitles[i].srclang
+                            tracks.push(track);
+                        }
+                        mediaInfo.tracks = tracks
+                    }
+                    if (that.Media.poster) {
+                        mediaInfo.metadata.images = [{
+                            'url': that.Media.poster
+                        }]
+                    }
+                    if (that.Media.title) {
+                        mediaInfo.metadata.title = that.Media.title
+                    }
+                    if (that.Media.description) {
+                        mediaInfo.metadata.subtitle = that.Media.description
+                    }
+                    var request = new chrome.cast.media.LoadRequest(mediaInfo)
+                    request.currentTime = that.Media.time
+                    request.autoplay = !that.Media.paused
+                    if (that.Media.subtitles.length > 0) {
+                        for (var i = 0; i < that.Media.subtitles.length; i++) {
+                            if (typeof that.Media.subtitles[i].active != 'undefined' && that.Media.subtitles[i].active) {
+                                request.activeTrackIds = [i]
+                            }
+                        }
+                    }
+                    that.Session.loadMedia(request).then(function() {
+                        TriggerEvent('media', that.Media)
+                    }, function(e) {
+                        TriggerEvent('error', 'ChromecastJS.cast():', e)
+                    })
+                }
             }
         }, 0)
     }

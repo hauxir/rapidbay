@@ -890,7 +890,7 @@
                 } else if (lowername === "arrowdown") {
                     e.preventDefault();
                     if (isInput) {
-                        var firstItem = document.querySelector(".search-history-item");
+                        var firstItem = document.querySelector(".search-history-item, .rich-frontend-link");
                         if (firstItem) {
                             firstItem.focus();
                         }
@@ -909,8 +909,9 @@
                         } else {
                             focusPrevElement();
                         }
-                    } else if (isInput) {
-                        $(".rich-frontend-link").focus();
+                    } else if (isFrontendLink) {
+                        var lastItem = $(".search-history-item:last");
+                        (lastItem.length ? lastItem : $("input")).focus();
                     } else if (!isTopbarButton) {
                         $(".topbar-home button:first").focus();
                     }

@@ -17,7 +17,7 @@
         <script src="/lib/chromecastjs.js"></script>
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
         <link rel="manifest" href="/manifest.json" />
-        <link href="/style.css" rel="stylesheet" />
+        <link href="/style.css?v=20261011-link-below2" rel="stylesheet" />
         <link rel="icon" type="image/png" href="/favicon.png" />
     </head>
 
@@ -64,7 +64,6 @@
                   </div>
               </div>
               <div class="wrapper">
-                <a href="/rich/" class="rich-frontend-link">View the new rich content frontend</a>
                 <form @submit="onSubmit">
                   <div class="input-group mb-3">
                     <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
@@ -72,8 +71,11 @@
                       <button class="btn btn-light" type="submit" tabindex="-1"><div class="icon search_icon"/></button>
                     </div>
                   </div>
-                  <div v-if="searchHistory.length > 0" class="search-history">
-                    <div tabindex="0" v-for="term in searchHistory" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
+                  <div class="search-below">
+                    <div v-if="searchHistory.length > 0" class="search-history">
+                      <div tabindex="0" v-for="term in searchHistory.slice(0, 4)" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
+                    </div>
+                    <a href="/rich/" class="rich-frontend-link">View the new rich content frontend</a>
                   </div>
                 </form>
               </div>
@@ -239,6 +241,6 @@
             <button class="btn btn-dark" @click="toggle()"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
         </script>
 
-        <script src="/app.js"></script>
+        <script src="/app.js?v=20261011-link-below"></script>
     </body>
 </html>

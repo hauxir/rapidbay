@@ -32,7 +32,8 @@ import settings
 import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
@@ -46,6 +47,7 @@ from result_grouping import (
     resolve_title,
     season_episode_details,
 )
+from starlette.datastructures import Headers
 from starlette.middleware.base import BaseHTTPMiddleware
 from tmdb import TMDBClient, is_unavailable, tmdb_disk_cache
 
@@ -349,6 +351,57 @@ class HeaderMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(HeaderMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class PreflightMiddleware:
+    """Answer CORS preflight even when the Origin header never arrives.
+
+    A Cloudflare quick tunnel forwards GET with Origin, and those responses
+    already carry Access-Control-Allow-Origin. It drops Origin on OPTIONS, so
+    CORSMiddleware ignores the preflight and FastAPI returns 405.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http" or scope["method"] != "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        if "access-control-request-method" not in headers:
+            await self.app(scope, receive, send)
+            return
+        origin = headers.get("origin")
+        allowed = settings.CORS_ORIGINS
+        if "*" in allowed:
+            allow_origin = "*"
+        elif origin and origin in allowed:
+            allow_origin = origin
+        else:
+            await self.app(scope, receive, send)
+            return
+        response = Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": allow_origin,
+                "Access-Control-Allow-Methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+                "Access-Control-Allow-Headers": headers.get("access-control-request-headers") or "*",
+                "Access-Control-Max-Age": "600",
+            },
+        )
+        await response(scope, receive, send)
+
+
+# Outermost, so it runs before CORSMiddleware.
+app.add_middleware(PreflightMiddleware)
 
 
 def _first_episode(value: int | List[int] | None) -> int | None:
@@ -545,6 +598,10 @@ def _send_from_directory(directory: str, filename: str, last_modified: datetime.
 def login(password: str | None = Form(default=None)) -> Response:
     if not password:
         raise HTTPException(status_code=404)
+    if settings.PASSWORD and password != settings.PASSWORD:
+        # 401 is what an external frontend can read. A matching password still
+        # returns 200 and sets the cookie the classic login page expects.
+        raise HTTPException(status_code=401)
     response = Response(content="{}", media_type="application/json")
     if settings.PASSWORD and password == settings.PASSWORD:
         response.set_cookie(key='password', value=password)
@@ -1508,16 +1565,6 @@ def _serve_frontend(directory: str, path: str, password: str | None) -> Response
     if not settings.PASSWORD or password == settings.PASSWORD:
         return _send_from_directory(directory, "index.html", last_modified=datetime.datetime.now())
     return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())
-
-
-@app.get("/rich", include_in_schema=False)
-def rich_frontend_root() -> Response:
-    return RedirectResponse("/rich/")
-
-
-@app.get("/rich/{path:path}", include_in_schema=False)
-def rich_frontend(path: str, password: str | None = Cookie(default=None)) -> Response:
-    return _serve_frontend(settings.RICH_FRONTEND_DIR, path, password)
 
 
 # Catch-all route for frontend - MUST be defined last

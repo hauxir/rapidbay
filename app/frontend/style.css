@@ -329,8 +329,6 @@ video::cue {
 
 .search-below { position: absolute; top: 100%; left: 0; right: 0; margin-top: 10px; }
 .search-below .search-history { position: static; margin-top: 0; }
-.rich-frontend-link { display: inline-block; margin-top: 24px; padding: 8px 16px; white-space: nowrap; color: rgba(255,255,255,0.7); border: 2px solid transparent; border-radius: 5px; background: none; font: inherit; cursor: pointer; }
-.rich-frontend-link:hover, .rich-frontend-link:focus { color: white; background: rgba(255,255,255,0.1); border-color: white; outline: none; text-decoration: none; }
 
 /* Search history */
 .search-history { position: absolute; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto; margin-top: 10px; }

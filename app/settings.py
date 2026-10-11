@@ -6,6 +6,9 @@ from typing import List, Tuple
 PASSWORD: str | None = None
 AUTO_PLAY_NEXT_FILE: bool = True
 OPENAPI_HOST: str | None = None
+# Browsers on another host (the rich frontend) may call this API.
+# Lock it down with CORS_ORIGINS='["https://your-app.fly.dev"]'.
+CORS_ORIGINS: List[str] = ["*"]
 
 # PATHS - temp values, final constants computed below
 _data_dir: str = "./data"
@@ -16,7 +19,6 @@ _filelist_dir: str = ""
 _torrents_dir: str = ""
 _output_dir: str = ""
 _frontend_dir: str = "./app/frontend"
-_rich_frontend_dir: str = "./app/frontend_rich"
 _kodi_addon_dir: str = "./app/kodi.addon"
 
 # JACKETT
@@ -90,6 +92,11 @@ for _variable in [item for item in list(globals().keys()) if not item.startswith
             _env_var = eval(_env_var)
         globals()[_variable] = _env_var
 
+# A bare URL (or comma-separated list) is not valid Python, so eval leaves it
+# as a string. Starlette would then treat each character as an origin.
+if isinstance(CORS_ORIGINS, str):
+    CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
+
 # Load path overrides from environment
 _data_dir = os.getenv("DATA_DIR", _data_dir)
 _cache_dir = os.getenv("CACHE_DIR", _cache_dir)
@@ -99,7 +106,6 @@ _filelist_dir = os.getenv("FILELIST_DIR", _filelist_dir)
 _torrents_dir = os.getenv("TORRENTS_DIR", _torrents_dir)
 _output_dir = os.getenv("OUTPUT_DIR", _output_dir)
 _frontend_dir = os.getenv("FRONTEND_DIR", _frontend_dir)
-_rich_frontend_dir = os.getenv("RICH_FRONTEND_DIR", _rich_frontend_dir)
 _kodi_addon_dir = os.getenv("KODI_ADDON_DIR", _kodi_addon_dir)
 
 # Compute final path constants (assigned once)
@@ -113,5 +119,4 @@ FILELIST_DIR: str = _filelist_dir if _filelist_dir else os.path.join(_data_dir, 
 TORRENTS_DIR: str = _torrents_dir if _torrents_dir else os.path.join(_data_dir, "torrents") + "/"
 OUTPUT_DIR: str = _output_dir if _output_dir else os.path.join(_data_dir, "output") + "/"
 FRONTEND_DIR: str = _frontend_dir
-RICH_FRONTEND_DIR: str = _rich_frontend_dir
 KODI_ADDON_DIR: str = _kodi_addon_dir

@@ -1,18 +1,131 @@
 (function () {
+    function isTextEditing(el) {
+        if (!el || !el.tagName) {
+            return false;
+        }
+        var tag = el.tagName;
+        if (tag !== "INPUT" && tag !== "TEXTAREA") {
+            return false;
+        }
+        if (el.readOnly || el.disabled) {
+            return false;
+        }
+        var type = String(el.type || "text").toLowerCase();
+        return type !== "button" && type !== "submit" && type !== "checkbox" && type !== "radio" && type !== "range";
+    }
+
+    var armingSearch = false;
+
+    function isAndroidDevice() {
+        return /Android/i.test(navigator.userAgent || "");
+    }
+
+    function armSearchInput(input) {
+        if (!input) {
+            return;
+        }
+        armingSearch = true;
+        input.dataset.tvArmed = "1";
+        input.readOnly = false;
+        input.dispatchEvent(new CustomEvent("tv-search-unlock", { bubbles: true }));
+        input.blur();
+        setTimeout(function () {
+            input.focus();
+            armingSearch = false;
+        }, 0);
+    }
+
+    function disarmSearchInput(input) {
+        if (!input) {
+            return;
+        }
+        delete input.dataset.tvArmed;
+        input.readOnly = true;
+        input.dispatchEvent(new CustomEvent("tv-search-lock", { bubbles: true }));
+    }
+
+    function blurUnarmedSearch() {
+        var inputs = document.querySelectorAll("input.form-control");
+        for (var i = 0; i < inputs.length; i++) {
+            if (inputs[i].dataset.tvArmed) {
+                continue;
+            }
+            inputs[i].readOnly = true;
+            if (document.activeElement === inputs[i]) {
+                inputs[i].blur();
+            }
+        }
+    }
+
+    // D-pad focus highlights the search box without opening the TV keyboard.
+    // The box stays read-only until OK/Enter or a real click.
+    document.addEventListener("focusin", function (e) {
+        var field = e.target;
+        if (!field || !field.classList || !field.classList.contains("form-control")) {
+            return;
+        }
+        if (field.dataset.tvArmed || armingSearch) {
+            return;
+        }
+        field.readOnly = true;
+    }, true);
+    document.addEventListener("focusout", function (e) {
+        var field = e.target;
+        if (!field || !field.classList || !field.classList.contains("form-control")) {
+            return;
+        }
+        if (armingSearch) {
+            return;
+        }
+        disarmSearchInput(field);
+    }, true);
+    document.addEventListener("mousedown", function (e) {
+        var field = e.target;
+        if (!field || !field.classList || !field.classList.contains("form-control")) {
+            return;
+        }
+        field.dataset.tvArmed = "1";
+        field.readOnly = false;
+        field.dispatchEvent(new CustomEvent("tv-search-unlock", { bubbles: true }));
+    }, true);
+
     var keylistener = function (e) {
         var keycode = e.keyCode ? e.keyCode : e.which;
         var name = e.key || "";
         var lowername = name.toLowerCase();
         var direction = arrowDirection(e);
+        var active = document.activeElement;
         var isSelect = lowername === "enter" || lowername === "select" || keycode === 13 || keycode === 23;
-        if (isSelect) {
-            if (document.activeElement && document.activeElement.tagName === "INPUT") {
-                return;
+        // Backspace deletes a character while a text field is being edited.
+        // The remote Back button is a different key and is left alone.
+        // Down leaves the search box even while typing; left and right still move the caret.
+        if (exitSearchOnDown(e)) {
+            return;
+        }
+        if (isTextEditing(active)) {
+            if (!document.documentElement.classList.contains("tv-ui") && (direction === "up" || direction === "down") && document.querySelector(".topbar-home")) {
+                e.preventDefault();
+                focusByDirection(direction);
             }
+            return;
+        }
+        if (isSelect && active && active.classList && active.classList.contains("form-control")) {
             e.preventDefault();
-            if (document.activeElement && document.activeElement.click) {
-                document.activeElement.click();
+            e.stopPropagation();
+            armSearchInput(active);
+            return;
+        }
+        if (isSelect) {
+            e.preventDefault();
+            if (active && active.click) {
+                active.click();
             }
+        }
+        if (document.querySelector(".topbar-home") && direction) {
+            document.body.onmouseover = null;
+            e.preventDefault();
+            focusByDirection(direction);
+            return;
         }
         if (direction === "down" || direction === "right") {
             document.body.onmouseover = null;
@@ -47,7 +160,7 @@
 
     function homeFocusTargets() {
         return Array.prototype.filter.call(
-            document.querySelectorAll(".form-control, .billboard-card, .poster-card, .search-chip, .search-history-item, .search-history-clear, .home-shortcut"),
+            document.querySelectorAll(".home-logo-link, .form-control, .billboard-card, .poster-card, .search-chip, .search-history-item, .search-history-clear, .home-shortcut, .group-card[tabindex='0'], .episode-card[tabindex='0'], .season-header[tabindex='0'], tr[tabindex='0']"),
             function (el) {
                 if (el.disabled) {
                     return false;
@@ -141,21 +254,95 @@
         return null;
     }
 
+    function firstContentTarget(targets) {
+        var best = null;
+        var bestTop = Infinity;
+        var bestLeft = Infinity;
+        targets.forEach(function (el) {
+            if (el.closest && el.closest(".topbar")) {
+                return;
+            }
+            var rect = el.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) {
+                return;
+            }
+            if (rect.top < bestTop - 8 || (Math.abs(rect.top - bestTop) <= 8 && rect.left < bestLeft)) {
+                best = el;
+                bestTop = rect.top;
+                bestLeft = rect.left;
+            }
+        });
+        return best;
+    }
+
+    function exitSearchOnDown(e) {
+        if (arrowDirection(e) !== "down") {
+            return false;
+        }
+        var active = document.activeElement;
+        if (!active || !active.classList || !active.classList.contains("form-control") || !isTextEditing(active)) {
+            return false;
+        }
+        if (!active.closest || !active.closest(".home-search")) {
+            return false;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) {
+            e.stopImmediatePropagation();
+        }
+        var next = firstContentTarget(homeFocusTargets());
+        disarmSearchInput(active);
+        active.blur();
+        if (next) {
+            focusTarget(next);
+        }
+        setTimeout(function () {
+            if (!next || !document.body.contains(next)) {
+                return;
+            }
+            if (document.activeElement === active || document.activeElement === document.body) {
+                focusTarget(next);
+            }
+        }, 60);
+        return true;
+    }
+
+    function focusTarget(el) {
+        if (!el) {
+            return;
+        }
+        // Arriving with the D-pad only highlights the search box. OK opens it.
+        if (el.classList && el.classList.contains("form-control")) {
+            delete el.dataset.tvArmed;
+            el.readOnly = true;
+        }
+        el.focus();
+        revealHomeTarget(el);
+    }
+
     function focusByDirection(direction) {
         var current = document.activeElement;
         var targets = homeFocusTargets();
         if (!current || targets.indexOf(current) === -1) {
-            if (targets[0]) {
-                targets[0].focus();
-                revealHomeTarget(targets[0]);
+            var initial = (direction === "down" && firstContentTarget(targets)) || targets[0];
+            if (initial) {
+                focusTarget(initial);
             }
             return;
+        }
+        // Down from the logo or the search box moves into the rows, not across the header.
+        if (direction === "down" && current.closest && current.closest(".topbar")) {
+            var content = firstContentTarget(targets);
+            if (content) {
+                focusTarget(content);
+                return;
+            }
         }
         if (direction === "down" && current.classList.contains("form-control")) {
             var nextRowFirst = firstFocusableInNextRow(current, targets);
             if (nextRowFirst) {
-                nextRowFirst.focus();
-                revealHomeTarget(nextRowFirst);
+                focusTarget(nextRowFirst);
                 return;
             }
         }
@@ -235,8 +422,7 @@
         if (!best) {
             return;
         }
-        best.focus();
-        revealHomeTarget(best);
+        focusTarget(best);
     }
 
     document.addEventListener("mousemove", function () {
@@ -250,7 +436,11 @@
 
     window.isChrome = /Chrome/i.test(navigator.userAgent);
     if (navigator.serviceWorker) {
-        navigator.serviceWorker.register("/rich/sw.js");
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+            registrations.forEach(function (registration) {
+                registration.unregister();
+            });
+        });
     }
 
     if (!window.location.origin) {
@@ -289,63 +479,183 @@
         }
     }
 
+    function apiBase() {
+        return String(window.RAPIDBAY_API_URL || "").replace(/\/$/, "");
+    }
+
+    function apiUrl(path) {
+        if (/^https?:\/\//i.test(path)) {
+            return path;
+        }
+        return apiBase() + path;
+    }
+
+    function authToken() {
+        return localStorage.getItem("rapidbayToken") || "";
+    }
+
+    function authHeaders(extra) {
+        var headers = {};
+        if (extra) {
+            Object.keys(extra).forEach(function (key) {
+                headers[key] = extra[key];
+            });
+        }
+        var token = authToken();
+        if (token) {
+            headers.Authorization = "Bearer " + token;
+        }
+        return headers;
+    }
+
+    function apiAjax(options) {
+        options.url = apiUrl(options.url);
+        options.headers = authHeaders(options.headers);
+        return $.ajax(options);
+    }
+
+    var castPrefixes = {};
+    var castPrefixWaiters = {};
+
+    function castPrefix(hash, callback) {
+        if (castPrefixes[hash]) {
+            callback(castPrefixes[hash]);
+            return;
+        }
+        if (castPrefixWaiters[hash]) {
+            castPrefixWaiters[hash].push(callback);
+            return;
+        }
+        castPrefixWaiters[hash] = [callback];
+        function finish(prefix) {
+            if (prefix) {
+                castPrefixes[hash] = prefix;
+            }
+            var waiters = castPrefixWaiters[hash] || [];
+            delete castPrefixWaiters[hash];
+            waiters.forEach(function (waiter) {
+                waiter(prefix);
+            });
+        }
+        apiAjax({
+            url: "/api/cast_link/" + hash,
+            method: "GET",
+            success: function (link) {
+                finish(link && link.prefix ? link.prefix : null);
+            },
+            error: function () {
+                finish(null);
+            },
+        });
+    }
+
+    // /play/<hash>/<file> is cookie-protected. Playback uses the signed /cast/
+    // prefix so the video element and hls.js can fetch bytes without a header.
+    function resolveMediaUrl(playPath, callback) {
+        var match = /^\/play\/([^/]+)\/(.*)$/.exec(playPath || "");
+        if (!match) {
+            callback(null);
+            return;
+        }
+        castPrefix(match[1], function (prefix) {
+            callback(prefix ? apiBase() + prefix + match[2] : null);
+        });
+    }
+
     function get(url, callback) {
         var request;
-        if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
-        }
         function _callback(data) {
             pending_requests = pending_requests.filter(function (req) {
-                req !== request;
+                return req !== request;
             });
             callback(data);
         }
-        request = $.get(url, _callback);
+        request = apiAjax({ url: url, method: "GET", success: _callback });
         pending_requests.push(request);
         return request;
     }
 
     function post(url, data, callback) {
-        if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
-        }
-        $.post(url, data, callback);
+        return apiAjax({ url: url, method: "POST", data: data, success: callback });
     }
 
     // Subscribe to a server-sent-events endpoint. Calls callback per event,
     // closes on {done: true}, and invokes fallback (e.g. to start polling)
-    // if SSE is unavailable or the stream errors.
+    // if SSE is unavailable or the stream errors. fetch is used so the
+    // Authorization header can be set; EventSource cannot.
     function subscribe(url, callback, fallback) {
-        if (!window.EventSource) {
+        if (!window.fetch || !window.ReadableStream) {
             fallback();
-            return null;
+            return { close: function () {} };
         }
-        if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
-        }
-        var es = new EventSource(url);
-        es.onmessage = function (e) {
-            var data = JSON.parse(e.data);
-            if (data.done) {
-                es.close();
+        var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var closed = false;
+        fetch(apiUrl(url), {
+            headers: authHeaders({ Accept: "text/event-stream" }),
+            signal: controller ? controller.signal : undefined,
+        }).then(function (response) {
+            if (!response.ok || !response.body || !response.body.getReader) {
+                throw new Error("sse");
             }
-            callback(data);
+            var reader = response.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = "";
+            function pump() {
+                return reader.read().then(function (result) {
+                    if (closed) {
+                        return;
+                    }
+                    if (result.done) {
+                        if (!closed) {
+                            fallback();
+                        }
+                        return;
+                    }
+                    buffer += decoder.decode(result.value, { stream: true });
+                    var parts = buffer.split("\n\n");
+                    buffer = parts.pop();
+                    parts.forEach(function (block) {
+                        var dataLines = [];
+                        block.split("\n").forEach(function (line) {
+                            if (line.indexOf("data:") === 0) {
+                                dataLines.push(line.slice(5).replace(/^ /, ""));
+                            }
+                        });
+                        if (!dataLines.length) {
+                            return;
+                        }
+                        var data = JSON.parse(dataLines.join("\n"));
+                        if (data.done) {
+                            closed = true;
+                        }
+                        callback(data);
+                    });
+                    if (!closed) {
+                        return pump();
+                    }
+                });
+            }
+            return pump();
+        }).catch(function () {
+            if (!closed) {
+                fallback();
+            }
+        });
+        return {
+            close: function () {
+                closed = true;
+                if (controller) {
+                    controller.abort();
+                }
+            },
         };
-        es.onerror = function () {
-            es.close();
-            fallback();
-        };
-        return es;
     }
 
     function reportLibraryEvents(events, onSuccess) {
         if (!events || !events.length) {
             return;
         }
-        if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
-        }
-        $.ajax({
+        apiAjax({
             url: "/api/library/observe/",
             method: "POST",
             contentType: "application/json",
@@ -521,8 +831,8 @@
         return "videoPosition_" + get_hash(magnet) + "_" + filename;
     }
 
-    // The classic frontend shares localStorage and reads videoPosition_* as a
-    // bare number, so duration and timestamp live under videoProgress_*.
+    // Duration and timestamp live under videoProgress_* so a bare number can
+    // stay in videoPosition_*. This storage belongs to this site only.
     function getVideoProgressKey(positionKey) {
         return "videoProgress_" + positionKey.slice("videoPosition_".length);
     }
@@ -831,10 +1141,7 @@
             callback({ keep_watching: [], recent: [] });
             return;
         }
-        if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
-        }
-        $.ajax({
+        apiAjax({
             url: "/api/watch_rows/",
             method: "POST",
             contentType: "application/json",
@@ -1244,11 +1551,13 @@
                 if (newUrl.split("?")[0] !== oldUrl.split("?")[0]) return;
                 var video = document.getElementsByTagName("video")[0];
                 if (!video) return;
-                var fullUrl = window.location.origin + newUrl;
+                var self = this;
+                resolveMediaUrl(newUrl, function (fullUrl) {
+                if (!fullUrl) return;
                 var resumeAt = video.currentTime;
                 var wasPlaying = !video.paused && !video.ended;
-                if (this.hls) {
-                    var hls = this.hls;
+                if (self.hls) {
+                    var hls = self.hls;
                     var seeked = false;
                     var resume = function () {
                         if (seeked) return;
@@ -1276,6 +1585,7 @@
                     video.addEventListener("loadedmetadata", onLoaded);
                     video.src = fullUrl;
                 }
+                });
             },
         },
         methods: {
@@ -1814,7 +2124,6 @@
             }
 
             var video = document.getElementsByTagName("video")[0];
-            var videoUrl = window.location.origin + self.url;
             var isHLS = self.url.indexOf(".m3u8") !== -1;
             var savedPosition = getVideoPosition(self.magnet, self.filename);
             // While a stream is still being transcoded, video.duration is only the
@@ -1873,12 +2182,7 @@
                 self.hls.on(Hls.Events.LEVEL_UPDATED, function (event, data) {
                     self.streamLive = !!(data && data.details && data.details.live);
                 });
-                self.hls.loadSource(videoUrl);
                 self.hls.attachMedia(video);
-            } else if (isHLS && video.canPlayType("application/vnd.apple.mpegurl")) {
-                video.src = videoUrl;
-            } else {
-                video.src = videoUrl;
             }
 
             function rememberNext(data) {
@@ -1950,13 +2254,22 @@
                     }
                 });
             });
-            video.play();
-
-            // Restore saved position (the hls.js path resumes via the
-            // startPosition config above instead).
-            if (savedPosition > 0 && !self.hls) {
-                video.currentTime = savedPosition;
-            }
+            resolveMediaUrl(self.url, function (videoUrl) {
+                if (!videoUrl) {
+                    return;
+                }
+                if (self.hls) {
+                    self.hls.loadSource(videoUrl);
+                } else {
+                    video.src = videoUrl;
+                }
+                video.play();
+                // Restore saved position (the hls.js path resumes via the
+                // startPosition config above instead).
+                if (savedPosition > 0 && !self.hls) {
+                    video.currentTime = savedPosition;
+                }
+            });
 
             // Save position periodically and report unfinished plays for Keep watching.
             self.positionInterval = setInterval(function () {
@@ -2328,8 +2641,14 @@
                     this.showError("Chromecast is not available in this browser.");
                     return;
                 }
-                if (/^(localhost|127(\.\d+){3}|\[?::1\]?)$/.test(window.location.hostname)) {
-                    this.showError("Open RapidBay by its network address to cast. A TV cannot reach localhost.");
+                var apiHost = "";
+                try {
+                    apiHost = new URL(apiBase()).hostname;
+                } catch (error) {
+                    apiHost = "";
+                }
+                if (/^(localhost|127(\.\d+){3}|\[?::1\]?)$/.test(apiHost)) {
+                    this.showError("Point RapidBay at a network address to cast. A TV cannot reach localhost.");
                     return;
                 }
                 var parts = /^\/play\/([^/]+)\/(.*)$/.exec(this.videoUrl || "");
@@ -2337,15 +2656,12 @@
                     this.showError("This video cannot be cast.");
                     return;
                 }
-                if (!document.cookie) {
-                    document.cookie = localStorage.getItem("cookie");
-                }
                 // The TV cannot send the password, so it gets a signed link for this torrent.
-                $.ajax({
+                apiAjax({
                     url: "/api/cast_link/" + parts[1],
                     method: "GET",
                     success: function (link) {
-                        var prefix = window.location.origin + link.prefix;
+                        var prefix = apiBase() + link.prefix;
                         function castUrl(path) {
                             var inner = /^\/play\/[^/]+\/(.*)$/.exec(path || "");
                             return inner ? prefix + inner[1] : null;
@@ -2471,6 +2787,7 @@
                 topSeries: [],
                 topMovies: [],
                 homeRetried: false,
+                searchLocked: isAndroidDevice(),
             };
         },
         methods: {
@@ -2630,7 +2947,7 @@
                 navigate("/");
             },
             openClassic: function () {
-                window.location.assign("/");
+                window.location.assign(apiBase() + "/");
             },
         },
         mounted: function () {
@@ -2643,6 +2960,18 @@
                 self.refreshRails();
             };
             window.addEventListener("resize", this.onHomeResize);
+            if (isAndroidDevice()) {
+                this.searchLocked = true;
+                this.$nextTick(blurUnarmedSearch);
+                setTimeout(blurUnarmedSearch, 250);
+                setTimeout(blurUnarmedSearch, 800);
+                setTimeout(blurUnarmedSearch, 1500);
+            } else {
+                var desktopSearch = this.$el.querySelector("input.form-control");
+                if (desktopSearch) {
+                    armSearchInput(desktopSearch);
+                }
+            }
 
             if (
                 router.lastRouteResolved().url.toLowerCase() ===
@@ -2657,58 +2986,45 @@
 
             this.keylistener = function (e) {
                 var direction = arrowDirection(e);
-                var lowername = direction ? "arrow" + direction : String(e.key || "").toLowerCase();
-                if (!lowername) {
-                    var code = e.keyCode || e.which;
-                    if (code === 13) lowername = "enter";
+                var code = e.keyCode || e.which || 0;
+                var lowername = String(e.key || "").toLowerCase();
+                var active = document.activeElement;
+                var isSearchInput = active && active.classList && active.classList.contains("form-control");
+                var isSelect = lowername === "enter" || lowername === "select" || code === 13 || code === 23;
+                // While the search box is open for typing, Backspace deletes a
+                // character. Down leaves the box; left and right move the caret.
+                if (exitSearchOnDown(e)) {
+                    return;
                 }
-                var isTopbarButton = document.activeElement && document.activeElement.classList.contains("home-shortcut");
-                var isHistoryItem = document.activeElement && (document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item"));
-                var isRecentItem = document.activeElement && (document.activeElement.classList.contains("billboard-card") || document.activeElement.classList.contains("poster-card") || document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item") || document.activeElement.classList.contains("search-history-clear") || document.activeElement.classList.contains("home-shortcut") || document.activeElement.classList.contains("row-nudge"));
-                var isSearchInput = document.activeElement && document.activeElement.classList.contains("form-control");
-                var homeStops = document.querySelectorAll(".billboard-card, .poster-card, .search-chip, .search-history-item, .search-history-clear, .home-shortcut, .row-nudge:not([hidden])");
-                var spatial = !!document.querySelector(".home-root");
-                if (lowername === "enter" && !isSearchInput && (isTopbarButton || isHistoryItem || isRecentItem)) {
-                    e.preventDefault();
-                    document.activeElement.click();
-                } else if (spatial && (lowername === "arrowdown" || lowername === "arrowup" || ((lowername === "arrowleft" || lowername === "arrowright") && !isSearchInput))) {
+                if (isTextEditing(active)) {
+                    if (!document.documentElement.classList.contains("tv-ui") && (direction === "up" || direction === "down")) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        focusByDirection(direction);
+                    }
+                    return;
+                }
+                if (isSelect && isSearchInput) {
                     e.preventDefault();
                     e.stopPropagation();
                     if (e.stopImmediatePropagation) {
                         e.stopImmediatePropagation();
                     }
-                    focusByDirection(lowername.replace("arrow", ""));
-                } else if (lowername === "arrowdown") {
-                    if (isSearchInput) {
-                        return;
-                    }
+                    armSearchInput(active);
+                    return;
+                }
+                if (direction) {
                     e.preventDefault();
-                    if (isHistoryItem || isRecentItem) {
-                        focusNextElement();
-                    } else {
-                        $("input.form-control").focus().click();
+                    e.stopPropagation();
+                    if (e.stopImmediatePropagation) {
+                        e.stopImmediatePropagation();
                     }
-                } else if (lowername === "arrowup") {
-                    if (isSearchInput) {
-                        return;
-                    }
+                    focusByDirection(direction);
+                    return;
+                }
+                if (isSelect && active && active.click && active.tagName !== "INPUT" && active.tagName !== "TEXTAREA") {
                     e.preventDefault();
-                    if (isHistoryItem || isRecentItem) {
-                        var idx = Array.prototype.indexOf.call(homeStops, document.activeElement);
-                        if (idx <= 0) {
-                            $("input.form-control").focus().click();
-                        } else {
-                            focusPrevElement();
-                        }
-                    } else if (!isTopbarButton) {
-                        $(".topbar-home button:first").focus();
-                    }
-                } else if (lowername === "arrowright" && !isSearchInput) {
-                    e.preventDefault();
-                    focusNextElement();
-                } else if (lowername === "arrowleft" && !isSearchInput) {
-                    e.preventDefault();
-                    focusPrevElement();
+                    active.click();
                 }
             };
 
@@ -2824,6 +3140,7 @@
                 libraryTitles: [],
                 pinnedTitle: null,
                 richSearchPending: false,
+                searchLocked: isAndroidDevice(),
             };
         },
         methods: {
@@ -3475,48 +3792,39 @@
                 var generation = this.richSearchGeneration;
                 this.resetRichSearch();
                 this.richSearchPending = true;
-                if (!window.EventSource) {
+                if (!window.fetch || !window.ReadableStream) {
                     this.loadBlockingRichSearch();
                     return;
                 }
-                if (!document.cookie) {
-                    document.cookie = localStorage.getItem("cookie");
-                }
                 var focused = false;
-                var source = new EventSource("/api/rich_search_events/" + encodeURIComponent(this.searchterm));
-                this.eventsource = source;
-                source.onmessage = function (e) {
-                    if (generation !== self.richSearchGeneration) {
-                        source.close();
-                        return;
-                    }
-                    var data;
-                    try {
-                        data = JSON.parse(e.data);
-                    } catch (error) {
-                        return;
-                    }
-                    self.applyRichPayload(data, generation);
-                    if (data.done) {
-                        self.richStreamSettled = true;
-                        source.close();
+                this.eventsource = subscribe(
+                    "/api/rich_search_events/" + encodeURIComponent(this.searchterm),
+                    function (data) {
+                        if (generation !== self.richSearchGeneration) {
+                            if (self.eventsource) {
+                                self.eventsource.close();
+                                self.eventsource = null;
+                            }
+                            return;
+                        }
+                        self.applyRichPayload(data, generation);
+                        if (data.done) {
+                            self.richStreamSettled = true;
+                            self.eventsource = null;
+                        } else if (!focused && self.results !== null) {
+                            focused = true;
+                        }
+                    },
+                    function () {
                         self.eventsource = null;
-                    } else if (!focused && self.results !== null) {
-                        focused = true;
+                        if (generation !== self.richSearchGeneration || self.richStreamSettled || self.results !== null) {
+                            self.richSearchPending = false;
+                            self.richStreamSettled = true;
+                            return;
+                        }
+                        self.loadBlockingRichSearch();
                     }
-                };
-                source.onerror = function () {
-                    source.close();
-                    if (self.eventsource === source) {
-                        self.eventsource = null;
-                    }
-                    if (generation !== self.richSearchGeneration || self.richStreamSettled || self.results !== null) {
-                        self.richSearchPending = false;
-                        self.richStreamSettled = true;
-                        return;
-                    }
-                    self.loadBlockingRichSearch();
-                };
+                );
             },
             focusFirstResult: function () {
                 rbsetTimeout(function () {
@@ -3570,6 +3878,16 @@
             },
         },
         template: "#search-results-screen-template",
+        mounted: function () {
+            if (!isAndroidDevice()) {
+                return;
+            }
+            this.searchLocked = true;
+            this.$nextTick(blurUnarmedSearch);
+            setTimeout(blurUnarmedSearch, 250);
+            setTimeout(blurUnarmedSearch, 800);
+            setTimeout(blurUnarmedSearch, 1500);
+        },
         created: function () {
             var self = this;
             this.searchterm = this.params ? this.params.searchterm : "";
@@ -3588,7 +3906,7 @@
                     }
                 });
                 if (hashes.length === 0 && torrent_links.length === 0) return;
-                $.ajax({
+                apiAjax({
                     url: "/api/magnet_status/",
                     type: "POST",
                     contentType: "application/json",
@@ -3815,7 +4133,9 @@
         methods: {
             preventchange: function (e) {
                 e.preventDefault();
-                e.target.value = window.location.origin + this.play_link;
+                resolveMediaUrl(this.play_link, function (url) {
+                    e.target.value = url || "";
+                });
             },
             back: function () {
                 window.history.back();
@@ -3925,12 +4245,22 @@
                 if (!window.isSafari && !playingHls) {
                     var subs = data.subtitles || [];
                     self.subtitles = subs.map(function (sub) {
+                        // Encode the filename. A release tag like [EZTVx.to]
+                        // makes an unencoded URL invalid, so the browser never
+                        // fetches the subtitle file.
+                        var url = "/play/" + magnet_hash + "/" + encodeURIComponent(sub);
                         return {
                             language: sub
                                 .substring(sub.lastIndexOf("_") + 1)
                                 .replace(".vtt", ""),
-                            url: "/play/" + magnet_hash + "/" + sub,
+                            url: url,
+                            mediaUrl: "",
                         };
+                    });
+                    self.subtitles.forEach(function (subtitle) {
+                        resolveMediaUrl(subtitle.url, function (mediaUrl) {
+                            subtitle.mediaUrl = mediaUrl || "";
+                        });
                     });
                 } else if (playingHls) {
                     self.subtitles = [];
@@ -3952,9 +4282,14 @@
                     self.streamMessage = null;
                 }
             }
+            var polling = false;
             function pollFileInfo() {
+                if (polling) {
+                    return;
+                }
+                polling = true;
                 (function get_file_info() {
-                    get(
+                    var request = get(
                         "/api/magnet/" +
                             magnet_hash +
                             "/" +
@@ -3966,9 +4301,19 @@
                             }
                         }
                     );
+                    if (request && request.fail) {
+                        request.fail(function () {
+                            if (self.status !== "ready") {
+                                rbsetTimeout(get_file_info, 1000);
+                            }
+                        });
+                    }
                 })();
             }
-            // Server pushes status changes (progress, peers, ready) as they happen
+            // Poll immediately. The event stream is kept too, but a tunnel can
+            // hold those small pushes back so the screen would otherwise sit
+            // on an empty spinner while the download is already running.
+            pollFileInfo();
             this.eventsource = subscribe(
                 "/api/magnet_events/" +
                     magnet_hash +
@@ -4001,7 +4346,40 @@
 
     var vm = new Vue({
         el: "#app",
-        data: { screen: null, params: {}, routeKey: "" },
+        data: {
+            screen: null,
+            params: {},
+            routeKey: "",
+            locked: false,
+            booting: true,
+            loginPassword: "",
+            loginError: "",
+        },
+        methods: {
+            submitLogin: function () {
+                var password = this.loginPassword;
+                var self = this;
+                if (!password) {
+                    return;
+                }
+                $.ajax({
+                    url: apiUrl("/api"),
+                    method: "POST",
+                    data: { password: password },
+                    success: function () {
+                        localStorage.setItem("rapidbayToken", password);
+                        self.loginError = "";
+                        self.locked = false;
+                        startRouter();
+                    },
+                    error: function (xhr) {
+                        self.loginError = xhr.status === 401
+                            ? "Wrong password"
+                            : "Can't reach the Rapidbay server.";
+                    },
+                });
+            },
+        },
     });
 
     function display_view(view_name) {
@@ -4019,15 +4397,42 @@
         };
     }
 
-    var router = new Navigo(window.location.origin + "/rich");
-    router
-        .on({
-            "search/": display_view("search-results-screen"),
-            "search/:searchterm": display_view("search-results-screen"),
-            "torrent/:torrent_link/": display_view("torrent-link-screen"),
-            "magnet/:magnet_link/": display_view("filelist-screen"),
-            "magnet/:magnet_link/:filename": display_view("download-screen"),
-            "*": display_view("search-screen"),
-        })
-        .resolve();
+    var routerStarted = false;
+    function startRouter() {
+        if (routerStarted) {
+            return;
+        }
+        routerStarted = true;
+        router.resolve();
+    }
+
+    var router = new Navigo(window.location.origin);
+    router.on({
+        "search/": display_view("search-results-screen"),
+        "search/:searchterm": display_view("search-results-screen"),
+        "torrent/:torrent_link/": display_view("torrent-link-screen"),
+        "magnet/:magnet_link/": display_view("filelist-screen"),
+        "magnet/:magnet_link/:filename": display_view("download-screen"),
+        "*": display_view("search-screen"),
+    });
+
+    $.ajax({
+        url: apiUrl("/api/home/"),
+        method: "GET",
+        headers: authHeaders(),
+        success: function () {
+            vm.booting = false;
+            vm.locked = false;
+            startRouter();
+        },
+        error: function (xhr) {
+            vm.booting = false;
+            vm.locked = true;
+            if (xhr.status === 404) {
+                localStorage.removeItem("rapidbayToken");
+                return;
+            }
+            vm.loginError = "Can't reach the Rapidbay server.";
+        },
+    });
 })();

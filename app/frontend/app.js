@@ -866,11 +866,6 @@
             goFavorites: function () {
                 navigate("/search/[favorites]");
             },
-            openRichFrontend: function () {
-                // A plain link is what Android TV hands to the system browser.
-                // Assigning the location keeps the rich frontend in this window.
-                window.location.assign("/rich/");
-            },
         },
         mounted: function () {
             this.searchHistory = getSearchHistory();
@@ -892,14 +887,13 @@
                 var isTopbarButton = document.activeElement && document.activeElement.closest(".topbar-home");
                 var isHistoryItem = document.activeElement && document.activeElement.closest(".search-history");
                 var isInput = document.activeElement && document.activeElement.tagName === "INPUT";
-                var isFrontendLink = document.activeElement && document.activeElement.classList.contains("rich-frontend-link");
-                if (lowername === "enter" && (isTopbarButton || isHistoryItem || isFrontendLink)) {
+                if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
                     e.preventDefault();
                     document.activeElement.click();
                 } else if (lowername === "arrowdown") {
                     e.preventDefault();
                     if (isInput) {
-                        var firstItem = document.querySelector(".search-history-item, .rich-frontend-link");
+                        var firstItem = document.querySelector(".search-history-item");
                         if (firstItem) {
                             firstItem.focus();
                         }
@@ -918,9 +912,6 @@
                         } else {
                             focusPrevElement();
                         }
-                    } else if (isFrontendLink) {
-                        var lastItem = $(".search-history-item:last");
-                        (lastItem.length ? lastItem : $("input")).focus();
                     } else if (!isTopbarButton) {
                         $(".topbar-home button:first").focus();
                     }

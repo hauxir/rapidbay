@@ -75,7 +75,6 @@
                     <div v-if="searchHistory.length > 0" class="search-history">
                       <div tabindex="0" v-for="term in searchHistory.slice(0, 4)" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
                     </div>
-                    <button type="button" class="rich-frontend-link" @click="openRichFrontend">View the new rich content frontend</button>
                   </div>
                 </form>
               </div>

@@ -14,3 +14,4 @@ __pycache__/
 !README.md
 .github/
 tests/
+rich-frontend/

@@ -16,23 +16,35 @@
             })();
         </script>
         <title>RapidBay</title>
-        <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
         <script src="/lib/jquery-3.3.1.min.js"></script>
         <script src="/lib/jquery-ui-focusable-1.13.2.min.js"></script>
         <script src="/lib/vue.2.5.3.min.js"></script>
         <script src="/lib/navigo.6.0.2.min.js"></script>
         <script src="/lib/hls.1.5.18.min.js"></script>
         <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
-        <script src="/rich/lib/chromecastjs.js"></script>
+        <script src="/lib/chromecastjs.js"></script>
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
-        <link rel="manifest" href="/rich/manifest.json" />
-        <link href="/rich/style.css?v=20261010-rich-split" rel="stylesheet" />
+        <link rel="manifest" href="/manifest.json" />
+        <link href="/style.css?v=20261011-tv-glow" rel="stylesheet" />
         <link rel="icon" type="image/png" href="/favicon.png?v=3" />
     </head>
 
     <body class="text-center">
         <div id="app">
-            <component :is="screen" :key="routeKey" :params="params"> </component>
+            <div v-if="booting" class="login-screen"></div>
+            <form v-else-if="locked" class="login-screen" @submit.prevent="submitLogin">
+                <input
+                    type="password"
+                    v-model="loginPassword"
+                    placeholder="Password"
+                    autocorrect="off"
+                    autocapitalize="none"
+                    autofocus
+                />
+                <button type="submit">Continue</button>
+                <p v-if="loginError" class="login-error">{{ loginError }}</p>
+            </form>
+            <component v-else :is="screen" :key="routeKey" :params="params"> </component>
         </div>
 
         <script type="text/x-template" id="loading-spinner-template">
@@ -73,12 +85,12 @@
         <script type="text/x-template" id="search-screen-template">
             <div class="root home-root">
               <div class="topbar topbar-home">
-                  <a class="home-logo-link" href="/rich/" @click.prevent="goHome()">
-                    <img class="home-logo" src="/rich/img/rapidbay-logo.png" alt="RapidBay">
+                  <a class="home-logo-link" href="/" @click.prevent="goHome()">
+                    <img class="home-logo" src="/img/rapidbay-logo.png" alt="RapidBay">
                   </a>
                   <form class="home-search" @submit="onSubmit">
                     <span class="home-search-icon" aria-hidden="true"></span>
-                    <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none" placeholder="Search">
+                    <input type="text" class="form-control" v-model="searchterm" :readonly="searchLocked" :inputmode="searchLocked ? 'none' : 'text'" @tv-search-unlock="searchLocked = false" @tv-search-lock="searchLocked = true" autocorrect="off" autocapitalize="none" placeholder="Search">
                   </form>
               </div>
               <div class="home-stage">
@@ -193,12 +205,12 @@
         <script type="text/x-template" id="search-results-screen-template">
             <div class="root">
               <div v-if="richContentEnabled" class="topbar topbar-home">
-                  <a class="home-logo-link" href="/rich/" @click.prevent="goHome()">
-                    <img class="home-logo" src="/rich/img/rapidbay-logo.png" alt="RapidBay">
+                  <a class="home-logo-link" href="/" @click.prevent="goHome()">
+                    <img class="home-logo" src="/img/rapidbay-logo.png" alt="RapidBay">
                   </a>
                   <form v-if="!pinnedTitle" class="home-search" @submit.prevent="onSearchSubmit">
                     <span class="home-search-icon" aria-hidden="true"></span>
-                    <input type="text" class="form-control" v-model="query" autocorrect="off" autocapitalize="none" placeholder="Search">
+                    <input type="text" class="form-control" v-model="query" :readonly="searchLocked" :inputmode="searchLocked ? 'none' : 'text'" @tv-search-unlock="searchLocked = false" @tv-search-lock="searchLocked = true" autocorrect="off" autocapitalize="none" placeholder="Search">
                   </form>
               </div>
               <div v-else class="topbar">
@@ -427,13 +439,14 @@
                    <video
                 poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                 disablepictureinpicture
+                crossorigin="anonymous"
                 v-if="supported && url" autoplay playsinline tabindex="0"
                 @click="togglePlay"
             >
-                       <track v-for="subtitle in subtitles"
+                       <track v-for="subtitle in subtitles" v-if="subtitle.mediaUrl"
                            :label="languageName(subtitle.language)" kind="subtitles"
                            :srclang="subtitle.language"
-                           :src="subtitle.url"
+                           :src="subtitle.mediaUrl"
                            :id="subtitle.url"
                        >
                    </video>
@@ -533,6 +546,7 @@
             <button class="btn btn-dark" @click="toggle()"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
         </script>
 
-        <script src="/rich/app.js?v=20261011-classic-button"></script>
+        <script src="/config.js"></script>
+        <script src="/app.js?v=20261011-tv-down"></script>
     </body>
 </html>

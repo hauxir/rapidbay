@@ -17,7 +17,7 @@
         <script src="/lib/chromecastjs.js"></script>
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
         <link rel="manifest" href="/manifest.json" />
-        <link href="/style.css?v=20261011-link-below2" rel="stylesheet" />
+        <link href="/style.css?v=20261011-rich-button" rel="stylesheet" />
         <link rel="icon" type="image/png" href="/favicon.png" />
     </head>
 
@@ -75,7 +75,7 @@
                     <div v-if="searchHistory.length > 0" class="search-history">
                       <div tabindex="0" v-for="term in searchHistory.slice(0, 4)" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
                     </div>
-                    <a href="/rich/" class="rich-frontend-link">View the new rich content frontend</a>
+                    <button type="button" class="rich-frontend-link" @click="openRichFrontend">View the new rich content frontend</button>
                   </div>
                 </form>
               </div>
@@ -241,6 +241,6 @@
             <button class="btn btn-dark" @click="toggle()"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
         </script>
 
-        <script src="/app.js?v=20261011-link-below"></script>
+        <script src="/app.js?v=20261011-rich-button"></script>
     </body>
 </html>

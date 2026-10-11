@@ -2629,6 +2629,9 @@
             goHome: function () {
                 navigate("/");
             },
+            openClassic: function () {
+                window.location.assign("/");
+            },
         },
         mounted: function () {
             this.applyPageBackground();

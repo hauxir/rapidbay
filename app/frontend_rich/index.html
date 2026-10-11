@@ -176,10 +176,10 @@
                     <span class="icon favorites_icon"></span>
                     <span>Favorites</span>
                   </button>
-                  <a class="home-shortcut" href="/">
+                  <button type="button" class="home-shortcut" @click="openClassic">
                     <span class="icon back_icon"></span>
                     <span>Classic view</span>
-                  </a>
+                  </button>
                 </nav>
               </div>
               </div>
@@ -533,6 +533,6 @@
             <button class="btn btn-dark" @click="toggle()"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
         </script>
 
-        <script src="/rich/app.js?v=20261011-cast"></script>
+        <script src="/rich/app.js?v=20261011-classic-button"></script>
     </body>
 </html>

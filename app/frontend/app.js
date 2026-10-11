@@ -866,6 +866,11 @@
             goFavorites: function () {
                 navigate("/search/[favorites]");
             },
+            openRichFrontend: function () {
+                // A plain link is what Android TV hands to the system browser.
+                // Assigning the location keeps the rich frontend in this window.
+                window.location.assign("/rich/");
+            },
         },
         mounted: function () {
             this.searchHistory = getSearchHistory();

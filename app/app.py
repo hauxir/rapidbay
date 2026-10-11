@@ -11,6 +11,7 @@ import shlex
 import socket
 import string
 import subprocess
+import time
 import urllib.parse
 from collections.abc import Generator
 from contextlib import asynccontextmanager
@@ -36,6 +37,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from result_grouping import (
+    ENRICH_BUDGET_SECONDS,
     FIRST_RENDER_LOOKUPS,
     MAX_TMDB_LOOKUPS,
     SearchAssembler,
@@ -45,7 +47,7 @@ from result_grouping import (
     season_episode_details,
 )
 from starlette.middleware.base import BaseHTTPMiddleware
-from tmdb import TMDBClient, tmdb_disk_cache
+from tmdb import TMDBClient, is_unavailable, tmdb_disk_cache
 
 
 # Response models for OpenAPI schema
@@ -667,6 +669,13 @@ async def rich_search_events(searchterm: str = "", _: None = Depends(authorize))
 
         client = TMDBClient(settings.TMDB_API_KEY, cache=tmdb_disk_cache())
         lookups = prepared.lookups[:MAX_TMDB_LOOKUPS]
+        deadline = time.monotonic() + ENRICH_BUDGET_SECONDS
+
+        def still_looking() -> bool:
+            """False once the enrichment budget is spent or TMDB has stopped answering."""
+            return time.monotonic() < deadline and not is_unavailable()
+
+        searchable = lookups if still_looking() else []
         last_signature: str | None = None
 
         def take(done: bool) -> Dict[str, Any] | None:
@@ -689,8 +698,8 @@ async def rich_search_events(searchterm: str = "", _: None = Depends(authorize))
             except Exception:
                 return [], search_response
 
-        first = lookups[:FIRST_RENDER_LOOKUPS]
-        rest = lookups[FIRST_RENDER_LOOKUPS:]
+        first = searchable[:FIRST_RENDER_LOOKUPS]
+        rest = searchable[FIRST_RENDER_LOOKUPS:]
         previews = await asyncio.gather(*[lookup_one(lookup, False, None) for lookup in first]) if first else []
         search_responses: Dict[str, Dict[str, Any] | None] = {}
         for lookup, (groups, search_response) in zip(first, previews, strict=True):
@@ -705,7 +714,7 @@ async def rich_search_events(searchterm: str = "", _: None = Depends(authorize))
             await asyncio.gather(
                 *[lookup_one(lookup, True, search_responses.get(lookup.normalized)) for lookup in first]
             )
-            if first
+            if first and still_looking()
             else []
         )
         for lookup, (groups, _search_response) in zip(first, details, strict=True):
@@ -721,9 +730,17 @@ async def rich_search_events(searchterm: str = "", _: None = Depends(authorize))
         semaphore = asyncio.Semaphore(_TMDB_LOOKUP_CONCURRENCY)
 
         async def resolve_rest(lookup: Any) -> None:
+            if not still_looking():
+                await queue.put((lookup, [], True))
+                return
             async with semaphore:
+                if not still_looking():
+                    await queue.put((lookup, [], True))
+                    return
                 groups, search_response = await lookup_one(lookup, False, None)
                 await queue.put((lookup, groups, False))
+                if not still_looking():
+                    return
                 detailed, _search_response = await lookup_one(lookup, True, search_response)
                 await queue.put((lookup, detailed, True))
 

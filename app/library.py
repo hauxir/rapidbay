@@ -318,7 +318,12 @@ def _apply_personal(item: dict[str, Any], event: dict[str, Any], episode_parsed:
         _touch_progress(item, event, episode_parsed, label_text, when)
     elif kind == "watched":
         if item["media_type"] == "movie":
-            item["watched_at"] = max(int(item.get("watched_at") or 0), when)
+            current = item.get("watched_at")
+            if isinstance(current, int):
+                item["watched_at"] = max(current, when)
+            else:
+                # Zero means the movie was finished and the date was not stored.
+                item["watched_at"] = when
         else:
             seasons = _parsed_seasons(episode_parsed)
             episode_number = _as_int(episode_parsed.get("episode"))
@@ -375,6 +380,9 @@ def _record_activity(
     when: int,
     episode_parsed: dict[str, Any],
 ) -> None:
+    """Add one activity row. An unknown time is left off the chart, which only counts the last 30 days."""
+    if when <= 0:
+        return
     try:
         if kind == "search":
             query = _text(event.get("title"))
@@ -535,7 +543,7 @@ def _runtime_seconds(client: TMDBClient, item: dict[str, Any], entry: dict[str, 
 
 
 def _keep_watching(items: list[dict[str, Any]], client: TMDBClient | None = None) -> list[dict[str, Any]]:
-    """Unfinished plays from the last 14 days, one card per title, newest first."""
+    """Unfinished plays from the last 14 days, one card per file, newest first."""
     cutoff = int(time.time() * 1000) - 14 * 24 * 60 * 60 * 1000
     cards: list[dict[str, Any]] = []
     for item in items:
@@ -549,25 +557,23 @@ def _keep_watching(items: list[dict[str, Any]], client: TMDBClient | None = None
             if _progress_superseded(item, entry):
                 continue
             current.append(entry)
-        if not current:
-            continue
-        latest = max(current, key=lambda entry: int(entry.get("at") or 0))
-        card = _card(item)
-        season = _as_int(latest.get("season"))
-        episode = _as_int(latest.get("episode"))
-        if item.get("media_type") == "tv" and season is not None and episode is not None:
-            card["subtitle"] = _episode_label(season, episode)
-        magnet = _text(latest.get("magnet")) or None
-        filename = _text(latest.get("filename")) or None
-        position = _as_float(latest.get("position"))
-        duration = _as_float(latest.get("duration"))
-        if duration <= 0 and client is not None:
-            duration = _runtime_seconds(client, item, latest)
-        card["minutes_left"] = _minutes_left(position, duration)
-        card["magnet"] = magnet
-        card["filename"] = filename
-        card["_at"] = int(latest.get("at") or 0)
-        cards.append(card)
+        for latest in current:
+            card = _card(item)
+            season = _as_int(latest.get("season"))
+            episode = _as_int(latest.get("episode"))
+            if item.get("media_type") == "tv" and season is not None and episode is not None:
+                card["subtitle"] = _episode_label(season, episode)
+            magnet = _text(latest.get("magnet")) or None
+            filename = _text(latest.get("filename")) or None
+            position = _as_float(latest.get("position"))
+            duration = _as_float(latest.get("duration"))
+            if duration <= 0 and client is not None:
+                duration = _runtime_seconds(client, item, latest)
+            card["minutes_left"] = _minutes_left(position, duration)
+            card["magnet"] = magnet
+            card["filename"] = filename
+            card["_at"] = int(latest.get("at") or 0)
+            cards.append(card)
     cards.sort(key=lambda card: int(card.get("_at") or 0), reverse=True)
     for card in cards:
         card.pop("_at", None)
@@ -713,14 +719,17 @@ def _recent_stamp(item: dict[str, Any]) -> int:
     return stamp
 
 
+def _was_watched(item: dict[str, Any]) -> bool:
+    """True when a title was finished. A stored zero is a finish whose date is unknown."""
+    if item.get("watched_episodes"):
+        return True
+    return isinstance(item.get("watched_at"), int)
+
+
 def present_watch_rows(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Turn one browser's titles into Keep watching and Recently watched cards."""
     client = TMDBClient(settings.TMDB_API_KEY) if settings.TMDB_API_KEY else None
-    recent = [
-        _card(item)
-        for item in items
-        if item.get("watched_at") or item.get("watched_episodes")
-    ]
+    recent = [_card(item) for item in items if _was_watched(item)]
     recent.sort(key=_recent_stamp, reverse=True)
     keep_watching = _keep_watching(items, client)
     if client is not None:

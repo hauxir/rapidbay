@@ -387,6 +387,7 @@
             });
         });
         var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        var completedAt = JSON.parse(localStorage.getItem("completedAt") || "{}");
         Object.keys(completed).forEach(function (hash) {
             var magnet = magnetsByHash[hash] || ("magnet:?xt=urn:btih:" + hash);
             (completed[hash] || []).forEach(function (filename) {
@@ -395,7 +396,7 @@
                     magnet: magnet,
                     title: filename,
                     filename: filename,
-                    ts: 0,
+                    ts: parseInt(completedAt[hash + "\n" + filename], 10) || 0,
                 });
             });
         });
@@ -805,7 +806,7 @@
             if (card.title) {
                 current.title = card.title;
             }
-            if (card.watched_at) {
+            if (card.watched_at || card.watched_at === 0) {
                 current.watched_at = card.watched_at;
             }
             (card.watched_episodes || []).forEach(function (episode) {
@@ -973,6 +974,10 @@
             router.historyAPIUpdateMethod("pushState");
         }
         router.navigate(path);
+    }
+
+    function searchPath(term) {
+        return "/search/" + encodeURIComponent(term);
     }
 
     var rbmixin = {
@@ -2583,7 +2588,7 @@
                 }
                 this.searchterm = term;
                 saveSearchTerm(term);
-                var path = "/search/" + term;
+                var path = searchPath(term);
                 if (title.tmdb_id && (title.media_type === "tv" || title.media_type === "movie")) {
                     path += "?media=" + title.media_type + "&tmdb=" + title.tmdb_id;
                 }
@@ -2600,13 +2605,13 @@
                     );
                 } else {
                     saveSearchTerm(this.searchterm);
-                    navigate("/search/" + this.searchterm);
+                    navigate(searchPath(this.searchterm));
                 }
             },
             onHistoryClick: function (term) {
                 this.searchterm = term;
                 saveSearchTerm(term);
-                navigate("/search/" + term);
+                navigate(searchPath(term));
             },
             clearSearches: function () {
                 clearSearchHistory();
@@ -2835,7 +2840,7 @@
                     return;
                 }
                 saveSearchTerm(term);
-                navigate("/search/" + term);
+                navigate(searchPath(term));
             },
             onResultClick: function (result, seasonNumber, episodeNumber) {
                 rememberEpisodeTarget(seasonNumber, episodeNumber);
@@ -3057,7 +3062,7 @@
             },
             isMovieWatched: function (group) {
                 var match = this.libraryMatch(group);
-                return !!(match && match.watched_at);
+                return !!(match && match.watched_at !== null && match.watched_at !== undefined);
             },
             isEpisodeNumberWatched: function (group, seasonNumber, episodeNumber) {
                 var match = this.libraryMatch(group);
@@ -3534,7 +3539,7 @@
                 // each indexer responds instead of waiting for the slowest.
                 var focused = false;
                 this.eventsource = subscribe(
-                    "/api/search_events/" + self.searchterm,
+                    "/api/search_events/" + encodeURIComponent(self.searchterm),
                     function (data) {
                         if (data.results) {
                             self.results = data.results;

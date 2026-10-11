@@ -428,6 +428,9 @@ def _select_group_for_result(
             if group["media_type"] == "movie" and group.get("year") == parsed_year:
                 return group
         return None
+    for group in groups:
+        if group["media_type"] == "movie":
+            return group
     return groups[0]
 
 
@@ -551,6 +554,8 @@ class TitleLookup:
     needs_tv: bool
     order: int
     count: int
+    # A release with no season and no year can only sit on a movie card.
+    needs_yearless_movie: bool = False
 
 
 @dataclass
@@ -574,6 +579,7 @@ def prepare_search(results: list[dict[str, Any]]) -> PreparedSearch:
     counts: dict[str, int] = {}
     movie_years_by_title: dict[str, set[int]] = {}
     tv_titles: set[str] = set()
+    yearless_movies: set[str] = set()
 
     for result in results:
         raw_title = result.get("title")
@@ -602,6 +608,8 @@ def prepare_search(results: list[dict[str, Any]]) -> PreparedSearch:
         parsed_year = _as_int(parsed.get("year"))
         if parsed_year is not None:
             movie_years_by_title.setdefault(normalized, set()).add(parsed_year)
+        else:
+            yearless_movies.add(normalized)
 
     lookups = [
         TitleLookup(
@@ -609,6 +617,7 @@ def prepare_search(results: list[dict[str, Any]]) -> PreparedSearch:
             title=title,
             movie_years=frozenset(movie_years_by_title.get(normalized, set())),
             needs_tv=normalized in tv_titles,
+            needs_yearless_movie=normalized in yearless_movies,
             order=index,
             count=counts.get(normalized, 0),
         )
@@ -645,6 +654,7 @@ def resolve_title(
     keys: list[tuple[str, int]] = []
     covered_years: set[int] = set()
     have_tv = False
+    have_movie = False
     detail_lookups = 0
     movie_years = set(lookup.movie_years)
     for raw_candidate in cast("list[Any]", candidates):
@@ -661,7 +671,10 @@ def resolve_title(
             candidate_year is None or candidate_year in uncovered_years
         )
         want_tv = lookup.needs_tv and not have_tv and candidate_media_type == "tv"
-        if not (want_default or want_year or want_tv):
+        want_yearless_movie = (
+            lookup.needs_yearless_movie and not have_movie and candidate_media_type == "movie"
+        )
+        if not (want_default or want_year or want_tv or want_yearless_movie):
             continue
         detail_lookups += 1
         if fetch_details:
@@ -683,10 +696,13 @@ def resolve_title(
             found.append((key, group))
         if group["media_type"] == "tv":
             have_tv = True
+        if group["media_type"] == "movie":
+            have_movie = True
         group_year = group.get("year")
         if group["media_type"] == "movie" and isinstance(group_year, int):
             covered_years.add(group_year)
-        if covered_years >= movie_years and (not lookup.needs_tv or have_tv):
+        yearless_done = not lookup.needs_yearless_movie or have_movie
+        if covered_years >= movie_years and (not lookup.needs_tv or have_tv) and yearless_done:
             break
     return found, search_response
 

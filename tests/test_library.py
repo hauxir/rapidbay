@@ -11,7 +11,7 @@ from app.library import catalog, home, present_watch_rows, process_event, watch_
 
 def _show(results, _key):
     title = results[0]["title"]
-    if "Slow Horses" in title or "S06E02" in title:
+    if "Slow Horses" in title or "Slow.Horses" in title:
         return {
             "groups": [{
                 "tmdb_id": 95480,
@@ -342,6 +342,72 @@ def test_finish_removes_an_earlier_unfinished_play_but_keeps_a_later_rewatch() -
         assert [card["title"] for card in shown["keep_watching"]] == ["Slow Horses"]
         assert shown["keep_watching"][0]["minutes_left"] == 40
         assert shown["recent"][0]["subtitle"] == "Season 6 - Episode 2"
+
+
+def test_keep_watching_lists_every_unfinished_episode() -> None:
+    now = int(time.time() * 1000)
+    earlier = now - 60 * 60 * 1000
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")), \
+            patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.enrich_search_results", side_effect=_show):
+        playing = [
+            {
+                "event": "progress",
+                "magnet": "magnet:?xt=urn:btih:abc",
+                "title": "Slow.Horses.S06E01.mkv",
+                "filename": "Slow.Horses.S06E01.mkv",
+                "ts": earlier,
+                "position": 400,
+                "duration": 2700,
+            },
+            {
+                "event": "progress",
+                "magnet": "magnet:?xt=urn:btih:abc",
+                "title": "Slow.Horses.S06E02.mkv",
+                "filename": "Slow.Horses.S06E02.mkv",
+                "ts": now,
+                "position": 300,
+                "duration": 2700,
+            },
+        ]
+        cards = watch_rows(playing)["keep_watching"]
+
+    assert [card["filename"] for card in cards] == [
+        "Slow.Horses.S06E02.mkv",
+        "Slow.Horses.S06E01.mkv",
+    ]
+    assert [card["subtitle"] for card in cards] == [
+        "Season 6 - Episode 2",
+        "Season 6 - Episode 1",
+    ]
+
+
+def test_finished_movie_without_a_date_stays_in_recently_watched() -> None:
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")), \
+            patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.enrich_search_results", side_effect=_show), \
+            patch("app.library.stats.record") as record:
+        process_event({
+            "event": "watched",
+            "magnet": "magnet:?xt=urn:btih:def",
+            "title": "Dune.2021.1080p.mkv",
+            "filename": "Dune.2021.1080p.mkv",
+            "ts": 0,
+        })
+        record.assert_not_called()
+        with patch("app.library.settings.TMDB_API_KEY", None):
+            rows = watch_rows([{
+                "event": "watched",
+                "magnet": "magnet:?xt=urn:btih:def",
+                "title": "Dune.2021.1080p.mkv",
+                "filename": "Dune.2021.1080p.mkv",
+                "ts": 0,
+            }])
+
+    assert [item["title"] for item in rows["recent"]] == ["Dune"]
+    assert rows["recent"][0]["watched_at"] == 0
 
 
 def _no_match(_results, _key):

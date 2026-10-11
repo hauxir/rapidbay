@@ -973,3 +973,35 @@ def test_enrichment_stops_when_tmdb_is_unavailable() -> None:
 
     resolve.assert_not_called()
     assert len(response["other"]) == 2
+
+
+def test_yearless_movie_joins_the_movie_when_tmdb_lists_a_show_first() -> None:
+    result = make_torrent("Dune|")
+    client = MagicMock()
+    client.search_multi.return_value = {
+        "results": [
+            {"id": 9, "media_type": "tv", "name": "Dune"},
+            {"id": 5, "media_type": "movie", "title": "Dune"},
+        ]
+    }
+    client.get_tv_details.return_value = {
+        "id": 9,
+        "name": "Dune",
+        "first_air_date": "2000-01-01",
+    }
+    client.get_movie_details.return_value = {
+        "id": 5,
+        "title": "Dune",
+        "release_date": "2021-09-15",
+    }
+    client.get_image_url.return_value = None
+
+    with patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)), \
+            patch("app.result_grouping._tmdb_client", return_value=client):
+        response = enrich_search_results([result], "api-key")
+
+    assert response["other"] == []
+    assert len(response["groups"]) == 1
+    assert response["groups"][0]["media_type"] == "movie"
+    assert response["groups"][0]["tmdb_id"] == 5
+    assert response["groups"][0]["results"] == [result]

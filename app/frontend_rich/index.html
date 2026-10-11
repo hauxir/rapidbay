@@ -88,7 +88,7 @@
                   <div class="home-row-rail">
                     <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
                     <div class="billboard-scroller" @scroll="refreshRails">
-                    <button type="button" class="billboard-card" v-for="title in keepWatching" :key="'keep-' + title.media_type + ':' + title.tmdb_id" @click="resumeTitle(title)">
+                    <button type="button" class="billboard-card" v-for="title in keepWatching" :key="'keep-' + title.media_type + ':' + title.tmdb_id + ':' + (title.filename || '') + ':' + (title.magnet || '')" @click="resumeTitle(title)">
                       <img v-if="title.backdrop_url || title.poster_url" :src="title.backdrop_url || title.poster_url" :alt="title.title">
                       <span class="billboard-card-shade">
                         <span class="billboard-card-copy">

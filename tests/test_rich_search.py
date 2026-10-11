@@ -342,3 +342,82 @@ def test_rich_search_events_sends_the_first_titles_before_the_rest(
     assert [group["title"] for group in payload["groups"]] == ["Alpha", "Beta", "Gamma"]
     assert payload["done"] is False
     assert "Later" not in text
+
+
+def _prepared_titles() -> Any:
+    from app.result_grouping import PreparedSearch, TitleLookup
+
+    names = ["Alpha", "Beta", "Gamma", "Later"]
+    lookups = [
+        TitleLookup(name.casefold(), name, frozenset(), False, index, 10 - index)
+        for index, name in enumerate(names)
+    ]
+    parsed = [
+        ({"title": name, "seeds": 10 - index, "magnet": f"magnet:?xt={name}"}, {}, name)
+        for index, name in enumerate(names)
+    ]
+    return PreparedSearch(parsed, lookups)
+
+
+def _collect_rich_events() -> list[dict[str, Any]]:
+    import asyncio
+    import json
+
+    async def collect() -> list[dict[str, Any]]:
+        response = await app_module.rich_search_events("test")
+        events: list[dict[str, Any]] = []
+        async for raw in response.body_iterator:
+            text = raw.decode() if isinstance(raw, bytes) else raw
+            events.append(json.loads(text.removeprefix("data: ").strip()))
+        return events
+
+    return asyncio.run(collect())
+
+
+def test_rich_search_events_skips_lookups_once_the_time_budget_is_spent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_indexers(monkeypatch)
+    monkeypatch.setattr(app_module.settings, "TMDB_API_KEY", "tmdb-key")
+    monkeypatch.setattr(app_module, "_indexer_search", lambda term: [])
+    monkeypatch.setattr(app_module, "_add_status_to_results", lambda results: results)
+    monkeypatch.setattr(app_module, "prepare_search", lambda results: _prepared_titles())
+    monkeypatch.setattr(app_module, "ENRICH_BUDGET_SECONDS", 0)
+    lookups: list[str] = []
+
+    def fail_lookup(*_args: object, **_kwargs: object) -> tuple[list[object], None]:
+        lookups.append("called")
+        return [], None
+
+    monkeypatch.setattr(app_module, "resolve_title", fail_lookup)
+
+    events = _collect_rich_events()
+
+    assert lookups == []
+    assert events[-1]["done"] is True
+    assert events[-1]["groups"] == []
+    assert [item["parsed_title"] for item in events[-1]["other"]] == ["Alpha", "Beta", "Gamma", "Later"]
+
+
+def test_rich_search_events_skips_lookups_when_tmdb_is_unavailable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_indexers(monkeypatch)
+    monkeypatch.setattr(app_module.settings, "TMDB_API_KEY", "tmdb-key")
+    monkeypatch.setattr(app_module, "_indexer_search", lambda term: [])
+    monkeypatch.setattr(app_module, "_add_status_to_results", lambda results: results)
+    monkeypatch.setattr(app_module, "prepare_search", lambda results: _prepared_titles())
+    monkeypatch.setattr(app_module, "is_unavailable", lambda: True)
+    lookups: list[str] = []
+
+    def fail_lookup(*_args: object, **_kwargs: object) -> tuple[list[object], None]:
+        lookups.append("called")
+        return [], None
+
+    monkeypatch.setattr(app_module, "resolve_title", fail_lookup)
+
+    events = _collect_rich_events()
+
+    assert lookups == []
+    assert events[-1]["done"] is True
+    assert [item["parsed_title"] for item in events[-1]["other"]] == ["Alpha", "Beta", "Gamma", "Later"]

@@ -265,6 +265,10 @@
         router.navigate(path);
     }
 
+    function searchPath(term) {
+        return "/search/" + encodeURIComponent(term);
+    }
+
     var rbmixin = {
         props: ["params"],
         methods: {
@@ -845,13 +849,13 @@
                     );
                 } else {
                     saveSearchTerm(this.searchterm);
-                    navigate("/search/" + this.searchterm);
+                    navigate(searchPath(this.searchterm));
                 }
             },
             onHistoryClick: function (term) {
                 this.searchterm = term;
                 saveSearchTerm(term);
-                navigate("/search/" + term);
+                navigate(searchPath(term));
             },
             goHistory: function () {
                 navigate("/search/[history]");
@@ -1017,7 +1021,7 @@
                     });
                 };
                 var fallbackSearch = function () {
-                    get("/api/search/" + self.searchterm, function (data) {
+                    get("/api/search/" + encodeURIComponent(self.searchterm), function (data) {
                         self.results = data.results;
                         focusFirstResult();
                     });
@@ -1026,7 +1030,7 @@
                 // each indexer responds instead of waiting for the slowest.
                 var focused = false;
                 this.eventsource = subscribe(
-                    "/api/search_events/" + self.searchterm,
+                    "/api/search_events/" + encodeURIComponent(self.searchterm),
                     function (data) {
                         if (data.results) {
                             self.results = data.results;

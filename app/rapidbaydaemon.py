@@ -239,7 +239,7 @@ class RapidBayDaemon:
         self.seekable_streamer: seekable_hls.SeekableHLSStreamer = seekable_hls.SeekableHLSStreamer(
             on_probe=self._note_probe,
             on_seek=self.torrent_client.clear_piece_deadlines,
-            on_unseekable=lambda mh, fn: self.start_hls_stream(mh, fn),
+            on_unseekable=self._fall_back_to_sequential,
         )
         # Torrents currently held back so a watched file gets the bandwidth it
         # needs (see _share_bandwidth), and the session's peak download rate —
@@ -255,6 +255,10 @@ class RapidBayDaemon:
         # Last deadline-rush of a file's head window, keyed like
         # _file_poll_times; throttles _rush_hls_head.
         self._head_rushes: Dict[Tuple[str, str], float] = {}
+        # Files whose ▶ was accepted for seekable HLS but which turned out to
+        # have no keyframe index before enough of the head was on disk for the
+        # sequential streamer; started from the status poll once it is.
+        self._sequential_pending: Set[Tuple[str, str]] = set()
         # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
         # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
         # the file from the web seed and/or peers transparently; tracked only so
@@ -308,6 +312,12 @@ class RapidBayDaemon:
         duration = p.end_time - p.start_time
         if located and duration > 0:
             self._byte_rates[(magnet_hash, filename)] = int(located[1] / duration)
+
+    def _fall_back_to_sequential(self, magnet_hash: str, filename: str) -> None:
+        if self.start_hls_stream(magnet_hash, filename).get("reason") == "not_ready":
+            self._sequential_pending.add((magnet_hash, filename))
+            self._head_rushes.pop((magnet_hash, filename), None)
+            self._rush_hls_head(magnet_hash, filename)
 
     def _rush_for_reader(self, magnet_hash: str, filename: str, start: int, end: int) -> None:
         self.torrent_client.prioritize_byte_range(
@@ -441,7 +451,14 @@ class RapidBayDaemon:
                 # faststart — see video_conversion.is_pipe_streamable), or right
                 # away for seekable HLS, which reads the file in any order.
                 can_stream = self._hls_can_stream(magnet_hash, filename)
-                if can_stream:
+                if (magnet_hash, filename) in self._sequential_pending:
+                    # ▶ was already pressed; start once the head is in.
+                    if can_stream:
+                        self._sequential_pending.discard((magnet_hash, filename))
+                        if not self.start_hls_stream(magnet_hash, filename)["started"]:
+                            can_stream = False
+                    hls_info = {'hls_pending': True}
+                elif can_stream:
                     hls_info = {'can_stream': True}
                 if not can_stream or self._uses_seekable_hls(filename, m3u8):
                     # A viewer is looking at this file (only their status polls
@@ -609,10 +626,15 @@ class RapidBayDaemon:
             )
         # The sequential streamer starts once a head is on disk, so ffprobe can
         # read the duration locally; it sizes the prefetch window.
+        # Off the request path: ffprobe can take its full timeout on a sparse
+        # file, and request_window falls back to HLS_PREFETCH_BYTES meanwhile.
         if poll_key not in self._byte_rates:
-            duration = _probe_duration(filepath)
-            if duration:
-                self._byte_rates[poll_key] = int(f.size / duration)
+            def probe_byte_rate(size: int = f.size) -> None:
+                duration = _probe_duration(filepath)
+                if duration:
+                    self._byte_rates[poll_key] = int(size / duration)
+
+            Thread(target=probe_byte_rate, daemon=True).start()
 
         # Rolling prefetch: the feeder keeps a deadline-rushed window ahead of
         # its position so contiguous data keeps forming under rarest-first
@@ -871,7 +893,9 @@ class RapidBayDaemon:
         ]
 
         def is_state(filename: str, state: str) -> bool:
-            return self.get_file_status(magnet_hash, filename)["status"] == state
+            # include_hls=False: HLS fields (and the probes/rushes behind
+            # them) are for viewers' polls, not this housekeeping.
+            return self.get_file_status(magnet_hash, filename, include_hls=False)["status"] == state
 
         active_filenames = video_filenames if video_filenames else filenames
 
@@ -890,6 +914,7 @@ class RapidBayDaemon:
                 self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
                 self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
                 self._byte_rates.pop((magnet_hash, os.path.basename(f.path)), None)
+                self._sequential_pending.discard((magnet_hash, os.path.basename(f.path)))
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
             video_conversion.clear_master_playlist_cache_under(output_dir)
@@ -935,7 +960,11 @@ class RapidBayDaemon:
     def _heartbeat(self) -> None:
         # Process libtorrent session alerts for better monitoring
         self.torrent_client.process_alerts()
-        self._share_bandwidth()
+        # Best effort; a handle error mustn't skip the rest of the tick.
+        try:
+            self._share_bandwidth()
+        except Exception as e:
+            log.debug(f"bandwidth sharing failed: {e}")
 
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)
@@ -954,6 +983,8 @@ class RapidBayDaemon:
                         self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
                         self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
                         self._byte_rates.pop((magnet_hash, os.path.basename(f.path)), None)
+                        self._sequential_pending.discard((magnet_hash, os.path.basename(f.path)))
+                        self._sequential_pending.discard((magnet_hash, os.path.basename(f.path)))
                     self._web_seeded.pop(magnet_hash, None)
                     web_seed_proxy.unregister(magnet_hash)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

@@ -101,6 +101,23 @@ def torrent_is_finished(h: libtorrent.torrent_handle) -> bool:
     )
 
 
+def _piece_priorities_from_files(h: libtorrent.torrent_handle) -> List[int]:
+    """Each piece's priority as implied by file priorities alone — the
+    highest priority among the files it overlaps."""
+    ti = h.get_torrent_info()
+    fs = ti.files()
+    piece_length = ti.piece_length()
+    base = [0] * ti.num_pieces()
+    for i, prio in enumerate(h.file_priorities()):
+        size = fs.file_size(i)
+        if prio == 0 or size == 0:
+            continue
+        offset = fs.file_offset(i)
+        for idx in range(offset // piece_length, (offset + size - 1) // piece_length + 1):
+            base[idx] = max(base[idx], prio)
+    return base
+
+
 def prioritize_files(h: libtorrent.torrent_handle, priorities: List[int], timeout: int = 10) -> None:
     h.prioritize_files(priorities)
     start_time = time.time()
@@ -432,12 +449,15 @@ class TorrentClient:
     def clear_piece_deadlines(self, magnet_hash: str) -> None:
         """Drop every outstanding piece deadline on a torrent — after a seek,
         the old position's deadlines would otherwise keep competing with the
-        new one's."""
+        new one's — and put piece priorities back to what the files imply.
+        libtorrent leaves an unfinished rushed piece at priority 1, below
+        the rest of its file."""
         with self.locks.lock(magnet_hash):
             h = self.torrents.get(magnet_hash)
             if h:
                 with contextlib.suppress(Exception):
                     h.clear_piece_deadlines()
+                    h.prioritize_pieces(_piece_priorities_from_files(h))
 
     def file_location(self, magnet_hash: str, filename: str) -> Tuple[str, int] | None:
         """(path on disk, size) of a file in an active torrent."""

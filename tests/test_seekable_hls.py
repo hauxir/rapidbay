@@ -3,8 +3,10 @@ and the VOD playlist layout. The ffmpeg side is exercised end to end against
 real MKV/MP4 files outside the unit tests."""
 
 import struct
+import threading
+import time
 
-from app import fmp4, keyframes
+from app import fmp4, keyframes, seekable_hls
 from app.seekable_hls import (
     Probe,
     build_vod_playlist,
@@ -186,3 +188,26 @@ def test_parse_segment_request():
     assert parse_segment_request("Movie.2026_vod_init.mp4") == ("Movie.2026", None)
     assert parse_segment_request("Movie.2026.mp4") is None
     assert parse_segment_request("Movie_vod_x.m4s") is None
+
+
+def test_superseded_waiter_does_not_restart_the_job(tmp_path):
+    streamer = seekable_hls.SeekableHLSStreamer()
+    session = seekable_hls._Session(
+        "h", "f.mkv", str(tmp_path), str(tmp_path / "f.m3u8"), "http://x", 1, "f.mkv", lambda: False
+    )
+    session.probe = seekable_hls.Probe(0.0, 60.0, "h264", "aac", [0.0, 10.0, 20.0, 30.0], "tok")
+    started = []
+    streamer._ensure_job = lambda _s, n: started.append(n)  # type: ignore[method-assign]
+    result = []
+    t = threading.Thread(target=lambda: result.append(streamer.wait_for(session, 1, 5)))
+    t.start()
+    while not started:
+        time.sleep(0.01)
+    # A seek elsewhere supersedes it while no job is running.
+    with session.cond:
+        session.request_seq += 1
+        session.cond.notify_all()
+    t.join(2)
+    # It gives up instead of dragging ffmpeg back to its old position.
+    assert result == [None]
+    assert started == [1]

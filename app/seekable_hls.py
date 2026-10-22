@@ -65,7 +65,7 @@ _BOUNDARY_TOLERANCE = 0.5
 # 3/23 s from the target, which would otherwise land a whole GOP early.
 _SEEK_PAST_KEYFRAME = 0.25
 
-SEEKABLE_EXTENSIONS = {".mkv", ".webm", ".mp4", ".m4v", ".mov"}
+SEEKABLE_EXTENSIONS = {".mkv", ".mp4"}
 
 _SEGMENT_RE = re.compile(r"^(?P<stem>.+)_vod_(?P<n>\d+)\.m4s$")
 _INIT_RE = re.compile(r"^(?P<stem>.+)_vod_init\.mp4$")
@@ -163,7 +163,7 @@ def probe_file(filename: str, url: str, file_size: int, m3u8_path: str) -> Probe
 
     ext = os.path.splitext(filename)[1].lower()
     try:
-        kf = keyframes.mkv_keyframes(read) if ext in (".mkv", ".webm") else keyframes.mp4_keyframes(read, file_size)
+        kf = keyframes.mkv_keyframes(read) if ext == ".mkv" else keyframes.mp4_keyframes(read, file_size)
     except OSError as e:
         raise ProbeUnavailableError(f"index unreadable: {e}") from e
     except (ValueError, IndexError) as e:
@@ -431,9 +431,12 @@ class SeekableHLSStreamer:
                     target = session.init_path() if n is None else session.segment_path(n)
                     if os.path.isfile(target):
                         return target
-                    if session.job is None or (n is not None and my_request == session.request_seq):
-                        self._ensure_job(session, 0 if n is None else n)
-                    elif n is not None and not self._job_covers(session.job, n):
+                    if n is None:
+                        if session.job is None:
+                            self._ensure_job(session, 0)
+                    elif my_request == session.request_seq:
+                        self._ensure_job(session, n)
+                    elif session.job is None or not self._job_covers(session.job, n):
                         return None
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -564,6 +567,7 @@ class SeekableHLSStreamer:
                 return
             with session.cond:
                 job = session.job
+                job_ended = False
                 if job is not None:
                     try:
                         progressed = self._drain(session, job)
@@ -573,7 +577,8 @@ class SeekableHLSStreamer:
                         progressed = False
                     if progressed:
                         session.cond.notify_all()
-                    if session.job is job and job.proc.poll() is not None and not self._has_unconsumed(job):
+                    job_ended = session.job is job and job.proc.poll() is not None and not self._has_unconsumed(job)
+                    if job_ended:
                         failed = (
                             job.proc.returncode != 0
                             and not job.stopping
@@ -587,10 +592,13 @@ class SeekableHLSStreamer:
                             self._discard_partial(session)
                             return
                         session.cond.notify_all()
+                # A job reaching EOF may have filled the last gap; otherwise
+                # stat every segment file only every few seconds.
                 now = time.monotonic()
-                if (session.job is None or now - last_complete_check > 5) and self._complete(session):
-                    break
-                last_complete_check = now
+                if job_ended or now - last_complete_check > 5:
+                    last_complete_check = now
+                    if self._complete(session):
+                        break
         # Every segment exists: the playlist is a finished VOD that nginx
         # serves statically, so the session can release its slot.
         if os.path.isfile(session.input_filepath):

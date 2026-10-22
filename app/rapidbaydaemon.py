@@ -4,6 +4,7 @@ import functools
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -12,9 +13,11 @@ from typing import Any, Callable, Dict, List, Set, Tuple
 
 import http_cache
 import log
+import seekable_hls
 import settings
 import subtitles
 import torrent
+import torrent_stream
 import video_conversion
 import web_seed_proxy
 from common import threaded
@@ -140,6 +143,36 @@ def _hls_effective_threshold(file_size: int) -> int:
     return min(settings.HLS_START_THRESHOLD, max(file_size // 4, 1024 * 1024))
 
 
+# A file counts as being watched for this long after its last status poll or
+# segment fetch.
+_WATCHING_TIMEOUT = 15
+# Room a watched torrent gets above its current rate so it can speed up.
+_WATCHED_HEADROOM = 256 * 1024
+# Floor for a held-back torrent, so it keeps its peers.
+_MIN_BACKGROUND_RATE = 32 * 1024
+
+
+def _read_ahead_window(byte_rate: int | None) -> int:
+    """Bytes to keep rushed ahead of a reader: HLS_READ_AHEAD_SECONDS of the
+    file's bitrate, clamped so low bitrates still buffer a useful amount and
+    4K remuxes can't starve everything else."""
+    if not byte_rate:
+        return settings.HLS_PREFETCH_BYTES
+    return max(16 * 1024 * 1024, min(byte_rate * settings.HLS_READ_AHEAD_SECONDS, 1024 * 1024 * 1024))
+
+
+def _probe_duration(filepath: str) -> float | None:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", filepath],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        duration = float(result.stdout.strip())
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    return duration if duration > 0 else None
+
+
 def _get_vtt_subtitles(output_dir: str, video_filename: str) -> List[str]:
     if not os.path.isdir(output_dir):
         return []
@@ -193,6 +226,26 @@ class RapidBayDaemon:
         )
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
         self.hls_streamer: video_conversion.HLSStreamer = video_conversion.HLSStreamer()
+        # Bytes/second each file plays at (size / duration), keyed like
+        # _file_poll_times; sizes read-ahead windows, piece deadlines and the
+        # bandwidth reserved for playback.
+        self._byte_rates: Dict[Tuple[str, str], int] = {}
+        self.file_server: torrent_stream.TorrentFileServer = torrent_stream.TorrentFileServer(
+            locate=self.torrent_client.file_location,
+            is_range_downloaded=self.torrent_client.is_range_downloaded,
+            rush=self._rush_for_reader,
+            window_for=lambda mh, fn: _read_ahead_window(self._byte_rates.get((mh, fn))),
+        )
+        self.seekable_streamer: seekable_hls.SeekableHLSStreamer = seekable_hls.SeekableHLSStreamer(
+            on_probe=self._note_probe,
+            on_seek=self.torrent_client.clear_piece_deadlines,
+            on_unseekable=lambda mh, fn: self.start_hls_stream(mh, fn),
+        )
+        # Torrents currently held back so a watched file gets the bandwidth it
+        # needs (see _share_bandwidth), and the session's peak download rate —
+        # the estimate of what the link can carry.
+        self._throttled: Set[str] = set()
+        self._link_peak: float = 0.0
         self._subtitle_gate: Lock = Lock()
         # Last time any client polled a file's status, keyed by
         # (magnet_hash, filename). The frontend polls ~1/s while a
@@ -225,11 +278,41 @@ class RapidBayDaemon:
                 callback()
 
     def start(self) -> None:
+        self.file_server.start()
         self.thread.start()
 
     def stop(self) -> None:
         self._stop_event.set()
         self.thread.join(timeout=5.0)
+        self.file_server.stop()
+
+    def _hls_active(self, m3u8: str) -> bool:
+        return m3u8 in self.hls_streamer.active_streams or m3u8 in self.seekable_streamer.active_streams
+
+    def hls_streams(self) -> List[str]:
+        return list(self.hls_streamer.active_streams) + list(self.seekable_streamer.active_streams)
+
+    def _stop_hls_under(self, output_dir: str) -> None:
+        self.hls_streamer.stop_under(output_dir)
+        self.seekable_streamer.stop_under(output_dir)
+
+    def _uses_seekable_hls(self, filename: str, m3u8: str) -> bool:
+        return (
+            settings.HLS_SEEKABLE
+            and os.path.splitext(filename)[1].lower() in seekable_hls.SEEKABLE_EXTENSIONS
+            and not os.path.isfile(seekable_hls.SeekableHLSStreamer.unseekable_marker(m3u8))
+        )
+
+    def _note_probe(self, magnet_hash: str, filename: str, p: seekable_hls.Probe) -> None:
+        located = self.torrent_client.file_location(magnet_hash, filename)
+        duration = p.end_time - p.start_time
+        if located and duration > 0:
+            self._byte_rates[(magnet_hash, filename)] = int(located[1] / duration)
+
+    def _rush_for_reader(self, magnet_hash: str, filename: str, start: int, end: int) -> None:
+        self.torrent_client.prioritize_byte_range(
+            magnet_hash, filename, start, end, byte_rate=self._byte_rates.get((magnet_hash, filename))
+        )
 
     def downloads(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         result: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -349,22 +432,24 @@ class RapidBayDaemon:
                     'hls_filename': master_filename,
                     'hls_subtitles': vtt_subtitles,
                 }
-            elif m3u8 in self.hls_streamer.active_streams:
+            elif self._hls_active(m3u8):
                 # Stream is starting but m3u8 not written yet
                 hls_info = {'hls_pending': True}
             elif not self.hls_streamer.is_failed(m3u8):
                 # Offer early playback once enough contiguous data is on disk and
                 # the container is sequentially pipe-readable (MP4 only when
-                # faststart — see video_conversion.is_pipe_streamable).
-                if self._hls_can_stream(magnet_hash, filename):
+                # faststart — see video_conversion.is_pipe_streamable), or right
+                # away for seekable HLS, which reads the file in any order.
+                can_stream = self._hls_can_stream(magnet_hash, filename)
+                if can_stream:
                     hls_info = {'can_stream': True}
-                else:
+                if not can_stream or self._uses_seekable_hls(filename, m3u8):
                     # A viewer is looking at this file (only their status polls
-                    # reach this branch) but the streamable prefix hasn't formed
-                    # yet — deadline-rush the head window so it does. This is
-                    # the file-scoped replacement for torrent-wide
-                    # sequential_download, which slowed every download and
-                    # punished the swarm for files nobody streams.
+                    # reach this branch) — fetch what starting playback needs
+                    # (the head, or for seekable HLS a probe) so ▶ starts
+                    # quickly. This is the file-scoped replacement
+                    # for torrent-wide sequential_download, which slowed every
+                    # download and punished the swarm for files nobody streams.
                     self._rush_hls_head(magnet_hash, filename)
 
         # Check if MP4 output file exists (READY - primary output)
@@ -433,7 +518,7 @@ class RapidBayDaemon:
             **hls_info,
         }
 
-    def start_hls_stream(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
+    def start_hls_stream(self, magnet_hash: str, filename: str, resume: bool = False) -> Dict[str, Any]:
         """Start HLS streaming for a file.
 
         Returns a dict with:
@@ -454,6 +539,7 @@ class RapidBayDaemon:
         if (
             ext not in video_conversion.PIPE_FRIENDLY_EXTENSIONS
             and ext not in video_conversion.PROBE_EXTENSIONS
+            and not (settings.HLS_SEEKABLE and ext in seekable_hls.SEEKABLE_EXTENSIONS)
         ):
             return {"started": False, "reason": "unsupported_format"}
         output_dir = _get_output_dir(magnet_hash)
@@ -464,7 +550,7 @@ class RapidBayDaemon:
         # so filename can't traverse — this is the catch-all.
         if not _is_safe_subpath(settings.OUTPUT_DIR, m3u8):
             return {"started": False, "reason": "invalid_path"}
-        if os.path.isfile(m3u8) or m3u8 in self.hls_streamer.active_streams:
+        if self._hls_active(m3u8) or (os.path.isfile(m3u8) and not resume):
             return {"started": True}  # Already streaming or complete
         if self.hls_streamer.is_failed(m3u8):
             return {"started": False, "reason": "codec_failed"}
@@ -479,6 +565,31 @@ class RapidBayDaemon:
         # Same anchoring as above — settings.DOWNLOAD_DIR is the trusted root.
         if not _is_safe_subpath(settings.DOWNLOAD_DIR, filepath):
             return {"started": False, "reason": "invalid_path"}
+        # Viewer-liveness: if no client has polled this file's status (or
+        # fetched a segment) for HLS_VIEWER_TIMEOUT, the stream has no
+        # audience — it's stopped and its slot freed (no .failed marker; ▶
+        # resurfaces for the next viewer). Fall back to stream start time so
+        # the stream can't be killed before the first poll lands.
+        started_at = time.monotonic()
+        poll_key = (magnet_hash, filename)
+
+        def is_abandoned() -> bool:
+            last = self._file_poll_times.get(poll_key, started_at)
+            return time.monotonic() - last > settings.HLS_VIEWER_TIMEOUT
+
+        os.makedirs(output_dir, exist_ok=True)
+        if self._uses_seekable_hls(filename, m3u8):
+            started = self.seekable_streamer.start_stream(
+                magnet_hash,
+                filename,
+                output_dir,
+                _m3u8_filename(filename),
+                self.file_server.url(magnet_hash, filename),
+                f.size,
+                filepath,
+                is_abandoned,
+            )
+            return {"started": True} if started else {"started": False, "reason": "capacity"}
         available_bytes = self._get_available_bytes(magnet_hash, filename)
         if available_bytes < _hls_effective_threshold(f.size):
             return {"started": False, "reason": "not_ready"}
@@ -496,27 +607,21 @@ class RapidBayDaemon:
             is_range_downloaded = functools.partial(
                 self.torrent_client.is_range_downloaded, magnet_hash, filename
             )
-        # Viewer-liveness: if no client has polled this file's status for
-        # HLS_VIEWER_TIMEOUT, the stream has no audience — the feeder stops it
-        # and frees the slot (no .failed marker; ▶ resurfaces for the next
-        # viewer). Fall back to stream start time so the stream can't be
-        # killed before the first poll lands.
-        started_at = time.monotonic()
-        poll_key = (magnet_hash, filename)
-
-        def is_abandoned() -> bool:
-            last = self._file_poll_times.get(poll_key, started_at)
-            return time.monotonic() - last > settings.HLS_VIEWER_TIMEOUT
+        # The sequential streamer starts once a head is on disk, so ffprobe can
+        # read the duration locally; it sizes the prefetch window.
+        if poll_key not in self._byte_rates:
+            duration = _probe_duration(filepath)
+            if duration:
+                self._byte_rates[poll_key] = int(f.size / duration)
 
         # Rolling prefetch: the feeder keeps a deadline-rushed window ahead of
         # its position so contiguous data keeps forming under rarest-first
         # piece picking (no torrent-wide sequential_download).
         def request_window(offset: int) -> None:
-            self.torrent_client.prioritize_byte_range(
-                magnet_hash, filename, offset, offset + settings.HLS_PREFETCH_BYTES
+            self._rush_for_reader(
+                magnet_hash, filename, offset, offset + _read_ahead_window(self._byte_rates.get(poll_key))
             )
 
-        os.makedirs(output_dir, exist_ok=True)
         started = self.hls_streamer.start_stream(
             filepath,
             output_dir,
@@ -530,6 +635,107 @@ class RapidBayDaemon:
         )
         return {"started": True} if started else {"started": False, "reason": "capacity"}
 
+    def serve_hls_segment(self, magnet_hash: str, name: str, token: str | None, authorized: bool) -> str | None:
+        """Path of a seekable-HLS segment (or init segment) once it exists,
+        producing it on demand; None if `name` isn't one, the caller may not
+        have it, or it couldn't be made in time.
+
+        Callers without the login cookie (Chromecast, AirPlay) are let in by
+        the token embedded in the playlist's segment URIs."""
+        if not _is_valid_magnet_hash(magnet_hash):
+            return None
+        parsed = seekable_hls.parse_segment_request(name)
+        if parsed is None:
+            return None
+        stem, n = parsed
+        output_dir = _get_output_dir(magnet_hash)
+        if not authorized and not self.hls_segment_token_ok(magnet_hash, name, token):
+            return None
+        session = self.seekable_streamer.session_for(output_dir, stem)
+        if session is None:
+            # Reaped for want of status polls (a cast device fetching segments
+            # doesn't poll), or the daemon restarted under an open player.
+            filename = self._filename_for_stem(magnet_hash, stem)
+            if filename is None or not self.start_hls_stream(magnet_hash, filename, resume=True)["started"]:
+                return None
+            session = self.seekable_streamer.session_for(output_dir, stem)
+            if session is None:
+                return None
+        # Segment fetches count as a viewer, so casting keeps the stream alive
+        # after the phone that started it locks.
+        self.note_file_poll(magnet_hash, session.filename)
+        return self.seekable_streamer.wait_for(session, n, settings.HLS_STALL_TIMEOUT)
+
+    def hls_segment_token_ok(self, magnet_hash: str, name: str, token: str | None) -> bool:
+        parsed = seekable_hls.parse_segment_request(name)
+        if not token or parsed is None or not _is_valid_magnet_hash(magnet_hash):
+            return False
+        expected = seekable_hls.SeekableHLSStreamer.token_for(_get_output_dir(magnet_hash), parsed[0])
+        return expected is not None and secrets.compare_digest(expected, token)
+
+    def _filename_for_stem(self, magnet_hash: str, stem: str) -> str | None:
+        h = self.torrent_client.torrents.get(magnet_hash)
+        if not h or not h.has_metadata():
+            return None
+        for f in torrent.get_torrent_info(h).files():
+            basename = os.path.basename(f.path)
+            if os.path.splitext(basename)[0] == stem:
+                return basename
+        return None
+
+    def _share_bandwidth(self) -> None:
+        """Playback first: while a file is being watched and still
+        downloading, cap every other torrent so the watched one keeps
+        headroom above its playback rate. The reservation tracks what the
+        watched torrent actually gets (plus room to grow), so a slow swarm
+        doesn't idle the link."""
+        torrents = dict(self.torrent_client.torrents)
+        total_rate = 0
+        for h in torrents.values():
+            with contextlib.suppress(Exception):
+                total_rate += h.status().download_rate
+        # Peak observed throughput, decaying slowly so a link that got slower
+        # is re-measured.
+        self._link_peak = max(float(total_rate), self._link_peak * 0.999)
+
+        watched: Dict[str, int] = {}
+        if settings.PRIORITIZE_WATCHED_DOWNLOADS:
+            now = time.monotonic()
+            for (magnet_hash, filename), polled in list(self._file_poll_times.items()):
+                h = torrents.get(magnet_hash)
+                if now - polled > _WATCHING_TIMEOUT or h is None or not h.has_metadata():
+                    continue
+                i, f = torrent.get_index_and_file_from_files(h, filename)
+                if i is None or f is None or h.file_progress()[i] >= f.size:
+                    continue
+                byte_rate = self._byte_rates.get((magnet_hash, filename))
+                need = int(byte_rate * 1.5) if byte_rate else int(self._link_peak / 2)
+                watched[magnet_hash] = watched.get(magnet_hash, 0) + need
+
+        others = [mh for mh in torrents if mh not in watched]
+        if not watched or not others or self._link_peak <= 0:
+            for magnet_hash in list(self._throttled):
+                h = torrents.get(magnet_hash)
+                if h is not None:
+                    h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
+            self._throttled.clear()
+            return
+
+        reserve = 0
+        for magnet_hash, need in watched.items():
+            rate = torrents[magnet_hash].status().download_rate
+            reserve += min(need, int(rate * 1.25) + _WATCHED_HEADROOM)
+        per_torrent = max(int((self._link_peak - reserve) / len(others)), _MIN_BACKGROUND_RATE)
+        if settings.TORRENT_DOWNLOAD_LIMIT > 0:
+            per_torrent = min(per_torrent, settings.TORRENT_DOWNLOAD_LIMIT)
+        for magnet_hash in others:
+            torrents[magnet_hash].set_download_limit(per_torrent)
+        for magnet_hash in self._throttled - set(others):
+            h = torrents.get(magnet_hash)
+            if h is not None:
+                h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
+        self._throttled = set(others)
+
     def _hls_can_stream(self, magnet_hash: str, filename: str) -> bool:
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h or not h.has_metadata():
@@ -537,6 +743,8 @@ class RapidBayDaemon:
         i, f = torrent.get_index_and_file_from_files(h, filename)
         if i is None or f is None:
             return False
+        if self._uses_seekable_hls(filename, _m3u8_path(magnet_hash, filename)):
+            return True
         available = self._get_available_bytes(magnet_hash, filename)
         if available < _hls_effective_threshold(f.size):
             return False
@@ -567,6 +775,18 @@ class RapidBayDaemon:
         if i is None or f is None:
             return
         self._head_rushes[key] = now
+        if self._uses_seekable_hls(filename, _m3u8_path(magnet_hash, filename)):
+            # Probe now, so ▶ starts from a cached probe. Rushing a fixed head
+            # and tail instead would make the bytes ffprobe is blocked on
+            # compete with everything else rushed.
+            self.seekable_streamer.prefetch(
+                filename,
+                self.file_server.url(magnet_hash, filename),
+                f.size,
+                _get_output_dir(magnet_hash),
+                _m3u8_filename(filename),
+            )
+            return
         self.torrent_client.prioritize_byte_range(
             magnet_hash, filename, 0, _hls_effective_threshold(f.size)
         )
@@ -660,7 +880,7 @@ class RapidBayDaemon:
             # Defensive: HLS streams should have completed naturally by the time
             # all files are READY, but kill any stragglers before remove_files=True
             # yanks the input out from under them.
-            self.hls_streamer.stop_under(output_dir)
+            self._stop_hls_under(output_dir)
             self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
             self._web_seeded.pop(magnet_hash, None)
             web_seed_proxy.unregister(magnet_hash)
@@ -669,6 +889,7 @@ class RapidBayDaemon:
                 self.subtitle_downloads.pop(filepath, None)
                 self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
                 self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
+                self._byte_rates.pop((magnet_hash, os.path.basename(f.path)), None)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
             video_conversion.clear_master_playlist_cache_under(output_dir)
@@ -714,6 +935,7 @@ class RapidBayDaemon:
     def _heartbeat(self) -> None:
         # Process libtorrent session alerts for better monitoring
         self.torrent_client.process_alerts()
+        self._share_bandwidth()
 
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)
@@ -725,12 +947,13 @@ class RapidBayDaemon:
                     # Kill any active HLS stream first; otherwise its ffmpeg +
                     # pipe-feeder threads outlive remove_files=True and spin
                     # forever waiting on bytes that will never arrive.
-                    self.hls_streamer.stop_under(output_dir)
+                    self._stop_hls_under(output_dir)
                     for f in torrent.get_torrent_info(h).files():
                         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
                         self.subtitle_downloads.pop(filepath, None)
                         self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
                         self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
+                        self._byte_rates.pop((magnet_hash, os.path.basename(f.path)), None)
                     self._web_seeded.pop(magnet_hash, None)
                     web_seed_proxy.unregister(magnet_hash)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

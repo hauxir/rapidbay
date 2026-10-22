@@ -81,7 +81,7 @@ def get_sub_tracks(filepath: str) -> List[Tuple[int, str]]:
     ]
 
 
-def _extract_subtitles_as_vtt(filepath: str, output_dir: str) -> Any:
+def extract_subtitles_as_vtt(filepath: str, output_dir: str) -> Any:
     basename: str = os.path.basename(filepath)
     filename_without_extension: str = os.path.splitext(basename)[0]
     sub_tracks: List[Tuple[int, str]] = get_sub_tracks(filepath)
@@ -99,7 +99,7 @@ def _cleanup_pre_emitted_vtts(output_dir: str, output_filepath: str) -> None:
     subtitles available during HLS playback.
 
     Once MP4 conversion has baked external SRTs into the MP4 and
-    _extract_subtitles_as_vtt has written indexed "{stem}.{idx}_{lang}.vtt"
+    extract_subtitles_as_vtt has written indexed "{stem}.{idx}_{lang}.vtt"
     files, the pre-emitted "{stem}_{lang}.vtt" files are duplicates with the
     same language tag — the browser surfaces both <track> elements
     simultaneously and the user sees subs rendered twice. Only delete when
@@ -568,6 +568,7 @@ def _detect_audio_codec(filepath: str) -> str:
 class VideoConverter:
     def __init__(self) -> None:
         self.file_conversions: Dict[str, bool] = {}
+        self._reservation_lock = threading.Lock()
         # Optional hook fired when a conversion starts or finishes
         self.on_state_change: Callable[[], None] | None = None
 
@@ -576,19 +577,22 @@ class VideoConverter:
         if callback:
             callback()
 
-    @threaded
-    @log.catch_and_log_exceptions
     def convert_file(self, input_filepath: str, output_filepath: str) -> None:
-        notify_on_exit = False
-        try:
-
+        # Reserve the slot before spawning the worker: checked inside the
+        # thread, two heartbeats could both pass the check before either
+        # recorded the conversion, and two ffmpegs would write the same file.
+        with self._reservation_lock:
             if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
                 return
             if self.file_conversions.get(output_filepath):
                 return
-
             self.file_conversions[output_filepath] = True
-            notify_on_exit = True
+        self._run_conversion(input_filepath, output_filepath)
+
+    @threaded
+    @log.catch_and_log_exceptions
+    def _run_conversion(self, input_filepath: str, output_filepath: str) -> None:
+        try:
             self._notify()
 
             output_dir: str = os.path.dirname(output_filepath)
@@ -620,14 +624,13 @@ class VideoConverter:
             # `&&` chain with mv.
             os.replace(_incomplete_path(output_filepath), output_filepath)
 
-            _extract_subtitles_as_vtt(output_filepath, output_dir).wait()
+            extract_subtitles_as_vtt(output_filepath, output_dir).wait()
             _cleanup_pre_emitted_vtts(output_dir, output_filepath)
 
         finally:
             with contextlib.suppress(KeyError):
                 del self.file_conversions[output_filepath]
-            if notify_on_exit:
-                self._notify()
+            self._notify()
 
 
 class HLSStreamer:
@@ -896,7 +899,7 @@ class HLSStreamer:
             # Extract embedded subtitles as VTT from the original file
             if os.path.isfile(input_filepath):
                 with contextlib.suppress(Exception):
-                    _extract_subtitles_as_vtt(input_filepath, output_dir).wait()
+                    extract_subtitles_as_vtt(input_filepath, output_dir).wait()
 
         finally:
             with self._reservation_lock:
@@ -1139,7 +1142,7 @@ class HLSStreamer:
                 proc.stdin.close()  # type: ignore[union-attr]
 
 
-def _atomic_write(path: str, content: str) -> None:
+def atomic_write(path: str, content: str) -> None:
     # Use a unique tmp file so concurrent writers can't clobber each other's
     # in-flight tmp before the rename.
     fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path))
@@ -1235,7 +1238,7 @@ def write_hls_master_playlist(
         # the VTT URI inside the sub-playlist itself.
         sub_playlist_uri = urllib.parse.quote(sub_playlist_filename)
         vtt_uri = urllib.parse.quote(vtt)
-        _atomic_write(
+        atomic_write(
             sub_playlist_path,
             (
                 "#EXTM3U\n"
@@ -1264,7 +1267,7 @@ def write_hls_master_playlist(
         lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}")
     lines.append(urllib.parse.quote(video_m3u8_filename))
 
-    _atomic_write(master_path, "\n".join(lines) + "\n")
+    atomic_write(master_path, "\n".join(lines) + "\n")
     with _master_playlist_cache_lock:
         _master_playlist_cache[master_path] = signature
     return master_filename

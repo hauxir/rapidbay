@@ -22,9 +22,11 @@ import jackett
 import log
 import prowlarr
 import PTN
+import quality
 import requests
 import requests.adapters
 import requests.utils
+import seekable_hls
 import settings
 import torrent
 from common import path_hierarchy
@@ -343,19 +345,22 @@ Disallow: /""",
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def authorize(
+def is_authorized(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     password: Annotated[str | None, Cookie(include_in_schema=False)] = None,
-) -> None:
+) -> bool:
     if not settings.PASSWORD:
-        return
+        return True
     # Check Bearer token first
     if credentials and credentials.credentials == settings.PASSWORD:
-        return
+        return True
     # Fall back to cookie
-    if password == settings.PASSWORD:
-        return
-    raise HTTPException(status_code=404)
+    return password == settings.PASSWORD
+
+
+def authorize(authorized: Annotated[bool, Depends(is_authorized)]) -> None:
+    if not authorized:
+        raise HTTPException(status_code=404)
 
 
 def _resolve_within(directory: str, path: str) -> str | None:
@@ -449,7 +454,12 @@ def _finalize_results(results: List[Dict[str, Any]], searchterm: str) -> List[Di
     rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
 
     if searchterm == "":
-        return _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)
+        filtered_results = _weighted_sort_date_seeds(filtered_results)
+    if settings.DEMOTE_LOW_QUALITY_RESULTS:
+        # Cam/telesync/screener releases and "4K" torrents too small to be 4K
+        # sink below everything else, keeping their relative order.
+        demoted: List[Dict[str, Any]] = [r for r in filtered_results if quality.is_low_quality(r)]
+        filtered_results = [r for r in filtered_results if not quality.is_low_quality(r)] + demoted
     return _add_status_to_results(filtered_results + rest)
 
 
@@ -998,7 +1008,7 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
         "conversions": dict(daemon.video_converter.file_conversions),
-        "hls_streams": list(daemon.hls_streamer.active_streams.keys()),
+        "hls_streams": daemon.hls_streams(),
     }
 
 
@@ -1054,15 +1064,46 @@ def kodi_repo(request: Request, path: str = "") -> Response:
 
 
 @app.get("/play/{magnet_hash}/{filename:path}")
-def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Response:
+def play(
+    magnet_hash: str,
+    filename: str,
+    authorized: Annotated[bool, Depends(is_authorized)],
+    t: str | None = None,
+) -> Response:
+    # Seekable-HLS segment URIs carry a token (`t`) from their playlist, so
+    # players that can't send the login cookie (Chromecast, AirPlay) can
+    # fetch them.
+    if not authorized and not daemon.hls_segment_token_ok(magnet_hash, filename, t):
+        raise HTTPException(status_code=404)
     # Anchored on OUTPUT_DIR itself - anchoring on OUTPUT_DIR/<magnet_hash>
     # lets a traversing magnet_hash move the root of the containment check.
     filepath = _resolve_within(settings.OUTPUT_DIR, os.path.join(magnet_hash, filename))
-    if not filepath or not os.path.isfile(filepath):
+    if not filepath:
         raise HTTPException(status_code=404, detail="File not found")
-    response = FileResponse(filepath)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    return response
+    if os.path.isfile(filepath):
+        response = FileResponse(filepath)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+    if seekable_hls.parse_segment_request(filename) is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # A seekable-HLS segment that doesn't exist yet: send headers now and the
+    # body once it has been made, so the player's time-to-first-byte timeout
+    # doesn't fire while pieces download. If it can't be made, the response
+    # is cut short and the player retries.
+    def body() -> Generator[bytes, None, None]:
+        path = daemon.serve_hls_segment(magnet_hash, filename, t, authorized)
+        if path is None:
+            raise RuntimeError(f"segment unavailable: {magnet_hash}/{filename}")
+        with open(path, "rb") as f:
+            while chunk := f.read(256 * 1024):
+                yield chunk
+
+    return StreamingResponse(
+        body(),
+        media_type="video/mp4",
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # Catch-all route for frontend - MUST be defined last

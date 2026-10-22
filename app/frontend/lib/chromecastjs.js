@@ -203,7 +203,17 @@ var ChromecastJS = function(scope, reciever) {
                 that.Session = cast.framework.CastContext.getInstance().getCurrentSession()
                 if (that.Session && that.Media.content) {
                     var mediaInfo = new chrome.cast.media.MediaInfo(that.Media.content)
-                    //mediaInfo.contentType = 'video/mp4' ??
+                    // RapidBay's HLS uses fMP4 segments; the default receiver
+                    // assumes MPEG-TS for HLS unless told otherwise.
+                    if (that.Media.content.split('?')[0].slice(-5) === '.m3u8') {
+                        mediaInfo.contentType = 'application/x-mpegurl'
+                        if (chrome.cast.media.HlsSegmentFormat) {
+                            mediaInfo.hlsSegmentFormat = chrome.cast.media.HlsSegmentFormat.FMP4
+                        }
+                        if (chrome.cast.media.HlsVideoSegmentFormat) {
+                            mediaInfo.hlsVideoSegmentFormat = chrome.cast.media.HlsVideoSegmentFormat.FMP4
+                        }
+                    }
                     mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata()
                     // The sexy subtitle support function <3
                     if (that.Media.subtitles.length > 0) {

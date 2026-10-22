@@ -46,6 +46,7 @@ TRENDING_TITLE_BLOCKLIST: List[str] = []
 TRENDING_BLOCK_NON_LATIN_TITLES: bool = False
 
 MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS: List[str] = ["XviD"]
+DEMOTE_LOW_QUALITY_RESULTS: bool = True  # sink cam/telesync/screener releases and undersized "4K" torrents
 
 # SUBTITLES
 SUBTITLE_LANGUAGES: List[str] = ["en"]  # list of languages, e.g. ["en", "de", "es"]
@@ -77,7 +78,18 @@ HLS_START_THRESHOLD: int = 50 * 1024 * 1024  # bytes of sequential data before s
 MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent HLS ffmpeg processes (independent of MAX_PARALLEL_CONVERSIONS)
 HLS_STALL_TIMEOUT: int = 180  # seconds without progress before an HLS stream is killed and its slot freed
 HLS_VIEWER_TIMEOUT: int = 300  # seconds without any client polling the file's status before an active HLS stream is stopped and its slot freed
-HLS_PREFETCH_BYTES: int = 32 * 1024 * 1024  # rolling deadline-rushed window the streamer keeps ahead of the pipe feeder
+HLS_PREFETCH_BYTES: int = 32 * 1024 * 1024  # read-ahead window when a file's bitrate isn't known yet
+HLS_READ_AHEAD_SECONDS: int = 60  # playback time kept deadline-rushed ahead of the reader once the bitrate is known
+# Seekable HLS (MKV/WebM/MP4/MOV): a full-length VOD playlist right away, with
+# segments made on demand so viewers can skip anywhere in a file that is still
+# downloading. Other containers, and files without a keyframe index, use the
+# sequential streamer.
+HLS_SEEKABLE: bool = True
+
+# BANDWIDTH
+# While a file is being watched and still downloading, cap other torrents so
+# playback keeps headroom above its bitrate.
+PRIORITIZE_WATCHED_DOWNLOADS: bool = True
 
 # Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:

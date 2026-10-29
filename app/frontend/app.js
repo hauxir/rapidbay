@@ -784,6 +784,8 @@
                 var media = {
                     content: contentUrl,
                     title: "RapidBay",
+                    // Continue on the TV where the browser was.
+                    time: video.currentTime || 0,
                     subtitles: current_subtitle
                         ? [
                               {

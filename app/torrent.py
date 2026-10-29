@@ -375,9 +375,12 @@ class TorrentClient:
             self._seq_bytes_cache[cache_key] = (now, sequential_bytes)
             return sequential_bytes
 
-    def _piece_span(self, h: libtorrent.torrent_handle, filename: str, start: int, end: int) -> Tuple[int, int] | None:
+    def _piece_span(
+        self, h: libtorrent.torrent_handle, filename: str, start: int, end: int
+    ) -> Tuple[int, int, int] | None:
         """Map file byte range [start, end) to the inclusive piece-index span
-        covering it, or None if the handle/file isn't resolvable."""
+        covering it, plus the file's byte offset in the torrent, or None if
+        the handle/file isn't resolvable."""
         if not h.has_metadata() or end <= start:
             return None
         ti = h.get_torrent_info()
@@ -393,13 +396,20 @@ class TorrentClient:
         last = min(ti.num_pieces() - 1, last)
         if last < first:
             return None
-        return first, last
+        return first, last, file_offset
 
-    def prioritize_byte_range(self, magnet_hash: str, filename: str, start: int, end: int) -> None:
+    def prioritize_byte_range(
+        self, magnet_hash: str, filename: str, start: int, end: int, byte_rate: int | None = None
+    ) -> None:
         """Rush the pieces covering file byte range [start, end) via piece
         deadlines (and top priority), so an out-of-order region — e.g. a
         moov-at-end MP4's trailing index — downloads ahead of the sequential
-        head instead of arriving last."""
+        head instead of arriving last.
+
+        With `byte_rate` (bytes/s the player consumes), each piece's deadline
+        is when playback will reach it, so a long read-ahead window doesn't
+        mark every piece as overdue — libtorrent re-requests late
+        time-critical pieces from other peers, which would waste bandwidth."""
         with self.locks.lock(magnet_hash):
             h = self.torrents.get(magnet_hash)
             if not h:
@@ -407,16 +417,24 @@ class TorrentClient:
             span = self._piece_span(h, filename, start, end)
             if span is None:
                 return
-            first, last = span
-            deadline = 0
-            for idx in range(first, last + 1):
+            first, last, file_offset = span
+            piece_length = h.get_torrent_info().piece_length()
+            range_start = file_offset + max(0, start)
+            for n, idx in enumerate(range(first, last + 1)):
+                if h.have_piece(idx):
+                    continue
                 with contextlib.suppress(Exception):
                     h.piece_priority(idx, 7)
+                # Ascending deadlines so the front of the range (e.g. the moov
+                # header at the start of the tail) lands before the rest.
+                deadline = n * 10
+                if byte_rate:
+                    # Measured from the range start, not in whole pieces: the
+                    # range usually begins partway through its first piece.
+                    bytes_ahead = max(0, idx * piece_length - range_start)
+                    deadline = max(deadline, int(bytes_ahead * 1000 / byte_rate))
                 with contextlib.suppress(Exception):
-                    # Ascending deadlines so the moov header (front of the tail)
-                    # lands before the rest of it.
                     h.set_piece_deadline(idx, deadline)
-                deadline += 10
 
     def is_range_downloaded(self, magnet_hash: str, filename: str, start: int, end: int) -> bool:
         """True iff every piece covering file byte range [start, end) is
@@ -428,7 +446,7 @@ class TorrentClient:
             span = self._piece_span(h, filename, start, end)
             if span is None:
                 return False
-            first, last = span
+            first, last, _ = span
             return all(h.have_piece(idx) for idx in range(first, last + 1))
 
     def _write_filelist_to_disk(self, magnet_link: str) -> None:

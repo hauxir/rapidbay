@@ -20,13 +20,6 @@ import web_seed_proxy
 from common import threaded
 from subtitles import get_subtitle_language
 
-# A file counts as being watched for this long after its last status poll.
-_WATCHING_TIMEOUT = 15
-# Room a watched torrent gets above its current rate so it can speed up.
-_WATCHED_HEADROOM = 256 * 1024
-# Floor for a held-back torrent, so it keeps its peers.
-_MIN_BACKGROUND_RATE = 32 * 1024
-
 
 def get_filepaths(magnet_hash: str) -> List[str] | None:
     filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
@@ -231,14 +224,8 @@ class RapidBayDaemon:
         # _file_poll_times; throttles _rush_hls_head.
         self._head_rushes: Dict[Tuple[str, str], float] = {}
         # Bytes/second each file plays at (size / duration), keyed like
-        # _file_poll_times; sizes read-ahead windows, piece deadlines and the
-        # bandwidth reserved for playback.
+        # _file_poll_times; sizes read-ahead windows and piece deadlines.
         self._byte_rates: Dict[Tuple[str, str], int] = {}
-        # Torrents currently held back so a watched file gets the bandwidth it
-        # needs (see _share_bandwidth), and the session's peak download rate —
-        # the estimate of what the link can carry.
-        self._throttled: Set[str] = set()
-        self._link_peak: float = 0.0
         # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
         # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
         # the file from the web seed and/or peers transparently; tracked only so
@@ -632,64 +619,6 @@ class RapidBayDaemon:
         self._head_rushes.pop((magnet_hash, filename), None)
         self._byte_rates.pop((magnet_hash, filename), None)
 
-    def _share_bandwidth(self) -> None:
-        """Playback first: while a file is being watched and still
-        downloading, cap every other torrent so the watched one keeps
-        headroom above its playback rate. The reservation tracks what the
-        watched torrent actually gets (plus room to grow), so a slow swarm
-        doesn't idle the link."""
-        torrents = dict(self.torrent_client.torrents)
-        total_rate = 0
-        for h in torrents.values():
-            with contextlib.suppress(Exception):
-                total_rate += h.status().download_rate
-        # Peak observed throughput, decaying slowly so a link that got slower
-        # is re-measured.
-        self._link_peak = max(float(total_rate), self._link_peak * 0.999)
-
-        watched: Dict[str, int] = {}
-        if settings.PRIORITIZE_WATCHED_DOWNLOADS:
-            now = time.monotonic()
-            for (magnet_hash, filename), polled in list(self._file_poll_times.items()):
-                h = torrents.get(magnet_hash)
-                if now - polled > _WATCHING_TIMEOUT or h is None or not h.has_metadata():
-                    continue
-                i, f = torrent.get_index_and_file_from_files(h, filename)
-                if i is None or f is None or h.file_progress()[i] >= f.size:
-                    continue
-                byte_rate = self._byte_rates.get((magnet_hash, filename))
-                need = int(byte_rate * 1.5) if byte_rate else int(self._link_peak / 2)
-                watched[magnet_hash] = watched.get(magnet_hash, 0) + need
-
-        others = [mh for mh in torrents if mh not in watched]
-        if not watched or not others or self._link_peak <= 0:
-            for magnet_hash in list(self._throttled):
-                h = torrents.get(magnet_hash)
-                if h is not None:
-                    h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
-            self._throttled.clear()
-            return
-
-        reserve = 0
-        for magnet_hash, need in watched.items():
-            # The handle may have been removed since the snapshot above; a
-            # watched torrent we can't read counts as idle.
-            rate = 0
-            with contextlib.suppress(Exception):
-                rate = torrents[magnet_hash].status().download_rate
-            reserve += min(need, int(rate * 1.25) + _WATCHED_HEADROOM)
-        per_torrent = max(int((self._link_peak - reserve) / len(others)), _MIN_BACKGROUND_RATE)
-        if settings.TORRENT_DOWNLOAD_LIMIT > 0:
-            per_torrent = min(per_torrent, settings.TORRENT_DOWNLOAD_LIMIT)
-        for magnet_hash in others:
-            with contextlib.suppress(Exception):
-                torrents[magnet_hash].set_download_limit(per_torrent)
-        for magnet_hash in self._throttled - set(others):
-            h = torrents.get(magnet_hash)
-            if h is not None:
-                h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
-        self._throttled = set(others)
-
     def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:
         # Test-and-set the dedup marker synchronously so racing callers (heartbeats
         # spawning while a prior download is in flight) can't both pass the check
@@ -832,11 +761,6 @@ class RapidBayDaemon:
     def _heartbeat(self) -> None:
         # Process libtorrent session alerts for better monitoring
         self.torrent_client.process_alerts()
-        # Best effort; a handle error mustn't skip the rest of the tick.
-        try:
-            self._share_bandwidth()
-        except Exception as e:
-            log.debug(f"bandwidth sharing failed: {e}")
 
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)

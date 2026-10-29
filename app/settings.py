@@ -80,11 +80,6 @@ HLS_VIEWER_TIMEOUT: int = 300  # seconds without any client polling the file's s
 HLS_PREFETCH_BYTES: int = 32 * 1024 * 1024  # read-ahead window when a file's bitrate isn't known yet
 HLS_READ_AHEAD_SECONDS: int = 60  # playback time kept deadline-rushed ahead of the reader once the bitrate is known
 
-# BANDWIDTH
-# While a file is being watched and still downloading, cap other torrents so
-# playback keeps headroom above its bitrate.
-PRIORITIZE_WATCHED_DOWNLOADS: bool = True
-
 # Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:
     _NULL = "NULL"

@@ -181,6 +181,15 @@ class SubtitleDownloadStatus:
     FINISHED: str = "finished"
 
 
+# Containers whose header states the whole file's duration. ffprobe estimates
+# the others (MPEG-TS/PS) from the data present, which on a partial file is
+# the downloaded part's duration, and size/duration would overstate the
+# bitrate by the undownloaded fraction.
+_HEADER_DURATION_EXTENSIONS = {".mkv", ".mp4", ".avi"}
+# Seconds between attempts to probe a file's bitrate.
+_PROBE_RETRY_INTERVAL = 30.0
+
+
 def _read_ahead_window(byte_rate: int | None) -> int:
     """Bytes to keep rushed ahead of a reader: HLS_READ_AHEAD_SECONDS of the
     file's bitrate, clamped so low bitrates still buffer a useful amount and
@@ -226,6 +235,10 @@ class RapidBayDaemon:
         # Bytes/second each file plays at (size / duration), keyed like
         # _file_poll_times; sizes read-ahead windows and piece deadlines.
         self._byte_rates: Dict[Tuple[str, str], int] = {}
+        # Files with a bitrate probe running, and when each was last tried.
+        self._probing: Set[Tuple[str, str]] = set()
+        self._probe_attempts: Dict[Tuple[str, str], float] = {}
+        self._probe_lock: Lock = Lock()
         # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
         # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
         # the file from the web seed and/or peers transparently; tracked only so
@@ -532,23 +545,16 @@ class RapidBayDaemon:
             last = self._file_poll_times.get(poll_key, started_at)
             return time.monotonic() - last > settings.HLS_VIEWER_TIMEOUT
 
-        # The streamer starts once a head is on disk, so ffprobe can read the
-        # duration locally; it sizes the prefetch window and the piece
-        # deadlines. Off the request path: ffprobe can take its full timeout
-        # on a sparse file, and request_window falls back to
-        # HLS_PREFETCH_BYTES meanwhile.
-        if poll_key not in self._byte_rates:
-            def probe_byte_rate(size: int = f.size) -> None:
-                duration = _probe_duration(filepath)
-                if duration:
-                    self._byte_rates[poll_key] = int(size / duration)
-
-            Thread(target=probe_byte_rate, daemon=True).start()
-
         # Rolling prefetch: the feeder keeps a deadline-rushed window ahead of
         # its position so contiguous data keeps forming under rarest-first
-        # piece picking (no torrent-wide sequential_download).
-        def request_window(offset: int) -> None:
+        # piece picking (no torrent-wide sequential_download). The window is
+        # sized by the file's bitrate once ffprobe has read its duration from
+        # the bytes on disk; the first call comes once the input is readable
+        # (for a moov-at-end MP4, after the moov is in), so that's when the
+        # probe starts. HLS_PREFETCH_BYTES applies until it returns.
+        def request_window(offset: int, size: int = f.size) -> None:
+            if poll_key not in self._byte_rates:
+                self._probe_byte_rate(poll_key, filepath, size)
             self._rush_for_reader(
                 magnet_hash, filename, offset, offset + _read_ahead_window(self._byte_rates.get(poll_key))
             )
@@ -606,6 +612,30 @@ class RapidBayDaemon:
         self._head_rushes[key] = now
         self._rush_for_reader(magnet_hash, filename, 0, _hls_effective_threshold(f.size))
 
+    def _probe_byte_rate(self, key: Tuple[str, str], filepath: str, size: int) -> None:
+        """Start one background ffprobe for the file's bitrate, unless one is
+        running or one was tried less than _PROBE_RETRY_INTERVAL ago. Off the
+        request path: ffprobe can take its full timeout on a sparse file."""
+        if os.path.splitext(filepath)[1].lower() not in _HEADER_DURATION_EXTENSIONS:
+            return
+        now = time.monotonic()
+        with self._probe_lock:
+            if key in self._probing or now - self._probe_attempts.get(key, -_PROBE_RETRY_INTERVAL) < _PROBE_RETRY_INTERVAL:
+                return
+            self._probing.add(key)
+            self._probe_attempts[key] = now
+
+        def run() -> None:
+            try:
+                duration = _probe_duration(filepath)
+                if duration:
+                    self._byte_rates[key] = int(size / duration)
+            finally:
+                with self._probe_lock:
+                    self._probing.discard(key)
+
+        Thread(target=run, daemon=True).start()
+
     def _rush_for_reader(self, magnet_hash: str, filename: str, start: int, end: int) -> None:
         self.torrent_client.prioritize_byte_range(
             magnet_hash, filename, start, end, byte_rate=self._byte_rates.get((magnet_hash, filename))
@@ -618,6 +648,7 @@ class RapidBayDaemon:
         self._file_poll_times.pop((magnet_hash, filename), None)
         self._head_rushes.pop((magnet_hash, filename), None)
         self._byte_rates.pop((magnet_hash, filename), None)
+        self._probe_attempts.pop((magnet_hash, filename), None)
 
     def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:
         # Test-and-set the dedup marker synchronously so racing callers (heartbeats

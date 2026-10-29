@@ -369,9 +369,12 @@ class TorrentClient:
             self._seq_bytes_cache[cache_key] = (now, sequential_bytes)
             return sequential_bytes
 
-    def _piece_span(self, h: libtorrent.torrent_handle, filename: str, start: int, end: int) -> Tuple[int, int] | None:
+    def _piece_span(
+        self, h: libtorrent.torrent_handle, filename: str, start: int, end: int
+    ) -> Tuple[int, int, int] | None:
         """Map file byte range [start, end) to the inclusive piece-index span
-        covering it, or None if the handle/file isn't resolvable."""
+        covering it, plus the file's byte offset in the torrent, or None if
+        the handle/file isn't resolvable."""
         if not h.has_metadata() or end <= start:
             return None
         ti = h.get_torrent_info()
@@ -387,7 +390,7 @@ class TorrentClient:
         last = min(ti.num_pieces() - 1, last)
         if last < first:
             return None
-        return first, last
+        return first, last, file_offset
 
     def prioritize_byte_range(
         self, magnet_hash: str, filename: str, start: int, end: int, byte_rate: int | None = None
@@ -408,8 +411,9 @@ class TorrentClient:
             span = self._piece_span(h, filename, start, end)
             if span is None:
                 return
-            first, last = span
+            first, last, file_offset = span
             piece_length = h.get_torrent_info().piece_length()
+            range_start = file_offset + max(0, start)
             for n, idx in enumerate(range(first, last + 1)):
                 if h.have_piece(idx):
                     continue
@@ -419,7 +423,10 @@ class TorrentClient:
                 # header at the start of the tail) lands before the rest.
                 deadline = n * 10
                 if byte_rate:
-                    deadline = max(deadline, int(n * piece_length * 1000 / byte_rate))
+                    # Measured from the range start, not in whole pieces: the
+                    # range usually begins partway through its first piece.
+                    bytes_ahead = max(0, idx * piece_length - range_start)
+                    deadline = max(deadline, int(bytes_ahead * 1000 / byte_rate))
                 with contextlib.suppress(Exception):
                     h.set_piece_deadline(idx, deadline)
 
@@ -433,7 +440,7 @@ class TorrentClient:
             span = self._piece_span(h, filename, start, end)
             if span is None:
                 return False
-            first, last = span
+            first, last, _ = span
             return all(h.have_piece(idx) for idx in range(first, last + 1))
 
     def _write_filelist_to_disk(self, magnet_link: str) -> None:

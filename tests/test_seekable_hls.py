@@ -211,3 +211,54 @@ def test_superseded_waiter_does_not_restart_the_job(tmp_path):
     # It gives up instead of dragging ffmpeg back to its old position.
     assert result == [None]
     assert started == [1]
+
+
+class _Proc:
+    def __init__(self, exited):
+        self.exited = exited
+        self.returncode = 0 if exited else None
+
+    def poll(self):
+        return self.returncode
+
+
+def _session(tmp_path):
+    session = seekable_hls._Session(
+        "h", "f.mkv", str(tmp_path), str(tmp_path / "f.m3u8"), "http://x", 1, "f.mkv", lambda: False
+    )
+    session.probe = seekable_hls.Probe(0.0, 60.0, "h264", "aac", [0.0, 10.0, 20.0, 30.0])
+    return session
+
+
+def test_exited_job_with_undrained_pieces_still_covers_its_segments(tmp_path):
+    streamer = seekable_hls.SeekableHLSStreamer()
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    job = seekable_hls._Job(_Proc(exited=True), 2, str(job_dir))  # type: ignore[arg-type]
+    job.frontier = 3
+    # ffmpeg reached EOF and exited, but the supervisor hasn't drained its last piece yet.
+    (job_dir / "job.m3u8").write_text("#EXTM3U\n#EXTINF:1.0,\ng_0.m4s\n#EXT-X-ENDLIST\n")
+    assert streamer._job_covers(job, 3)
+    # Once drained, an exited job covers nothing and a waiter may restart one.
+    job.consumed = 1
+    assert not streamer._job_covers(job, 3)
+    # A killed job never does, even with pieces left behind.
+    job.consumed = 0
+    job.stopping = True
+    assert not streamer._job_covers(job, 3)
+
+
+def test_stop_releases_the_slot_at_once_without_evicting_a_successor(tmp_path):
+    streamer = seekable_hls.SeekableHLSStreamer()
+    old = _session(tmp_path)
+    streamer.active_streams[old.m3u8_path] = old
+    streamer.stop(old.m3u8_path)
+    assert old.stopped and old.m3u8_path not in streamer.active_streams
+    # A new session for the same file takes the slot; the old thread's
+    # release on exit must leave it alone.
+    new = _session(tmp_path)
+    streamer.active_streams[new.m3u8_path] = new
+    streamer._release(old)
+    assert streamer.active_streams[new.m3u8_path] is new
+    streamer._release(new)
+    assert new.m3u8_path not in streamer.active_streams

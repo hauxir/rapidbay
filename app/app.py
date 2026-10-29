@@ -13,6 +13,7 @@ import string
 import subprocess
 import urllib.parse
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator, Dict, List, cast, override
 
@@ -1063,6 +1064,15 @@ def kodi_repo(request: Request, path: str = "") -> Response:
     )
 
 
+# Pending segment requests block in the daemon for up to HLS_STALL_TIMEOUT
+# while pieces download. Starlette would otherwise run them on its shared
+# threadpool (40 workers), where a few slow viewers could starve every other
+# sync endpoint; this pool bounds them separately.
+_segment_workers = ThreadPoolExecutor(
+    max_workers=16 * settings.MAX_PARALLEL_HLS_STREAMS, thread_name_prefix="hls-segment"
+)
+
+
 @app.get("/play/{magnet_hash}/{filename:path}")
 def play(
     magnet_hash: str,
@@ -1090,8 +1100,10 @@ def play(
     # body once it has been made, so the player's time-to-first-byte timeout
     # doesn't fire while pieces download. If it can't be made, the response
     # is cut short and the player retries.
-    def body() -> Generator[bytes, None, None]:
-        path = daemon.serve_hls_segment(magnet_hash, filename)
+    async def body() -> AsyncIterator[bytes]:
+        path = await asyncio.get_running_loop().run_in_executor(
+            _segment_workers, daemon.serve_hls_segment, magnet_hash, filename
+        )
         if path is None:
             raise RuntimeError(f"segment unavailable: {magnet_hash}/{filename}")
         with open(path, "rb") as f:

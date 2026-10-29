@@ -470,6 +470,32 @@ class TorrentClient:
                 return None
             return os.path.join(self.download_dir, magnet_hash, f.path), f.size
 
+    def file_layout(self, magnet_hash: str, filename: str) -> Tuple[int, int, int] | None:
+        """(offset of the file in the torrent, piece length, piece count),
+        so a reader can map its own byte ranges to pieces without walking
+        the file list on every poll (see have_pieces)."""
+        with self.locks.lock(magnet_hash):
+            h = self.torrents.get(magnet_hash)
+            if not h or not h.has_metadata():
+                return None
+            ti = h.get_torrent_info()
+            i, f = get_index_and_file_from_files(h, filename)
+            if i is None or f is None:
+                return None
+            return ti.files().file_offset(i), ti.piece_length(), ti.num_pieces()
+
+    def have_pieces(self, magnet_hash: str, first: int, last: int) -> bool | None:
+        """True iff pieces first..last (inclusive) are verified and on disk;
+        None once the torrent is gone."""
+        with self.locks.lock(magnet_hash):
+            h = self.torrents.get(magnet_hash)
+            if not h:
+                return None
+            try:
+                return all(h.have_piece(idx) for idx in range(first, last + 1))
+            except Exception:
+                return None
+
     def is_range_downloaded(self, magnet_hash: str, filename: str, start: int, end: int) -> bool:
         """True iff every piece covering file byte range [start, end) is
         verified and on disk."""

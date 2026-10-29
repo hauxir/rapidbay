@@ -33,6 +33,7 @@ import os
 import re
 import secrets
 import shutil
+import struct
 import subprocess
 import threading
 import time
@@ -163,7 +164,9 @@ def probe_file(filename: str, url: str, file_size: int, m3u8_path: str) -> Probe
         kf = keyframes.mkv_keyframes(read) if ext == ".mkv" else keyframes.mp4_keyframes(read, file_size)
     except OSError as e:
         raise ProbeUnavailableError(f"index unreadable: {e}") from e
-    except (ValueError, IndexError) as e:
+    except (ValueError, IndexError, struct.error) as e:
+        # struct.error is not a ValueError: a truncated sample table raises
+        # it from the parsers' unpack calls.
         log.debug(f"seekable HLS: keyframe index unreadable for {filename}: {e}")
         kf = None
     if not kf:
@@ -377,8 +380,11 @@ class SeekableHLSStreamer:
         return True
 
     def stop(self, m3u8_path: str) -> None:
+        # Release the slot now: the session thread may still be inside a
+        # probe (up to HLS_STALL_TIMEOUT) and would otherwise hold it until
+        # that returns.
         with self._lock:
-            session = self.active_streams.get(m3u8_path)
+            session = self.active_streams.pop(m3u8_path, None)
         if session is None:
             return
         with session.cond:
@@ -455,8 +461,14 @@ class SeekableHLSStreamer:
                 session.stopped = True
                 self._stop_job(session)
                 session.cond.notify_all()
-            with self._lock:
-                self.active_streams.pop(session.m3u8_path, None)
+            self._release(session)
+
+    def _release(self, session: _Session) -> None:
+        """Give up the session's slot, unless stop() already did and a new
+        session for the same file has taken it since."""
+        with self._lock:
+            if self.active_streams.get(session.m3u8_path) is session:
+                del self.active_streams[session.m3u8_path]
 
     def prefetch(self, filename: str, url: str, file_size: int, output_dir: str, m3u8_filename: str) -> None:
         """Probe a file in the background while its viewer is still on the
@@ -525,8 +537,7 @@ class SeekableHLSStreamer:
                 if self._on_unseekable:
                     # Release this session's slot before the fallback
                     # claims one.
-                    with self._lock:
-                        self.active_streams.pop(session.m3u8_path, None)
+                    self._release(session)
                     self._on_unseekable(session.magnet_hash, session.filename)
             else:
                 print(f"seekable HLS: {session.filename} has no streamable video")
@@ -559,7 +570,7 @@ class SeekableHLSStreamer:
                 if job is not None:
                     try:
                         progressed = self._drain(session, job)
-                    except (OSError, ValueError) as e:
+                    except (OSError, ValueError, struct.error) as e:
                         log.debug(f"seekable HLS: dropping job for {session.filename}: {e}")
                         self._stop_job(session)
                         progressed = False
@@ -687,10 +698,14 @@ class SeekableHLSStreamer:
             os.path.isfile(session.segment_path(i)) for i in range(session.n_segments)
         )
 
-    @staticmethod
-    def _job_covers(job: _Job, n: int) -> bool:
-        """Whether the running job will reach segment `n` soon."""
-        return job.proc.poll() is None and job.start <= n <= job.frontier + _SEEK_GAP_SEGMENTS
+    def _job_covers(self, job: _Job, n: int) -> bool:
+        """Whether the job will reach segment `n` soon. A job that has exited
+        but still has pieces the supervisor hasn't drained counts as running:
+        a waiter waking in that gap must not throw those pieces away and
+        restart ffmpeg over them."""
+        if not job.start <= n <= job.frontier + _SEEK_GAP_SEGMENTS:
+            return False
+        return job.proc.poll() is None or (not job.stopping and self._has_unconsumed(job))
 
     def _ensure_job(self, session: _Session, n: int) -> None:
         """Called with session.cond held."""

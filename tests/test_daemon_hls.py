@@ -134,3 +134,61 @@ def test_finished_watched_file_does_not_throttle(monkeypatch):
     )
     daemon._share_bandwidth()
     assert other.limit == -1
+
+
+def test_resume_picks_the_video_not_a_sidecar_with_the_same_stem(monkeypatch):
+    daemon = rapidbaydaemon.RapidBayDaemon.__new__(rapidbaydaemon.RapidBayDaemon)
+
+    class File:
+        def __init__(self, path):
+            self.path = path
+
+    class Info:
+        def files(self):
+            return [File("Movie/Movie.2024.jpg"), File("Movie/Movie.2024.srt"), File("Movie/Movie.2024.mkv")]
+
+    class Handle:
+        def has_metadata(self):
+            return True
+
+    class Client:
+        torrents = {"h": Handle()}
+
+    daemon.torrent_client = Client()  # type: ignore[assignment]
+    monkeypatch.setattr(rapidbaydaemon.torrent, "get_torrent_info", lambda _h: Info())
+    assert daemon._filename_for_stem("h", "Movie.2024") == "Movie.2024.mkv"
+    assert daemon._filename_for_stem("h", "Other") is None
+
+
+def test_bandwidth_sharing_survives_a_removed_watched_handle(monkeypatch):
+    import time
+
+    class Gone(_Handle):
+        def status(self):
+            raise RuntimeError("invalid torrent handle used")
+
+    watched, other = Gone(rate=0), _Handle(rate=3_000_000)
+    daemon = _bandwidth_daemon(
+        monkeypatch,
+        {"w": watched, "o": other},
+        {("w", "movie.mkv"): time.monotonic()},
+        {("w", "movie.mkv"): 1_000_000},
+    )
+    daemon._share_bandwidth()
+    # The unreadable watched torrent counts as idle (headroom only); the
+    # other one still gets a limit rather than the tick aborting.
+    assert daemon._throttled == {"o"}
+    assert other.limit == 3_000_000 - 256 * 1024
+
+
+def test_forget_file_drops_every_record():
+    daemon = rapidbaydaemon.RapidBayDaemon.__new__(rapidbaydaemon.RapidBayDaemon)
+    key = ("h", "movie.mkv")
+    daemon.subtitle_downloads = {os.path.join(settings.DOWNLOAD_DIR, "h", "dir/movie.mkv"): "x"}
+    daemon._file_poll_times = {key: 1.0}
+    daemon._head_rushes = {key: 1.0}
+    daemon._byte_rates = {key: 1}
+    daemon._sequential_pending = {key}
+    daemon._forget_file("h", "dir/movie.mkv")
+    assert not daemon.subtitle_downloads and not daemon._file_poll_times and not daemon._head_rushes
+    assert not daemon._byte_rates and not daemon._sequential_pending

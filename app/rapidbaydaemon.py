@@ -231,7 +231,8 @@ class RapidBayDaemon:
         self._byte_rates: Dict[Tuple[str, str], int] = {}
         self.file_server: torrent_stream.TorrentFileServer = torrent_stream.TorrentFileServer(
             locate=self.torrent_client.file_location,
-            is_range_downloaded=self.torrent_client.is_range_downloaded,
+            layout=self.torrent_client.file_layout,
+            have_pieces=self.torrent_client.have_pieces,
             rush=self._rush_for_reader,
             window_for=lambda mh, fn: _read_ahead_window(self._byte_rates.get((mh, fn))),
         )
@@ -688,9 +689,21 @@ class RapidBayDaemon:
             return None
         for f in torrent.get_torrent_info(h).files():
             basename = os.path.basename(f.path)
-            if os.path.splitext(basename)[0] == stem:
+            name, ext = os.path.splitext(basename)
+            # Sidecars (.srt/.nfo/.jpg) share the video's stem; only a file
+            # the seekable streamer can take resumes the stream.
+            if name == stem and ext.lower() in seekable_hls.SEEKABLE_EXTENSIONS:
                 return basename
         return None
+
+    def _forget_file(self, magnet_hash: str, path: str) -> None:
+        """Drop every per-file record once its torrent is removed."""
+        filename = os.path.basename(path)
+        self.subtitle_downloads.pop(os.path.join(settings.DOWNLOAD_DIR, magnet_hash, path), None)
+        self._file_poll_times.pop((magnet_hash, filename), None)
+        self._head_rushes.pop((magnet_hash, filename), None)
+        self._byte_rates.pop((magnet_hash, filename), None)
+        self._sequential_pending.discard((magnet_hash, filename))
 
     def _share_bandwidth(self) -> None:
         """Playback first: while a file is being watched and still
@@ -732,13 +745,18 @@ class RapidBayDaemon:
 
         reserve = 0
         for magnet_hash, need in watched.items():
-            rate = torrents[magnet_hash].status().download_rate
+            # The handle may have been removed since the snapshot above; a
+            # watched torrent we can't read counts as idle.
+            rate = 0
+            with contextlib.suppress(Exception):
+                rate = torrents[magnet_hash].status().download_rate
             reserve += min(need, int(rate * 1.25) + _WATCHED_HEADROOM)
         per_torrent = max(int((self._link_peak - reserve) / len(others)), _MIN_BACKGROUND_RATE)
         if settings.TORRENT_DOWNLOAD_LIMIT > 0:
             per_torrent = min(per_torrent, settings.TORRENT_DOWNLOAD_LIMIT)
         for magnet_hash in others:
-            torrents[magnet_hash].set_download_limit(per_torrent)
+            with contextlib.suppress(Exception):
+                torrents[magnet_hash].set_download_limit(per_torrent)
         for magnet_hash in self._throttled - set(others):
             h = torrents.get(magnet_hash)
             if h is not None:
@@ -896,12 +914,7 @@ class RapidBayDaemon:
             self._web_seeded.pop(magnet_hash, None)
             web_seed_proxy.unregister(magnet_hash)
             for f in files:
-                filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-                self.subtitle_downloads.pop(filepath, None)
-                self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
-                self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
-                self._byte_rates.pop((magnet_hash, os.path.basename(f.path)), None)
-                self._sequential_pending.discard((magnet_hash, os.path.basename(f.path)))
+                self._forget_file(magnet_hash, f.path)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
             video_conversion.clear_master_playlist_cache_under(output_dir)
@@ -965,13 +978,7 @@ class RapidBayDaemon:
                     # forever waiting on bytes that will never arrive.
                     self._stop_hls_under(output_dir)
                     for f in torrent.get_torrent_info(h).files():
-                        filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-                        self.subtitle_downloads.pop(filepath, None)
-                        self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
-                        self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
-                        self._byte_rates.pop((magnet_hash, os.path.basename(f.path)), None)
-                        self._sequential_pending.discard((magnet_hash, os.path.basename(f.path)))
-                        self._sequential_pending.discard((magnet_hash, os.path.basename(f.path)))
+                        self._forget_file(magnet_hash, f.path)
                     self._web_seeded.pop(magnet_hash, None)
                     web_seed_proxy.unregister(magnet_hash)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

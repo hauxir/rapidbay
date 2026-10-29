@@ -16,6 +16,8 @@ to the read-ahead size for the file's bitrate.
 import contextlib
 import re
 import secrets
+import select
+import socket
 import threading
 import time
 import urllib.parse
@@ -37,7 +39,10 @@ _RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 # (path on disk, file size) for a torrent file, or None when unknown.
 Locate = Callable[[str, str], Tuple[str, int] | None]
-RangeCheck = Callable[[str, str, int, int], bool]
+# (file offset in the torrent, piece length, piece count), or None.
+Layout = Callable[[str, str], Tuple[int, int, int] | None]
+# Whether pieces first..last are all on disk; None once the torrent is gone.
+HavePieces = Callable[[str, int, int], bool | None]
 Rush = Callable[[str, str, int, int], None]
 WindowFor = Callable[[str, str], int]
 
@@ -69,12 +74,14 @@ class TorrentFileServer:
     def __init__(
         self,
         locate: Locate,
-        is_range_downloaded: RangeCheck,
+        layout: Layout,
+        have_pieces: HavePieces,
         rush: Rush,
         window_for: WindowFor,
     ) -> None:
         self._locate = locate
-        self._is_range_downloaded = is_range_downloaded
+        self._layout = layout
+        self._have_pieces = have_pieces
         self._rush = rush
         self._window_for = window_for
         # Random path prefix: the server only listens on loopback, but other
@@ -114,7 +121,8 @@ class TorrentFileServer:
             return
         magnet_hash, filename = parts[2], urllib.parse.unquote(parts[3])
         located = self._locate(magnet_hash, filename)
-        if located is None:
+        layout = self._layout(magnet_hash, filename)
+        if located is None or layout is None:
             req.send_error(404)
             return
         path, size = located
@@ -136,7 +144,7 @@ class TorrentFileServer:
             return
         # The reader going away mid-response (ffmpeg seeked or exited) is normal.
         with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-            self._stream(req, magnet_hash, filename, path, start, end)
+            self._stream(req, magnet_hash, filename, path, size, layout, start, end)
 
     def _stream(
         self,
@@ -144,6 +152,8 @@ class TorrentFileServer:
         magnet_hash: str,
         filename: str,
         path: str,
+        size: int,
+        layout: Tuple[int, int, int],
         start: int,
         end: int,
     ) -> None:
@@ -161,7 +171,7 @@ class TorrentFileServer:
                     self._rush(magnet_hash, filename, pos, pos + window)
                     rushed_to = pos + window
                 chunk_end = min(end + 1, pos + READ_CHUNK)
-                if not self._wait_for(magnet_hash, filename, pos, chunk_end):
+                if not self._wait_for(req.connection, magnet_hash, filename, size, layout, pos, chunk_end):
                     log.debug(f"torrent_stream: gave up waiting for {filename} @ {pos}")
                     return
                 if f is None:
@@ -176,12 +186,33 @@ class TorrentFileServer:
             if f is not None:
                 f.close()
 
-    def _wait_for(self, magnet_hash: str, filename: str, start: int, end: int) -> bool:
+    def _wait_for(
+        self,
+        conn: socket.socket,
+        magnet_hash: str,
+        filename: str,
+        size: int,
+        layout: Tuple[int, int, int],
+        start: int,
+        end: int,
+    ) -> bool:
+        """Block until file bytes [start, end) are on disk. False on timeout,
+        when the torrent goes away, or when the reader hangs up: a seek kills
+        ffmpeg, and a handler that kept waiting would go on re-rushing a
+        position nobody is reading, against the new job's deadlines."""
+        file_offset, piece_length, num_pieces = layout
+        first = (file_offset + start) // piece_length
+        last = min(num_pieces - 1, (file_offset + min(size, end) - 1) // piece_length)
+        if last < first:
+            return False
         began = time.monotonic()
         last_rush = began
         while True:
-            if self._is_range_downloaded(magnet_hash, filename, start, end):
+            have = self._have_pieces(magnet_hash, first, last)
+            if have:
                 return True
+            if have is None or _reader_gone(conn):
+                return False
             now = time.monotonic()
             if now - began > settings.HLS_STALL_TIMEOUT:
                 return False
@@ -189,3 +220,15 @@ class TorrentFileServer:
                 self._rush(magnet_hash, filename, start, start + CRITICAL_WINDOW_BYTES)
                 last_rush = now
             time.sleep(_WAIT_POLL)
+
+
+def _reader_gone(conn: socket.socket) -> bool:
+    """Whether the client closed its side. It sends nothing while waiting for
+    the body, so the socket only becomes readable at EOF (or on reset)."""
+    try:
+        readable, _, _ = select.select([conn], [], [], 0)
+        if not readable:
+            return False
+        return conn.recv(1, socket.MSG_PEEK) == b""
+    except (OSError, ValueError):
+        return True

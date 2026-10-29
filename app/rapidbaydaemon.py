@@ -20,6 +20,13 @@ import web_seed_proxy
 from common import threaded
 from subtitles import get_subtitle_language
 
+# A file counts as being watched for this long after its last status poll.
+_WATCHING_TIMEOUT = 15
+# Room a watched torrent gets above its current rate so it can speed up.
+_WATCHED_HEADROOM = 256 * 1024
+# Floor for a held-back torrent, so it keeps its peers.
+_MIN_BACKGROUND_RATE = 32 * 1024
+
 
 def get_filepaths(magnet_hash: str) -> List[str] | None:
     filename = os.path.join(settings.FILELIST_DIR, magnet_hash)
@@ -181,6 +188,27 @@ class SubtitleDownloadStatus:
     FINISHED: str = "finished"
 
 
+def _read_ahead_window(byte_rate: int | None) -> int:
+    """Bytes to keep rushed ahead of a reader: HLS_READ_AHEAD_SECONDS of the
+    file's bitrate, clamped so low bitrates still buffer a useful amount and
+    4K remuxes can't starve everything else."""
+    if not byte_rate:
+        return settings.HLS_PREFETCH_BYTES
+    return max(16 * 1024 * 1024, min(byte_rate * settings.HLS_READ_AHEAD_SECONDS, 1024 * 1024 * 1024))
+
+
+def _probe_duration(filepath: str) -> float | None:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", filepath],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        duration = float(result.stdout.strip())
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    return duration if duration > 0 else None
+
+
 class RapidBayDaemon:
     def __init__(self) -> None:
         self.subtitle_downloads: Dict[str, str] = {}
@@ -202,6 +230,15 @@ class RapidBayDaemon:
         # Last deadline-rush of a file's head window, keyed like
         # _file_poll_times; throttles _rush_hls_head.
         self._head_rushes: Dict[Tuple[str, str], float] = {}
+        # Bytes/second each file plays at (size / duration), keyed like
+        # _file_poll_times; sizes read-ahead windows, piece deadlines and the
+        # bandwidth reserved for playback.
+        self._byte_rates: Dict[Tuple[str, str], int] = {}
+        # Torrents currently held back so a watched file gets the bandwidth it
+        # needs (see _share_bandwidth), and the session's peak download rate —
+        # the estimate of what the link can carry.
+        self._throttled: Set[str] = set()
+        self._link_peak: float = 0.0
         # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
         # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
         # the file from the web seed and/or peers transparently; tracked only so
@@ -508,12 +545,25 @@ class RapidBayDaemon:
             last = self._file_poll_times.get(poll_key, started_at)
             return time.monotonic() - last > settings.HLS_VIEWER_TIMEOUT
 
+        # The streamer starts once a head is on disk, so ffprobe can read the
+        # duration locally; it sizes the prefetch window and the piece
+        # deadlines. Off the request path: ffprobe can take its full timeout
+        # on a sparse file, and request_window falls back to
+        # HLS_PREFETCH_BYTES meanwhile.
+        if poll_key not in self._byte_rates:
+            def probe_byte_rate(size: int = f.size) -> None:
+                duration = _probe_duration(filepath)
+                if duration:
+                    self._byte_rates[poll_key] = int(size / duration)
+
+            Thread(target=probe_byte_rate, daemon=True).start()
+
         # Rolling prefetch: the feeder keeps a deadline-rushed window ahead of
         # its position so contiguous data keeps forming under rarest-first
         # piece picking (no torrent-wide sequential_download).
         def request_window(offset: int) -> None:
-            self.torrent_client.prioritize_byte_range(
-                magnet_hash, filename, offset, offset + settings.HLS_PREFETCH_BYTES
+            self._rush_for_reader(
+                magnet_hash, filename, offset, offset + _read_ahead_window(self._byte_rates.get(poll_key))
             )
 
         os.makedirs(output_dir, exist_ok=True)
@@ -567,9 +617,78 @@ class RapidBayDaemon:
         if i is None or f is None:
             return
         self._head_rushes[key] = now
+        self._rush_for_reader(magnet_hash, filename, 0, _hls_effective_threshold(f.size))
+
+    def _rush_for_reader(self, magnet_hash: str, filename: str, start: int, end: int) -> None:
         self.torrent_client.prioritize_byte_range(
-            magnet_hash, filename, 0, _hls_effective_threshold(f.size)
+            magnet_hash, filename, start, end, byte_rate=self._byte_rates.get((magnet_hash, filename))
         )
+
+    def _forget_file(self, magnet_hash: str, path: str) -> None:
+        """Drop every per-file record once its torrent is removed."""
+        filename = os.path.basename(path)
+        self.subtitle_downloads.pop(os.path.join(settings.DOWNLOAD_DIR, magnet_hash, path), None)
+        self._file_poll_times.pop((magnet_hash, filename), None)
+        self._head_rushes.pop((magnet_hash, filename), None)
+        self._byte_rates.pop((magnet_hash, filename), None)
+
+    def _share_bandwidth(self) -> None:
+        """Playback first: while a file is being watched and still
+        downloading, cap every other torrent so the watched one keeps
+        headroom above its playback rate. The reservation tracks what the
+        watched torrent actually gets (plus room to grow), so a slow swarm
+        doesn't idle the link."""
+        torrents = dict(self.torrent_client.torrents)
+        total_rate = 0
+        for h in torrents.values():
+            with contextlib.suppress(Exception):
+                total_rate += h.status().download_rate
+        # Peak observed throughput, decaying slowly so a link that got slower
+        # is re-measured.
+        self._link_peak = max(float(total_rate), self._link_peak * 0.999)
+
+        watched: Dict[str, int] = {}
+        if settings.PRIORITIZE_WATCHED_DOWNLOADS:
+            now = time.monotonic()
+            for (magnet_hash, filename), polled in list(self._file_poll_times.items()):
+                h = torrents.get(magnet_hash)
+                if now - polled > _WATCHING_TIMEOUT or h is None or not h.has_metadata():
+                    continue
+                i, f = torrent.get_index_and_file_from_files(h, filename)
+                if i is None or f is None or h.file_progress()[i] >= f.size:
+                    continue
+                byte_rate = self._byte_rates.get((magnet_hash, filename))
+                need = int(byte_rate * 1.5) if byte_rate else int(self._link_peak / 2)
+                watched[magnet_hash] = watched.get(magnet_hash, 0) + need
+
+        others = [mh for mh in torrents if mh not in watched]
+        if not watched or not others or self._link_peak <= 0:
+            for magnet_hash in list(self._throttled):
+                h = torrents.get(magnet_hash)
+                if h is not None:
+                    h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
+            self._throttled.clear()
+            return
+
+        reserve = 0
+        for magnet_hash, need in watched.items():
+            # The handle may have been removed since the snapshot above; a
+            # watched torrent we can't read counts as idle.
+            rate = 0
+            with contextlib.suppress(Exception):
+                rate = torrents[magnet_hash].status().download_rate
+            reserve += min(need, int(rate * 1.25) + _WATCHED_HEADROOM)
+        per_torrent = max(int((self._link_peak - reserve) / len(others)), _MIN_BACKGROUND_RATE)
+        if settings.TORRENT_DOWNLOAD_LIMIT > 0:
+            per_torrent = min(per_torrent, settings.TORRENT_DOWNLOAD_LIMIT)
+        for magnet_hash in others:
+            with contextlib.suppress(Exception):
+                torrents[magnet_hash].set_download_limit(per_torrent)
+        for magnet_hash in self._throttled - set(others):
+            h = torrents.get(magnet_hash)
+            if h is not None:
+                h.set_download_limit(settings.TORRENT_DOWNLOAD_LIMIT)
+        self._throttled = set(others)
 
     def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:
         # Test-and-set the dedup marker synchronously so racing callers (heartbeats
@@ -651,7 +770,9 @@ class RapidBayDaemon:
         ]
 
         def is_state(filename: str, state: str) -> bool:
-            return self.get_file_status(magnet_hash, filename)["status"] == state
+            # include_hls=False: HLS fields (and the head rushes behind them)
+            # are for viewers' polls, not this housekeeping.
+            return self.get_file_status(magnet_hash, filename, include_hls=False)["status"] == state
 
         active_filenames = video_filenames if video_filenames else filenames
 
@@ -665,10 +786,7 @@ class RapidBayDaemon:
             self._web_seeded.pop(magnet_hash, None)
             web_seed_proxy.unregister(magnet_hash)
             for f in files:
-                filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-                self.subtitle_downloads.pop(filepath, None)
-                self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
-                self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
+                self._forget_file(magnet_hash, f.path)
                 m3u8 = _m3u8_path(magnet_hash, os.path.basename(f.path))
                 self.hls_streamer.clear_failed(m3u8)
             video_conversion.clear_master_playlist_cache_under(output_dir)
@@ -714,6 +832,11 @@ class RapidBayDaemon:
     def _heartbeat(self) -> None:
         # Process libtorrent session alerts for better monitoring
         self.torrent_client.process_alerts()
+        # Best effort; a handle error mustn't skip the rest of the tick.
+        try:
+            self._share_bandwidth()
+        except Exception as e:
+            log.debug(f"bandwidth sharing failed: {e}")
 
         for magnet_hash in list(self.torrent_client.torrents.keys()):
             h = self.torrent_client.torrents.get(magnet_hash)
@@ -727,10 +850,7 @@ class RapidBayDaemon:
                     # forever waiting on bytes that will never arrive.
                     self.hls_streamer.stop_under(output_dir)
                     for f in torrent.get_torrent_info(h).files():
-                        filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-                        self.subtitle_downloads.pop(filepath, None)
-                        self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
-                        self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
+                        self._forget_file(magnet_hash, f.path)
                     self._web_seeded.pop(magnet_hash, None)
                     web_seed_proxy.unregister(magnet_hash)
                     self.torrent_client.remove_torrent(magnet_hash, remove_files=True)

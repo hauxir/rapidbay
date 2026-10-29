@@ -389,11 +389,18 @@ class TorrentClient:
             return None
         return first, last
 
-    def prioritize_byte_range(self, magnet_hash: str, filename: str, start: int, end: int) -> None:
+    def prioritize_byte_range(
+        self, magnet_hash: str, filename: str, start: int, end: int, byte_rate: int | None = None
+    ) -> None:
         """Rush the pieces covering file byte range [start, end) via piece
         deadlines (and top priority), so an out-of-order region — e.g. a
         moov-at-end MP4's trailing index — downloads ahead of the sequential
-        head instead of arriving last."""
+        head instead of arriving last.
+
+        With `byte_rate` (bytes/s the player consumes), each piece's deadline
+        is when playback will reach it, so a long read-ahead window doesn't
+        mark every piece as overdue — libtorrent re-requests late
+        time-critical pieces from other peers, which would waste bandwidth."""
         with self.locks.lock(magnet_hash):
             h = self.torrents.get(magnet_hash)
             if not h:
@@ -402,15 +409,19 @@ class TorrentClient:
             if span is None:
                 return
             first, last = span
-            deadline = 0
-            for idx in range(first, last + 1):
+            piece_length = h.get_torrent_info().piece_length()
+            for n, idx in enumerate(range(first, last + 1)):
+                if h.have_piece(idx):
+                    continue
                 with contextlib.suppress(Exception):
                     h.piece_priority(idx, 7)
+                # Ascending deadlines so the front of the range (e.g. the moov
+                # header at the start of the tail) lands before the rest.
+                deadline = n * 10
+                if byte_rate:
+                    deadline = max(deadline, int(n * piece_length * 1000 / byte_rate))
                 with contextlib.suppress(Exception):
-                    # Ascending deadlines so the moov header (front of the tail)
-                    # lands before the rest of it.
                     h.set_piece_deadline(idx, deadline)
-                deadline += 10
 
     def is_range_downloaded(self, magnet_hash: str, filename: str, start: int, end: int) -> bool:
         """True iff every piece covering file byte range [start, end) is

@@ -587,7 +587,14 @@ class VideoConverter:
             if self.file_conversions.get(output_filepath):
                 return
             self.file_conversions[output_filepath] = True
-        self._run_conversion(input_filepath, output_filepath)
+        try:
+            self._run_conversion(input_filepath, output_filepath)
+        except BaseException:
+            # The worker's finally never runs if its thread couldn't start;
+            # free the slot so a later heartbeat can retry.
+            with self._reservation_lock, contextlib.suppress(KeyError):
+                del self.file_conversions[output_filepath]
+            raise
 
     @threaded
     @log.catch_and_log_exceptions

@@ -1068,12 +1068,11 @@ def play(
     magnet_hash: str,
     filename: str,
     authorized: Annotated[bool, Depends(is_authorized)],
-    t: str | None = None,
 ) -> Response:
-    # Seekable-HLS segment URIs carry a token (`t`) from their playlist, so
-    # players that can't send the login cookie (Chromecast, AirPlay) can
-    # fetch them.
-    if not authorized and not daemon.hls_segment_token_ok(magnet_hash, filename, t):
+    # Seekable-HLS segments are served without the login cookie: with nginx
+    # in front, everything under /play/ (playlists included) is already
+    # public, and cast devices (Chromecast, AirPlay) can't send the cookie.
+    if not authorized and seekable_hls.parse_segment_request(filename) is None:
         raise HTTPException(status_code=404)
     # Anchored on OUTPUT_DIR itself - anchoring on OUTPUT_DIR/<magnet_hash>
     # lets a traversing magnet_hash move the root of the containment check.
@@ -1092,7 +1091,7 @@ def play(
     # doesn't fire while pieces download. If it can't be made, the response
     # is cut short and the player retries.
     def body() -> Generator[bytes, None, None]:
-        path = daemon.serve_hls_segment(magnet_hash, filename, t, authorized)
+        path = daemon.serve_hls_segment(magnet_hash, filename)
         if path is None:
             raise RuntimeError(f"segment unavailable: {magnet_hash}/{filename}")
         with open(path, "rb") as f:

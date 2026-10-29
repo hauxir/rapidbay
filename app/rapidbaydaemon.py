@@ -4,7 +4,6 @@ import functools
 import json
 import os
 import re
-import secrets
 import shutil
 import subprocess
 import time
@@ -657,13 +656,10 @@ class RapidBayDaemon:
         )
         return {"started": True} if started else {"started": False, "reason": "capacity"}
 
-    def serve_hls_segment(self, magnet_hash: str, name: str, token: str | None, authorized: bool) -> str | None:
+    def serve_hls_segment(self, magnet_hash: str, name: str) -> str | None:
         """Path of a seekable-HLS segment (or init segment) once it exists,
-        producing it on demand; None if `name` isn't one, the caller may not
-        have it, or it couldn't be made in time.
-
-        Callers without the login cookie (Chromecast, AirPlay) are let in by
-        the token embedded in the playlist's segment URIs."""
+        producing it on demand; None if `name` isn't one or it couldn't be
+        made in time."""
         if not _is_valid_magnet_hash(magnet_hash):
             return None
         parsed = seekable_hls.parse_segment_request(name)
@@ -671,8 +667,6 @@ class RapidBayDaemon:
             return None
         stem, n = parsed
         output_dir = _get_output_dir(magnet_hash)
-        if not authorized and not self.hls_segment_token_ok(magnet_hash, name, token):
-            return None
         session = self.seekable_streamer.session_for(output_dir, stem)
         if session is None:
             # Reaped for want of status polls (a cast device fetching segments
@@ -687,13 +681,6 @@ class RapidBayDaemon:
         # after the phone that started it locks.
         self.note_file_poll(magnet_hash, session.filename)
         return self.seekable_streamer.wait_for(session, n, settings.HLS_STALL_TIMEOUT)
-
-    def hls_segment_token_ok(self, magnet_hash: str, name: str, token: str | None) -> bool:
-        parsed = seekable_hls.parse_segment_request(name)
-        if not token or parsed is None or not _is_valid_magnet_hash(magnet_hash):
-            return False
-        expected = seekable_hls.SeekableHLSStreamer.token_for(_get_output_dir(magnet_hash), parsed[0])
-        return expected is not None and secrets.compare_digest(expected, token)
 
     def _filename_for_stem(self, magnet_hash: str, stem: str) -> str | None:
         h = self.torrent_client.torrents.get(magnet_hash)

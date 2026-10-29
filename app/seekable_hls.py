@@ -103,9 +103,6 @@ class Probe:
     audio_codec: str
     # Presentation times of each playlist segment's first keyframe.
     boundaries: List[float] = field(default_factory=list)
-    # Random capability token appended to segment URIs. Players that can't send
-    # the login cookie (Chromecast, AirPlay) fetch segments with it instead.
-    token: str = ""
 
 
 class ProbeUnavailableError(Exception):
@@ -179,7 +176,6 @@ def probe_file(filename: str, url: str, file_size: int, m3u8_path: str) -> Probe
         video_codec=video.lower(),
         audio_codec=audio.lower(),
         boundaries=segment_boundaries(kf, settings.HLS_SEGMENT_DURATION),
-        token=secrets.token_urlsafe(12),
     )
 
 
@@ -202,7 +198,6 @@ def segment_boundaries(keyframe_times: List[float], segment_duration: float) -> 
 
 
 def build_vod_playlist(stem: str, p: Probe) -> str:
-    query = "?t=" + urllib.parse.quote(p.token)
     ends = p.boundaries[1:] + [max(p.end_time, p.boundaries[-1] + 0.001)]
     lengths = [max(end - start, 0.001) for start, end in zip(p.boundaries, ends, strict=True)]
     lines = [
@@ -212,11 +207,11 @@ def build_vod_playlist(stem: str, p: Probe) -> str:
         "#EXT-X-MEDIA-SEQUENCE:0",
         "#EXT-X-PLAYLIST-TYPE:VOD",
         "#EXT-X-INDEPENDENT-SEGMENTS",
-        f'#EXT-X-MAP:URI="{urllib.parse.quote(init_name(stem))}{query}"',
+        f'#EXT-X-MAP:URI="{urllib.parse.quote(init_name(stem))}"',
     ]
     for i, length in enumerate(lengths):
         lines.append(f"#EXTINF:{length:.6f},")
-        lines.append(urllib.parse.quote(segment_name(stem, i)) + query)
+        lines.append(urllib.parse.quote(segment_name(stem, i)))
     lines.append("#EXT-X-ENDLIST")
     return "\n".join(lines) + "\n"
 
@@ -402,13 +397,6 @@ class SeekableHLSStreamer:
         with self._lock:
             return self.active_streams.get(os.path.join(output_dir, stem + ".m3u8"))
 
-    @classmethod
-    def token_for(cls, output_dir: str, stem: str) -> str | None:
-        """Segment token of a file's playlist, from the on-disk probe cache —
-        valid even while no session is running (finished streams)."""
-        cached = cls._load_probe(os.path.join(output_dir, _probe_cache_name(stem)))
-        return cached.token if cached else None
-
     def wait_for(self, session: _Session, n: int | None, timeout: float) -> str | None:
         """Block until segment `n` (or the init segment when n is None) is on
         disk, starting or moving the ffmpeg job as needed. Returns its path, or
@@ -453,7 +441,7 @@ class SeekableHLSStreamer:
                 p = Probe(**json.load(f))
         except (OSError, ValueError, TypeError):
             return None
-        return p if p.boundaries and p.token else None
+        return p if p.boundaries else None
 
     @threaded
     @log.catch_and_log_exceptions

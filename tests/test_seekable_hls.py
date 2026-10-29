@@ -170,17 +170,17 @@ def test_segments_group_keyframes():
     assert segment_boundaries([0.5, 1.0, 3.7, 7.4, 11.1, 14.8, 18.5, 22.2, 25.9], 6) == [0.5, 3.7, 7.4, 11.1, 18.5, 25.9]
 
 
-def test_vod_playlist_lists_every_segment_with_token():
+def test_vod_playlist_lists_every_segment():
     p = Probe(start_time=0, end_time=25.0, video_codec="h264", audio_codec="aac",
-              boundaries=[0.0, 10.0, 20.0], token="tok")
+              boundaries=[0.0, 10.0, 20.0])
     playlist = build_vod_playlist("My Movie", p)
     assert "#EXT-X-PLAYLIST-TYPE:VOD" in playlist and playlist.rstrip().endswith("#EXT-X-ENDLIST")
-    assert '#EXT-X-MAP:URI="My%20Movie_vod_init.mp4?t=tok"' in playlist
+    assert '#EXT-X-MAP:URI="My%20Movie_vod_init.mp4"' in playlist
     assert "#EXT-X-TARGETDURATION:10" in playlist
     assert [line for line in playlist.splitlines() if line.startswith("#EXTINF")] == [
         "#EXTINF:10.000000,", "#EXTINF:10.000000,", "#EXTINF:5.000000,"
     ]
-    assert "My%20Movie_vod_2.m4s?t=tok" in playlist
+    assert "My%20Movie_vod_2.m4s" in playlist
 
 
 def test_parse_segment_request():
@@ -195,7 +195,7 @@ def test_superseded_waiter_does_not_restart_the_job(tmp_path):
     session = seekable_hls._Session(
         "h", "f.mkv", str(tmp_path), str(tmp_path / "f.m3u8"), "http://x", 1, "f.mkv", lambda: False
     )
-    session.probe = seekable_hls.Probe(0.0, 60.0, "h264", "aac", [0.0, 10.0, 20.0, 30.0], "tok")
+    session.probe = seekable_hls.Probe(0.0, 60.0, "h264", "aac", [0.0, 10.0, 20.0, 30.0])
     started = []
     streamer._ensure_job = lambda _s, n: started.append(n)  # type: ignore[method-assign]
     result = []

@@ -568,6 +568,7 @@ def _detect_audio_codec(filepath: str) -> str:
 class VideoConverter:
     def __init__(self) -> None:
         self.file_conversions: Dict[str, bool] = {}
+        self._reservation_lock = threading.Lock()
         # Optional hook fired when a conversion starts or finishes
         self.on_state_change: Callable[[], None] | None = None
 
@@ -576,19 +577,29 @@ class VideoConverter:
         if callback:
             callback()
 
-    @threaded
-    @log.catch_and_log_exceptions
     def convert_file(self, input_filepath: str, output_filepath: str) -> None:
-        notify_on_exit = False
-        try:
-
+        # Reserve the slot before spawning the worker: checked inside the
+        # thread, two heartbeats could both pass the check before either
+        # recorded the conversion, and two ffmpegs would write the same file.
+        with self._reservation_lock:
             if len(self.file_conversions.keys()) >= settings.MAX_PARALLEL_CONVERSIONS:
                 return
             if self.file_conversions.get(output_filepath):
                 return
-
             self.file_conversions[output_filepath] = True
-            notify_on_exit = True
+        try:
+            self._run_conversion(input_filepath, output_filepath)
+        except BaseException:
+            # The worker's finally never runs if its thread couldn't start;
+            # free the slot so a later heartbeat can retry.
+            with self._reservation_lock, contextlib.suppress(KeyError):
+                del self.file_conversions[output_filepath]
+            raise
+
+    @threaded
+    @log.catch_and_log_exceptions
+    def _run_conversion(self, input_filepath: str, output_filepath: str) -> None:
+        try:
             self._notify()
 
             output_dir: str = os.path.dirname(output_filepath)
@@ -626,8 +637,7 @@ class VideoConverter:
         finally:
             with contextlib.suppress(KeyError):
                 del self.file_conversions[output_filepath]
-            if notify_on_exit:
-                self._notify()
+            self._notify()
 
 
 class HLSStreamer:

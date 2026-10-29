@@ -32,12 +32,6 @@ DEFAULT_SESSION_SETTINGS: Dict[str, int | bool] = {
     'enable_lsd': True,
     'enable_upnp': True,
     'enable_natpmp': True,
-    # A magnet's files all start at priority 0 (nothing selected), which makes
-    # the torrent "finished" the moment metadata arrives, and libtorrent then
-    # drops its connections to seeds. Selecting a file only reconnects after
-    # this delay (default 60s) — a minute of dead air before playback in a
-    # small swarm.
-    'min_reconnect_time': 5,
 }
 
 DEFAULT_DHT_ROUTERS = [

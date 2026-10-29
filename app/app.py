@@ -23,7 +23,6 @@ import jackett
 import log
 import prowlarr
 import PTN
-import quality
 import requests
 import requests.adapters
 import requests.utils
@@ -455,12 +454,7 @@ def _finalize_results(results: List[Dict[str, Any]], searchterm: str) -> List[Di
     rest: List[Dict[str, Any]] = [r for r in results if any(s in r.get("title", "") for s in settings.MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS)]
 
     if searchterm == "":
-        filtered_results = _weighted_sort_date_seeds(filtered_results)
-    if settings.DEMOTE_LOW_QUALITY_RESULTS:
-        # Cam/telesync/screener releases and "4K" torrents too small to be 4K
-        # sink below everything else, keeping their relative order.
-        demoted: List[Dict[str, Any]] = [r for r in filtered_results if quality.is_low_quality(r)]
-        filtered_results = [r for r in filtered_results if not quality.is_low_quality(r)] + demoted
+        return _add_status_to_results(_weighted_sort_date_seeds(filtered_results) + rest)
     return _add_status_to_results(filtered_results + rest)
 
 

@@ -159,7 +159,6 @@ def _parse_results(
                 "magnet": magnet_uri,
                 "torrent_link": torrent_link,
                 "published": parse(published) if published else None,
-                "size": result.get("size"),
             }
         )
     return magnet_links

@@ -46,6 +46,7 @@ TRENDING_TITLE_BLOCKLIST: List[str] = []
 TRENDING_BLOCK_NON_LATIN_TITLES: bool = False
 
 MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS: List[str] = ["XviD"]
+DEMOTE_LOW_QUALITY_RESULTS: bool = True  # sink cam/telesync/screener releases and undersized "4K" torrents
 
 # SUBTITLES
 SUBTITLE_LANGUAGES: List[str] = ["en"]  # list of languages, e.g. ["en", "de", "es"]

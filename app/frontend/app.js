@@ -784,8 +784,9 @@
                 var media = {
                     content: contentUrl,
                     title: "RapidBay",
-                    // Continue on the TV where the browser was.
-                    time: video.currentTime || 0,
+                    // Continue on the TV where the browser was; a video that
+                    // has finished starts over rather than loading at its end.
+                    time: video.ended ? 0 : video.currentTime || 0,
                     subtitles: current_subtitle
                         ? [
                               {

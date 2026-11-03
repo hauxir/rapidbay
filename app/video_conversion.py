@@ -595,22 +595,6 @@ def _probe_audio_streams(filepath: str) -> List[Dict[str, Any]] | None:
     ]
 
 
-HLS_VIDEO_VARIANT = "video"
-
-
-def _hls_audio_variant(index: int) -> str:
-    return f"audio{index}"
-
-
-def _var_stream_language(raw: str) -> str:
-    """Language tag safe to embed in -var_stream_map, which is split on
-    spaces and commas; anything that isn't a plain tag is dropped."""
-    code = (raw or "").strip()
-    if code.lower() in ("", "und", "unknown", "unk"):
-        return ""
-    return code if re.fullmatch(r"[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*", code) else ""
-
-
 def build_hls_command(
     output_dir: str,
     m3u8_filename: str,
@@ -678,7 +662,7 @@ def build_hls_command(
     maps = ["-map", "0:V:0"]
     codec_args = ["-c:v", "copy", "-tag:v", video_tag]
     default_index = next((i for i, s in enumerate(audio_streams) if s["default"]), 0)
-    variants = [f"v:0,agroup:aud,name:{HLS_VIDEO_VARIANT}"]
+    variants = ["v:0,agroup:aud,name:video"]
     for i, stream in enumerate(audio_streams):
         maps += ["-map", f"0:a:{i}"]
         if "aac" in stream["codec"]:
@@ -689,10 +673,10 @@ def build_hls_command(
                 f"-b:a:{i}", settings.AAC_BITRATE,
                 f"-ac:a:{i}", str(settings.AAC_CHANNELS),
             ]
-        variant = f"a:{i},agroup:aud,name:{_hls_audio_variant(i)}"
-        language = _var_stream_language(stream["language"])
-        if language:
-            variant += f",language:{language}"
+        variant = f"a:{i},agroup:aud,name:audio{i}"
+        # -var_stream_map is split on spaces and commas; skip odd tags.
+        if re.fullmatch(r"[A-Za-z-]{2,}", stream["language"]) and stream["language"] != "und":
+            variant += f",language:{stream['language']}"
         if i == default_index:
             variant += ",default:yes"
         variants.append(variant)
@@ -714,7 +698,7 @@ def build_hls_command(
     ]
     media_playlists = [
         os.path.join(output_dir, f"{segment_prefix}_{name}.m3u8")
-        for name in [HLS_VIDEO_VARIANT, *(_hls_audio_variant(i) for i in range(len(audio_streams)))]
+        for name in ["video", *(f"audio{i}" for i in range(len(audio_streams)))]
     ]
     return cmd, media_playlists
 
@@ -1311,46 +1295,13 @@ def clear_master_playlist_cache_under(output_dir: str) -> None:
             _master_playlist_cache.pop(key, None)
 
 
-_HLS_ATTRIBUTE_RE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
-
-
-def _hls_attributes(line: str) -> Dict[str, str]:
-    return {k: v.strip('"') for k, v in _HLS_ATTRIBUTE_RE.findall(line.split(":", 1)[1])}
-
-
-def _read_ffmpeg_master(path: str) -> Tuple[str, List[Dict[str, str]], Dict[str, str]] | None:
-    """Parse the master playlist ffmpeg writes for a multi-audio stream.
-
-    Returns ``(content, audio renditions, stream attributes)``, or ``None``
-    when ``path`` is a plain media playlist. Media playlists grow with every
-    segment, so only the head is read; a master is a few hundred bytes.
-    """
+def _read_ffmpeg_master(path: str) -> str | None:
+    """Return the master playlist ffmpeg writes for a multi-audio stream, or
+    ``None`` when ``path`` is a plain media playlist. Media playlists grow with
+    every segment, so only the head is read; a master is a few hundred bytes."""
     with open(path) as f:
         content = f.read(16384)
-    if "#EXT-X-STREAM-INF" not in content:
-        return None
-    audio: List[Dict[str, str]] = []
-    stream: Dict[str, str] = {}
-    for line in content.splitlines():
-        if line.startswith("#EXT-X-MEDIA:") and "TYPE=AUDIO" in line:
-            audio.append(_hls_attributes(line))
-        elif line.startswith("#EXT-X-STREAM-INF:"):
-            stream = _hls_attributes(line)
-    return content, audio, stream
-
-
-def _unique_names(names: List[str]) -> List[str]:
-    """Number repeated names ("English 1", "English 2"). hls.js matches tracks
-    by label+lang, so duplicates would be treated as the same track."""
-    totals: Dict[str, int] = {}
-    for name in names:
-        totals[name] = totals.get(name, 0) + 1
-    seen: Dict[str, int] = {}
-    out: List[str] = []
-    for name in names:
-        seen[name] = seen.get(name, 0) + 1
-        out.append(f"{name} {seen[name]}" if totals[name] > 1 else name)
-    return out
+    return content if "#EXT-X-STREAM-INF" in content else None
 
 
 def write_hls_master_playlist(
@@ -1375,7 +1326,7 @@ def write_hls_master_playlist(
     # the audio renditions; merge it rather than nesting one master in another.
     ffmpeg_master = _read_ffmpeg_master(os.path.join(output_dir, video_m3u8_filename))
     signature: Tuple[str, ...] = (
-        video_m3u8_filename, ffmpeg_master[0] if ffmpeg_master else "", *vtt_filenames
+        video_m3u8_filename, ffmpeg_master or "", *vtt_filenames
     )
     with _master_playlist_cache_lock:
         if _master_playlist_cache.get(master_path) == signature and os.path.isfile(master_path):
@@ -1397,9 +1348,19 @@ def write_hls_master_playlist(
         raw = vtt_stem.rsplit("_", 1)[-1] if "_" in vtt_stem else ""
         code, display = _resolve_subtitle_language(raw.replace('"', ""))
         resolved.append((code, display))
+    name_totals: Dict[str, int] = {}
+    for _code, display in resolved:
+        name_totals[display] = name_totals.get(display, 0) + 1
+
     lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
-    names = _unique_names([display for _code, display in resolved])
-    for vtt, (lang_code, _display), name in zip(vtt_filenames, resolved, names, strict=False):
+    name_seen: Dict[str, int] = {}
+    for vtt, (lang_code, display) in zip(vtt_filenames, resolved, strict=False):
+        name_seen[display] = name_seen.get(display, 0) + 1
+        name = (
+            f"{display} {name_seen[display]}"
+            if name_totals[display] > 1
+            else display
+        )
         sub_playlist_filename = f"{vtt}.m3u8"
         sub_playlist_path = os.path.join(output_dir, sub_playlist_filename)
         # URI attributes in HLS manifests must be valid URIs — VTT filenames can
@@ -1430,38 +1391,20 @@ def write_hls_master_playlist(
             + f'URI="{sub_playlist_uri}"'
         )
 
-    stream_attrs = ["BANDWIDTH=2000000"]
+    stream_inf = "#EXT-X-STREAM-INF:BANDWIDTH=2000000"
     stream_uri = video_m3u8_filename
     if ffmpeg_master:
-        _content, audio, stream = ffmpeg_master
-        # Audio playlist names are fixed by build_hls_command; ffmpeg lists the
-        # renditions in that order. Its NAMEs ("audio_1") are replaced with
-        # language names so player menus read "English", "Icelandic".
-        resolved_audio = [_resolve_subtitle_language(a.get("LANGUAGE", "")) for a in audio]
-        audio_names = _unique_names(
-            [display if code else f"Track {i + 1}" for i, (code, display) in enumerate(resolved_audio)]
-        )
-        default_index = next((i for i, a in enumerate(audio) if a.get("DEFAULT") == "YES"), 0)
-        for i, ((lang_code, _display), name) in enumerate(zip(resolved_audio, audio_names, strict=False)):
-            language_attr = f'LANGUAGE="{lang_code}",' if lang_code else ""
-            audio_uri = urllib.parse.quote(f"{base}_{_hls_audio_variant(i)}.m3u8")
-            lines.append(
-                f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{name}",'
-                + f"{language_attr}DEFAULT={'YES' if i == default_index else 'NO'},AUTOSELECT=YES,"
-                + f'URI="{audio_uri}"'
-            )
-        if stream.get("BANDWIDTH"):
-            stream_attrs = [f"BANDWIDTH={stream['BANDWIDTH']}"]
-        if stream.get("RESOLUTION"):
-            stream_attrs.append(f"RESOLUTION={stream['RESOLUTION']}")
-        if stream.get("CODECS"):
-            stream_attrs.append(f'CODECS="{stream["CODECS"]}"')
-        if audio:
-            stream_attrs.append('AUDIO="audio"')
-        stream_uri = f"{base}_{HLS_VIDEO_VARIANT}.m3u8"
+        # Carry ffmpeg's audio renditions and its variant line over as-is,
+        # escaping the URIs it writes raw.
+        master_lines = ffmpeg_master.splitlines()
+        for i, line in enumerate(master_lines):
+            if line.startswith("#EXT-X-MEDIA:"):
+                lines.append(re.sub(r'URI="([^"]*)"', lambda m: f'URI="{urllib.parse.quote(m.group(1))}"', line))
+            elif line.startswith("#EXT-X-STREAM-INF:") and i + 1 < len(master_lines):
+                stream_inf, stream_uri = line, master_lines[i + 1]
     if vtt_filenames:
-        stream_attrs.append('SUBTITLES="subs"')
-    lines.append("#EXT-X-STREAM-INF:" + ",".join(stream_attrs))
+        stream_inf += ',SUBTITLES="subs"'
+    lines.append(stream_inf)
     lines.append(urllib.parse.quote(stream_uri))
 
     _atomic_write(master_path, "\n".join(lines) + "\n")

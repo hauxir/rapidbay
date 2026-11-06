@@ -235,7 +235,18 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
     for i, (lang, _) in enumerate(subtitle_filepaths):
         if lang is not None:
             args += [f"-metadata:s:s:{i + n_sub_tracks}", f"language={lang}"]
-    args += ["-c:s", "mov_text", "-movflags", "faststart", "-v", "quiet", "-stats"]
+    args += ["-c:s", "mov_text"]
+    # mov_text tracks otherwise get a 0x0 track size and text box, which
+    # Safari/AVFoundation lays cues out against, pushing them off-centre.
+    # Sizing the track to the video frame makes the (0,0,0,0) tx3g text box
+    # mean "whole frame", so cues sit centred at the bottom.
+    video_track: Any = next(
+        (t for t in media_info.tracks if t.track_type == "Video" and t.width and t.height),
+        None,
+    )
+    if video_track is not None:
+        args += ["-s:s", f"{int(video_track.width)}x{int(video_track.height)}"]
+    args += ["-movflags", "faststart", "-v", "quiet", "-stats"]
     if is_hevc:
         args += ["-tag:v", "hvc1"]
     args.append(_incomplete_path(output_filepath))

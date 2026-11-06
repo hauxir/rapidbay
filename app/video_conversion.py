@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import json
 import math
 import os
 import re
@@ -576,6 +577,143 @@ def _detect_audio_codec(filepath: str) -> str:
     return ""
 
 
+def _probe_audio_streams(filepath: str) -> List[Dict[str, Any]] | None:
+    """Return ``{"codec", "language", "default"}`` for every audio stream, in
+    stream order, or ``None`` when ffprobe fails."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=codec_name:stream_tags=language:stream_disposition=default",
+                "-of", "json",
+                filepath,
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        streams = json.loads(result.stdout).get("streams", [])
+    except (TimeoutExpired, OSError, ValueError):
+        return None
+    return [
+        {
+            "codec": str(s.get("codec_name") or "").lower(),
+            "language": str((s.get("tags") or {}).get("language") or ""),
+            "default": bool((s.get("disposition") or {}).get("default")),
+        }
+        for s in streams
+    ]
+
+
+def build_hls_command(
+    output_dir: str,
+    m3u8_filename: str,
+    video_tag: str,
+    audio_codec: str,
+    audio_streams: List[Dict[str, Any]] | None,
+) -> Tuple[List[str], List[str]]:
+    """Build the HLS ffmpeg command.
+
+    Returns ``(command, media_playlist_paths)``. A source with a single audio
+    track muxes it into the video segments and writes one media playlist at
+    ``m3u8_filename``. A source with several audio tracks writes each as its
+    own HLS audio rendition (EXT-X-MEDIA:TYPE=AUDIO) so players can switch
+    between them; ffmpeg then writes a master playlist at ``m3u8_filename``
+    and the media playlists next to it.
+    """
+    segment_prefix = os.path.splitext(m3u8_filename)[0]
+    m3u8_path = os.path.join(output_dir, m3u8_filename)
+    hls_time = str(settings.HLS_SEGMENT_DURATION)
+    head = [
+        "ffmpeg", "-nostdin",
+        "-i", "pipe:0",
+        # ffmpeg's default per-output-type stream selection auto-maps
+        # the input's subtitle track and emits WebVTT segments next to
+        # the video segments (named "{stem}{N}.vtt"). We surface
+        # subtitles separately via the master playlist, so disable
+        # subtitle output here to keep the segment dir clean.
+        "-sn",
+    ]
+    hls_args = [
+        "-hls_playlist_type", "event",
+        "-f", "hls",
+        "-hls_segment_type", "fmp4",
+        "-hls_time", hls_time,
+        "-hls_init_time", hls_time,
+    ]
+
+    if not audio_streams or len(audio_streams) < 2:
+        # Copy audio when source is already AAC; otherwise transcode. The
+        # aac_adtstoasc bitstream filter is needed when feeding ADTS-AAC
+        # (typical of .ts) into an fMP4 segment, but is harmless on
+        # transcode output too.
+        if "aac" in audio_codec:
+            audio_args = ["-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
+        else:
+            audio_args = [
+                "-acodec", "aac",
+                "-ab", settings.AAC_BITRATE,
+                "-ac", str(settings.AAC_CHANNELS),
+                "-bsf:a", "aac_adtstoasc",
+            ]
+        cmd = [
+            *head,
+            "-vcodec", "copy",
+            *audio_args,
+            "-tag:v", video_tag,
+            *hls_args,
+            "-hls_fmp4_init_filename", f"{segment_prefix}_init.mp4",
+            "-hls_segment_filename", os.path.join(output_dir, f"{segment_prefix}_seg_%04d.m4s"),
+            m3u8_path,
+        ]
+        return cmd, [m3u8_path]
+
+    # "V" skips attached pictures (cover art), which MKVs often carry as v:0.
+    maps = ["-map", "0:V:0"]
+    codec_args = ["-c:v", "copy", "-tag:v", video_tag]
+    default_index = next((i for i, s in enumerate(audio_streams) if s["default"]), 0)
+    variants = ["v:0,agroup:aud,name:video"]
+    for i, stream in enumerate(audio_streams):
+        maps += ["-map", f"0:a:{i}"]
+        if "aac" in stream["codec"]:
+            codec_args += [f"-c:a:{i}", "copy"]
+        else:
+            codec_args += [
+                f"-c:a:{i}", "aac",
+                f"-b:a:{i}", settings.AAC_BITRATE,
+                f"-ac:a:{i}", str(settings.AAC_CHANNELS),
+            ]
+        variant = f"a:{i},agroup:aud,name:audio{i}"
+        # -var_stream_map is split on spaces and commas; skip odd tags.
+        if re.fullmatch(r"[A-Za-z-]{2,}", stream["language"]) and stream["language"] != "und":
+            variant += f",language:{stream['language']}"
+        if i == default_index:
+            variant += ",default:yes"
+        variants.append(variant)
+    cmd = [
+        *head,
+        *maps,
+        *codec_args,
+        "-bsf:a", "aac_adtstoasc",
+        *hls_args,
+        # Write playlists via rename so the master never appears half-written.
+        # ffmpeg writes the master only once every rendition playlist exists,
+        # so its presence still means the stream is ready to play.
+        "-hls_flags", "temp_file",
+        "-hls_fmp4_init_filename", f"{segment_prefix}_%v_init.mp4",
+        "-hls_segment_filename", os.path.join(output_dir, f"{segment_prefix}_%v_seg_%04d.m4s"),
+        "-master_pl_name", m3u8_filename,
+        "-var_stream_map", " ".join(variants),
+        os.path.join(output_dir, f"{segment_prefix}_%v.m3u8"),
+    ]
+    media_playlists = [
+        os.path.join(output_dir, f"{segment_prefix}_{name}.m3u8")
+        for name in ["video", *(f"audio{i}" for i in range(len(audio_streams)))]
+    ]
+    return cmd, media_playlists
+
+
 class VideoConverter:
     def __init__(self) -> None:
         self.file_conversions: Dict[str, bool] = {}
@@ -778,9 +916,6 @@ class HLSStreamer:
         try:
             os.makedirs(output_dir, exist_ok=True)
 
-            segment_prefix = os.path.splitext(m3u8_filename)[0]
-            segment_pattern = os.path.join(output_dir, f"{segment_prefix}_seg_%04d.m4s")
-            init_filename = f"{segment_prefix}_init.mp4"
             stderr_log_path = os.path.join(output_dir, m3u8_filename + ".log")
 
             # Moov-at-end MP4: wait for the prioritized trailing moov to land,
@@ -799,43 +934,15 @@ class HLSStreamer:
             video_codec = _detect_video_codec(input_filepath)
             video_tag = "hvc1" if video_codec == "hevc" else "avc1"
 
-            # Copy audio when source is already AAC; otherwise transcode. The
-            # aac_adtstoasc bitstream filter is needed when feeding ADTS-AAC
-            # (typical of .ts) into an fMP4 segment, but is harmless on
-            # transcode output too.
-            audio_codec = _detect_audio_codec(input_filepath)
-            if "aac" in audio_codec:
-                audio_args = ["-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
-            else:
-                audio_args = [
-                    "-acodec", "aac",
-                    "-ab", settings.AAC_BITRATE,
-                    "-ac", str(settings.AAC_CHANNELS),
-                    "-bsf:a", "aac_adtstoasc",
-                ]
-
-            hls_time = str(settings.HLS_SEGMENT_DURATION)
-            ffmpeg_cmd = [
-                "ffmpeg", "-nostdin",
-                "-i", "pipe:0",
-                # ffmpeg's default per-output-type stream selection auto-maps
-                # the input's subtitle track and emits WebVTT segments next to
-                # the video segments (named "{stem}{N}.vtt"). We surface
-                # subtitles separately via the master playlist, so disable
-                # subtitle output here to keep the segment dir clean.
-                "-sn",
-                "-vcodec", "copy",
-                *audio_args,
-                "-tag:v", video_tag,
-                "-hls_playlist_type", "event",
-                "-f", "hls",
-                "-hls_segment_type", "fmp4",
-                "-hls_time", hls_time,
-                "-hls_init_time", hls_time,
-                "-hls_fmp4_init_filename", init_filename,
-                "-hls_segment_filename", segment_pattern,
-                m3u8_path,
-            ]
+            # Every audio track becomes its own rendition, as the MP4
+            # conversion keeps every track; ffmpeg alone would pick one.
+            ffmpeg_cmd, media_playlists = build_hls_command(
+                output_dir,
+                m3u8_filename,
+                video_tag,
+                _detect_audio_codec(input_filepath),
+                _probe_audio_streams(input_filepath),
+            )
 
             with open(stderr_log_path, "w") as stderr_log:
                 proc = Popen(ffmpeg_cmd, stdin=PIPE, stdout=DEVNULL, stderr=stderr_log)
@@ -894,20 +1001,23 @@ class HLSStreamer:
                     # Persist a failure marker so the frontend stops surfacing
                     # the ▶ button — even across restarts.
                     self.mark_failed(m3u8_path)
-                # Drop the partial m3u8 either way: an event playlist without
-                # ENDLIST will hang players that try to play it later.
-                with contextlib.suppress(OSError):
-                    os.remove(m3u8_path)
+                # Drop the partial playlists either way: an event playlist
+                # without ENDLIST will hang players that try to play it later.
+                for path in {m3u8_path, *media_playlists}:
+                    with contextlib.suppress(OSError):
+                        os.remove(path)
                 return
 
-            # Finalize the m3u8: switch EVENT→VOD and append ENDLIST
-            if os.path.isfile(m3u8_path):
-                with open(m3u8_path) as f:
+            # Finalize each media playlist: switch EVENT→VOD and append ENDLIST
+            for path in media_playlists:
+                if not os.path.isfile(path):
+                    continue
+                with open(path) as f:
                     content = f.read()
                 if "#EXT-X-ENDLIST" not in content:
                     content = content.replace("#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-PLAYLIST-TYPE:VOD")
                     content += "#EXT-X-ENDLIST\n"
-                    with open(m3u8_path, "w") as f:
+                    with open(path, "w") as f:
                         f.write(content)
 
             # Stream finished cleanly — drop the now-uninteresting stderr log.
@@ -1196,6 +1306,15 @@ def clear_master_playlist_cache_under(output_dir: str) -> None:
             _master_playlist_cache.pop(key, None)
 
 
+def _read_ffmpeg_master(path: str) -> str | None:
+    """Return the master playlist ffmpeg writes for a multi-audio stream, or
+    ``None`` when ``path`` is a plain media playlist. Media playlists grow with
+    every segment, so only the head is read; a master is a few hundred bytes."""
+    with open(path) as f:
+        content = f.read(16384)
+    return content if "#EXT-X-STREAM-INF" in content else None
+
+
 def write_hls_master_playlist(
     output_dir: str,
     video_m3u8_filename: str,
@@ -1214,7 +1333,12 @@ def write_hls_master_playlist(
     # Skip rewrite if the inputs are unchanged since last call. Frontend polls
     # the status endpoint every 1-3s; without this, the master + every subtitle
     # sub-playlist is rewritten on every poll for every viewer.
-    signature: Tuple[str, ...] = (video_m3u8_filename, *vtt_filenames)
+    # A multi-audio stream's "video" playlist is ffmpeg's own master listing
+    # the audio renditions; merge it rather than nesting one master in another.
+    ffmpeg_master = _read_ffmpeg_master(os.path.join(output_dir, video_m3u8_filename))
+    signature: Tuple[str, ...] = (
+        video_m3u8_filename, ffmpeg_master or "", *vtt_filenames
+    )
     with _master_playlist_cache_lock:
         if _master_playlist_cache.get(master_path) == signature and os.path.isfile(master_path):
             return master_filename
@@ -1278,12 +1402,21 @@ def write_hls_master_playlist(
             + f'URI="{sub_playlist_uri}"'
         )
 
-    bandwidth = 2000000
+    stream_inf = "#EXT-X-STREAM-INF:BANDWIDTH=2000000"
+    stream_uri = video_m3u8_filename
+    if ffmpeg_master:
+        # Carry ffmpeg's audio renditions and its variant line over as-is,
+        # escaping the URIs it writes raw.
+        master_lines = ffmpeg_master.splitlines()
+        for i, line in enumerate(master_lines):
+            if line.startswith("#EXT-X-MEDIA:"):
+                lines.append(re.sub(r'URI="([^"]*)"', lambda m: f'URI="{urllib.parse.quote(m.group(1))}"', line))
+            elif line.startswith("#EXT-X-STREAM-INF:") and i + 1 < len(master_lines):
+                stream_inf, stream_uri = line, master_lines[i + 1]
     if vtt_filenames:
-        lines.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},SUBTITLES="subs"')
-    else:
-        lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}")
-    lines.append(urllib.parse.quote(video_m3u8_filename))
+        stream_inf += ',SUBTITLES="subs"'
+    lines.append(stream_inf)
+    lines.append(urllib.parse.quote(stream_uri))
 
     _atomic_write(master_path, "\n".join(lines) + "\n")
     with _master_playlist_cache_lock:

@@ -17,6 +17,7 @@ echo ""
 echo "Type-checking frontend..."
 npm run typecheck
 npm run lint
+npm run typecoverage
 
 echo ""
 echo "Running smoke test (import check)..."

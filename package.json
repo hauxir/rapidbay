@@ -5,12 +5,14 @@
         "build": "tsc -p tsconfig.json",
         "watch": "tsc -p tsconfig.json --watch --preserveWatchOutput",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "lint": "eslint app/frontend/src"
+        "lint": "eslint app/frontend/src",
+        "typecoverage": "type-coverage -p tsconfig.json --strict --at-least 100 --detail"
     },
     "devDependencies": {
         "@types/jquery": "3.3.38",
         "eslint": "9.15.0",
         "hls.js": "1.5.18",
+        "type-coverage": "2.29.7",
         "typescript": "5.6.3",
         "typescript-eslint": "8.15.0",
         "vue": "2.5.3"

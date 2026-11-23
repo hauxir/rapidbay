@@ -148,7 +148,7 @@
     }
 
     var pending_callbacks: number[] = [];
-    var pending_requests: JQuery.jqXHR[] = [];
+    var pending_requests: JQuery.jqXHR<unknown>[] = [];
 
     function rbsetTimeout(f: () => void, s?: number) {
         clear_pending_callbacks();
@@ -182,7 +182,7 @@
     // not checked at runtime.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
     function get<T>(url: string, callback: (data: T) => void) {
-        var request: JQuery.jqXHR;
+        var request: JQuery.jqXHR<unknown>;
         restore_cookie();
         function _callback(data: T) {
             pending_requests = pending_requests.filter(function (req) {
@@ -215,8 +215,11 @@
         }
         restore_cookie();
         var es = new EventSource(url);
-        es.onmessage = function (e) {
-            var data = JSON.parse(e.data as string) as StreamEvent<T>;
+        es.onmessage = function (e: MessageEvent<unknown>) {
+            if (typeof e.data !== "string") return;
+            var parsed: unknown = JSON.parse(e.data);
+            // type-coverage:ignore-next-line -- server JSON, see get()
+            var data = parsed as StreamEvent<T>;
             if (data.done) {
                 es.close();
             }
@@ -227,6 +230,15 @@
             fallback();
         };
         return es;
+    }
+
+    // Reads JSON this app stored under key; its shape is not checked.
+    function readStored<T>(key: string, fallback: T): T {
+        var raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        var parsed: unknown = JSON.parse(raw);
+        // type-coverage:ignore-next-line -- written by this app
+        return parsed as T;
     }
 
     function saveToHistory(magnet: string) {
@@ -243,7 +255,7 @@
     }
 
     function getHistory(): HistoryEntry[] {
-        return JSON.parse(localStorage.getItem("downloadHistory") || "[]") as HistoryEntry[];
+        return readStored<HistoryEntry[]>("downloadHistory", []);
     }
 
     function clearHistory() {
@@ -266,11 +278,11 @@
     }
 
     function getSearchHistory(): string[] {
-        return JSON.parse(localStorage.getItem("searchHistory") || "[]") as string[];
+        return readStored<string[]>("searchHistory", []);
     }
 
     function getAllCompletedFiles(): { [hash: string]: string[] } {
-        return JSON.parse(localStorage.getItem("completedFiles") || "{}") as { [hash: string]: string[] };
+        return readStored<{ [hash: string]: string[] }>("completedFiles", {});
     }
 
     function markFileCompleted(magnet: string, filename: string) {
@@ -289,7 +301,7 @@
     }
 
     function getStoredFavorites(): Favorite[] {
-        return JSON.parse(localStorage.getItem("favorites") || "[]") as Favorite[];
+        return readStored<Favorite[]>("favorites", []);
     }
 
     function getFavorites(): Favorite[] {
@@ -382,6 +394,7 @@
     function component<Self>(name: string, options: ComponentDefinition<Self>) {
         // Vue 2.5's typings give every method `this: Vue`; at runtime `this` is
         // the full instance that Self describes.
+        // type-coverage:ignore-next-line
         Vue.component(name, options as unknown as ComponentOptions<Vue>);
     }
 
@@ -843,10 +856,8 @@
                         root.mozRequestFullScreen();
                     } else if (root.webkitRequestFullscreen) {
                         // Legacy WebKit flag, not in the DOM typings.
-                        root.webkitRequestFullscreen(
-                            (Element as unknown as { ALLOW_KEYBOARD_INPUT: number })
-                                .ALLOW_KEYBOARD_INPUT
-                        );
+                        var flag = "ALLOW_KEYBOARD_INPUT" in Element ? Element.ALLOW_KEYBOARD_INPUT : undefined;
+                        root.webkitRequestFullscreen(typeof flag === "number" ? flag : undefined);
                     }
                 } else {
                     if (document.cancelFullScreen) {
@@ -1102,7 +1113,7 @@
                     e.preventDefault();
                     if (isHistoryItem) {
                         var items = document.querySelectorAll(".search-history-item");
-                        var idx = Array.prototype.indexOf.call(items, document.activeElement);
+                        var idx = document.activeElement ? Array.from(items).indexOf(document.activeElement) : -1;
                         if (idx === 0) {
                             $("input").trigger("focus").trigger("click");
                         } else {

@@ -1,11 +1,77 @@
 (function () {
-    var keylistener = function (e) {
-        var keycode = e.keyCode ? e.keyCode : e.which;
+    // Response shapes mirror the pydantic models in app/app.py.
+    interface FileStatus {
+        status: string;
+        filename?: string | null;
+        subtitles?: string[] | null;
+        supported?: boolean | null;
+        progress?: number | null;
+        peers?: number | null;
+        source?: string | null;
+        download_rate?: number | null;
+        hls_filename?: string | null;
+        hls_subtitles?: string[] | null;
+        hls_pending?: boolean | null;
+        can_stream?: boolean | null;
+    }
+
+    interface FilesResponse {
+        files: string[] | null;
+        file_statuses?: { [filename: string]: string } | null;
+    }
+
+    interface NextFileResponse {
+        next_filename?: string | null;
+        next_magnet?: string | null;
+    }
+
+    interface MagnetStatusResponse {
+        statuses: { [hashOrLink: string]: string | null };
+    }
+
+    interface StreamResponse {
+        started?: boolean;
+        reason?: string;
+    }
+
+    // Server-sent events carry the same payloads plus a final {done: true}.
+    type StreamEvent<T> = T & { done?: boolean };
+
+    // A row on the search results screen: a search hit, a history entry or a
+    // favorite.
+    interface ResultRow {
+        title: string;
+        magnet?: string | null;
+        torrent_link?: string | null;
+        filename?: string;
+        seeds?: number;
+        status?: string | null;
+    }
+
+    interface HistoryEntry {
+        magnet: string;
+        title: string;
+        ts: number;
+    }
+
+    interface Favorite {
+        magnet: string;
+        filename: string;
+        title: string;
+        ts: number;
+    }
+
+    interface Subtitle {
+        language: string;
+        url: string;
+    }
+
+    var keylistener = function (e: KeyboardEvent) {
         var name = e.key;
         var lowername = name.toLowerCase();
         if (lowername === "enter") {
             e.preventDefault();
-            document.activeElement.click();
+            clickActiveElement();
         }
         if (lowername === "arrowdown" || lowername === "arrowright") {
             document.body.onmouseover = null;
@@ -24,28 +90,42 @@
         }
     };
 
+    function clickActiveElement() {
+        var active = document.activeElement as HTMLElement | null;
+        if (active) {
+            active.click();
+        }
+    }
+
+    function blurActiveElement() {
+        var active = document.activeElement as HTMLElement | null;
+        if (active) {
+            active.blur();
+        }
+    }
+
     function focusNextElement() {
         var selectables = $(':focusable:not([tabindex="-1"])');
         var currentIndex = selectables.index($(":focus"));
-        document.activeElement.blur();
+        blurActiveElement();
         selectables.eq(currentIndex + 1).focus();
     }
 
     function focusPrevElement() {
         var selectables = $(':focusable:not([tabindex="-1"])');
         var currentIndex = selectables.index($(":focus"));
-        document.activeElement.blur();
+        blurActiveElement();
         selectables.eq(currentIndex - 1).focus();
     }
 
     document.addEventListener("mousemove", function () {
         if (document.activeElement && document.activeElement.tagName !== "INPUT") {
-            document.activeElement.blur();
+            blurActiveElement();
         }
     });
 
     window.isSafari =
-        navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
+        !!navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
 
     window.isChrome = /Chrome/i.test(navigator.userAgent);
     if (navigator.serviceWorker) {
@@ -53,23 +133,23 @@
     }
 
     if (!window.location.origin) {
-        window.location.origin =
+        (window.location as { origin: string }).origin =
             window.location.protocol +
             "//" +
             window.location.hostname +
             (window.location.port ? ":" + window.location.port : "");
     }
 
-    if (!String.prototype.startsWith) {
-        String.prototype.startsWith = function (search, pos) {
+    if (!(String.prototype as Partial<String>).startsWith) {
+        String.prototype.startsWith = function (search: string, pos?: number) {
             return this.slice(pos || 0, search.length) === search;
         };
     }
 
-    var pending_callbacks = [];
-    var pending_requests = [];
+    var pending_callbacks: number[] = [];
+    var pending_requests: JQuery.jqXHR[] = [];
 
-    function rbsetTimeout(f, s) {
+    function rbsetTimeout(f: () => void, s?: number) {
         clear_pending_callbacks();
         pending_callbacks.push(setTimeout(f, s));
     }
@@ -84,18 +164,25 @@
     function clear_pending_requests() {
         while (pending_requests.length) {
             var r = pending_requests.pop();
-            r.abort();
+            r && r.abort();
         }
     }
 
-    function get(url, callback) {
-        var request;
+    function restore_cookie() {
         if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
+            var saved = localStorage.getItem("cookie");
+            if (saved) {
+                document.cookie = saved;
+            }
         }
-        function _callback(data) {
+    }
+
+    function get<T>(url: string, callback: (data: T) => void) {
+        var request: JQuery.jqXHR;
+        restore_cookie();
+        function _callback(data: T) {
             pending_requests = pending_requests.filter(function (req) {
-                req !== request;
+                return req !== request;
             });
             callback(data);
         }
@@ -104,27 +191,27 @@
         return request;
     }
 
-    function post(url, data, callback) {
-        if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
-        }
-        $.post(url, data, callback);
+    function post<T>(url: string, data: object, callback?: (data: T) => void) {
+        restore_cookie();
+        $.post(url, data, callback || null);
     }
 
     // Subscribe to a server-sent-events endpoint. Calls callback per event,
     // closes on {done: true}, and invokes fallback (e.g. to start polling)
     // if SSE is unavailable or the stream errors.
-    function subscribe(url, callback, fallback) {
+    function subscribe<T>(
+        url: string,
+        callback: (data: StreamEvent<T>) => void,
+        fallback: () => void
+    ): EventSource | null {
         if (!window.EventSource) {
             fallback();
             return null;
         }
-        if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
-        }
+        restore_cookie();
         var es = new EventSource(url);
         es.onmessage = function (e) {
-            var data = JSON.parse(e.data);
+            var data: StreamEvent<T> = JSON.parse(e.data);
             if (data.done) {
                 es.close();
             }
@@ -137,8 +224,8 @@
         return es;
     }
 
-    function saveToHistory(magnet) {
-        var history = JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+    function saveToHistory(magnet: string) {
+        var history = getHistory();
         history = history.filter(function (h) {
             return h.magnet !== magnet;
         });
@@ -150,7 +237,7 @@
         localStorage.setItem("downloadHistory", JSON.stringify(history));
     }
 
-    function getHistory() {
+    function getHistory(): HistoryEntry[] {
         return JSON.parse(localStorage.getItem("downloadHistory") || "[]");
     }
 
@@ -160,9 +247,9 @@
         localStorage.removeItem("searchHistory");
     }
 
-    function saveSearchTerm(term) {
+    function saveSearchTerm(term: string) {
         if (!term || term.trim() === "") return;
-        var history = JSON.parse(localStorage.getItem("searchHistory") || "[]");
+        var history = getSearchHistory();
         history = history.filter(function (t) {
             return t.toLowerCase() !== term.toLowerCase();
         });
@@ -173,13 +260,17 @@
         localStorage.setItem("searchHistory", JSON.stringify(history));
     }
 
-    function getSearchHistory() {
+    function getSearchHistory(): string[] {
         return JSON.parse(localStorage.getItem("searchHistory") || "[]");
     }
 
-    function markFileCompleted(magnet, filename) {
+    function getAllCompletedFiles(): { [hash: string]: string[] } {
+        return JSON.parse(localStorage.getItem("completedFiles") || "{}");
+    }
+
+    function markFileCompleted(magnet: string, filename: string) {
         var hash = get_hash(magnet);
-        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        var completed = getAllCompletedFiles();
         if (!completed[hash]) completed[hash] = [];
         if (completed[hash].indexOf(filename) === -1) {
             completed[hash].push(filename);
@@ -187,23 +278,24 @@
         localStorage.setItem("completedFiles", JSON.stringify(completed));
     }
 
-    function getCompletedFiles(magnet) {
+    function getCompletedFiles(magnet: string): string[] {
         var hash = get_hash(magnet);
-        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
-        return completed[hash] || [];
+        return getAllCompletedFiles()[hash] || [];
     }
 
-    function getFavorites() {
-        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
-        return favorites.sort(function (a, b) {
+    function getStoredFavorites(): Favorite[] {
+        return JSON.parse(localStorage.getItem("favorites") || "[]");
+    }
+
+    function getFavorites(): Favorite[] {
+        return getStoredFavorites().sort(function (a, b) {
             return (a.title || "").localeCompare(b.title || "");
         });
     }
 
-    function saveFavorite(magnet, filename) {
+    function saveFavorite(magnet: string, filename: string) {
         var magnetHash = get_hash(magnet);
-        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
-        favorites = favorites.filter(function (f) {
+        var favorites = getStoredFavorites().filter(function (f) {
             return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
         });
         var title = filename || get_magnet_name(magnet);
@@ -214,32 +306,31 @@
         localStorage.setItem("favorites", JSON.stringify(favorites));
     }
 
-    function removeFavorite(magnet, filename) {
+    function removeFavorite(magnet: string, filename: string) {
         var magnetHash = get_hash(magnet);
-        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
-        favorites = favorites.filter(function (f) {
+        var favorites = getStoredFavorites().filter(function (f) {
             return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
         });
         localStorage.setItem("favorites", JSON.stringify(favorites));
     }
 
-    function getVideoPositionKey(magnet, filename) {
+    function getVideoPositionKey(magnet: string, filename: string) {
         return "videoPosition_" + get_hash(magnet) + "_" + filename;
     }
 
-    function saveVideoPosition(magnet, filename, position) {
+    function saveVideoPosition(magnet: string, filename: string, position: number) {
         localStorage.setItem(getVideoPositionKey(magnet, filename), position.toString());
     }
 
-    function getVideoPosition(magnet, filename) {
-        return parseFloat(localStorage.getItem(getVideoPositionKey(magnet, filename))) || 0;
+    function getVideoPosition(magnet: string, filename: string) {
+        return parseFloat(localStorage.getItem(getVideoPositionKey(magnet, filename)) || "") || 0;
     }
 
-    function clearVideoPosition(magnet, filename) {
+    function clearVideoPosition(magnet: string, filename: string) {
         localStorage.removeItem(getVideoPositionKey(magnet, filename));
     }
 
-    function get_hash(magnet_link) {
+    function get_hash(magnet_link: string) {
         var hash_start = magnet_link.indexOf("btih:") + 5;
         var hash_end = magnet_link.indexOf("&");
         if (hash_end == -1) return magnet_link.substr(hash_start).toLowerCase();
@@ -248,7 +339,7 @@
             .toLowerCase();
     }
 
-    function get_magnet_name(magnet_link) {
+    function get_magnet_name(magnet_link: string) {
         var match = magnet_link.match(/dn=([^&]+)/);
         if (match) {
             return decodeURIComponent(match[1].replace(/\+/g, " "));
@@ -256,7 +347,7 @@
         return get_hash(magnet_link);
     }
 
-    function navigate(path, replaceState) {
+    function navigate(path: string, replaceState?: boolean) {
         if (replaceState) {
             router.historyAPIUpdateMethod("replaceState");
         } else {
@@ -265,24 +356,56 @@
         router.navigate(path);
     }
 
-    var rbmixin = {
+    // Registers a component whose `this` is Vue plus Self: the component's
+    // props, data, computed values and methods, and the non-reactive fields
+    // (listeners, hls.js instance, event source) it keeps on itself.
+    function component<Self>(
+        name: string,
+        options: ComponentOptions<Vue & Self> & ThisType<Vue & Self>
+    ) {
+        Vue.component(name, options as ComponentOptions<Vue>);
+    }
+
+    interface ScreenProps {
+        params: { [key: string]: string };
+        navigate: typeof navigate;
+    }
+
+    var rbmixin: ComponentOptions<Vue> = {
         props: ["params"],
         methods: {
             navigate: navigate,
         },
     };
 
-    Vue.component("loading-spinner", {
+    component<{ progress: number | null }>("loading-spinner", {
         props: ["heading", "subheading", "progress"],
         template: "#loading-spinner-template",
         updated: function () {
-            var progress_el = this.$refs.progress;
+            var progress_el = this.$refs.progress as HTMLElement | undefined;
             progress_el &&
-                (progress_el.style.width = this.progress * 100 + "%");
+                (progress_el.style.width = (this.progress || 0) * 100 + "%");
         },
     });
 
-    Vue.component("player", {
+    interface Player {
+        url: string;
+        magnet: string;
+        filename: string;
+        downloadStatus: string | null;
+        onStreamError?: () => void;
+        isDesktop: boolean;
+        isChrome: boolean;
+        hovering: boolean;
+        hls?: Hls | null;
+        positionInterval?: number;
+        addTrackListener: () => void;
+        captionChangeListener: (e: Event) => void;
+        videokeylistener: (event: KeyboardEvent) => void;
+        mousemove_listener: () => void;
+    }
+
+    component<Player>("player", {
         props: ["supported", "url", "subtitles", "back", "magnet", "filename", "downloadProgress", "downloadStatus", "onStreamError"],
         data: function () {
             return {
@@ -295,7 +418,7 @@
             };
         },
         computed: {
-            downloadStatusLabel: function () {
+            downloadStatusLabel: function (): string {
                 if (!this.downloadStatus) return "";
                 var text = this.downloadStatus.replace(/_/g, " ");
                 return text.charAt(0).toUpperCase() + text.slice(1);
@@ -307,7 +430,7 @@
             // place — the parent's :key strips the query string so we don't
             // remount the <video> here. Playback time and play/pause state
             // are preserved across the reload.
-            url: function (newUrl, oldUrl) {
+            url: function (newUrl: string, oldUrl: string) {
                 if (!newUrl || newUrl === oldUrl) return;
                 if (newUrl.split("?")[0] !== oldUrl.split("?")[0]) return;
                 var video = document.getElementsByTagName("video")[0];
@@ -354,8 +477,8 @@
             var self = this;
 
             function getNextFile() {
-                return new Promise(function (resolve) {
-                    get(
+                return new Promise<NextFileResponse>(function (resolve) {
+                    get<NextFileResponse>(
                         "/api/next_file/" + magnet_hash + "/" + filename,
                         function (data) {
                             resolve(data);
@@ -372,7 +495,7 @@
             if (isHLS && typeof Hls !== "undefined" && Hls.isSupported()) {
                 var errorRecoveries = 0;
                 var maxRecoveries = 5;
-                self.hls = new Hls({
+                var hls = new Hls({
                     // Resume through hls.js itself: setting video.currentTime
                     // before the manifest is parsed races hls.js's own initial
                     // seek (whose default for EVENT playlists is the live
@@ -386,7 +509,8 @@
                     // so embedded closed captions don't render alongside.
                     enableCEA708Captions: false,
                 });
-                self.hls.on(Hls.Events.ERROR, function (event, data) {
+                self.hls = hls;
+                hls.on(Hls.Events.ERROR, function (_event, data) {
                     if (!self.hls) return;
                     if (data.fatal) {
                         console.warn("HLS fatal error:", data.type, data.details);
@@ -412,8 +536,8 @@
                         }
                     }
                 });
-                self.hls.loadSource(videoUrl);
-                self.hls.attachMedia(video);
+                hls.loadSource(videoUrl);
+                hls.attachMedia(video);
             } else if (isHLS && video.canPlayType("application/vnd.apple.mpegurl")) {
                 video.src = videoUrl;
             } else {
@@ -474,7 +598,7 @@
                 markFileCompleted(self.magnet, self.filename);
             });
 
-            function normalizeLanguage(lang) {
+            function normalizeLanguage(lang: string | null) {
                 return lang ? lang.split("-")[0].toLowerCase() : lang;
             }
             function applyCaptionPreference() {
@@ -486,7 +610,7 @@
                 // subtitle, so blanket-hiding tracks would auto-select whichever
                 // happens to be last in the list.
                 var hasShowing = false;
-                var currentTrack;
+                var currentTrack: TextTrack | undefined;
                 for (var i = 0; i < tracks.length; i++) {
                     if (tracks[i].mode === "showing") {
                         hasShowing = true;
@@ -509,7 +633,7 @@
             };
             video.textTracks.addEventListener("addtrack", this.addTrackListener);
             this.captionChangeListener = function (e) {
-                var tracks = e.currentTarget;
+                var tracks = e.currentTarget as TextTrackList;
                 // Multiple tracks can end up in "showing" simultaneously:
                 // Chromium has had long-standing quirks where it auto-enables
                 // every <track srclang="en"> that matches the user's caption
@@ -526,7 +650,7 @@
                         lastShowingIndex = i;
                     }
                 }
-                var captionLanguage = null;
+                var captionLanguage: string | null = null;
                 for (var j = 0; j < tracks.length; j++) {
                     if (tracks[j].mode !== "showing") continue;
                     if (j !== lastShowingIndex) {
@@ -541,7 +665,7 @@
                 if (captionLanguage) {
                     window.localStorage.setItem(
                         "captionLanguage",
-                        normalizeLanguage(captionLanguage)
+                        normalizeLanguage(captionLanguage) || ""
                     );
                 } else {
                     window.localStorage.removeItem("captionLanguage");
@@ -554,11 +678,10 @@
             );
 
             this.videokeylistener = function (event) {
+                const active = document.activeElement;
                 const videoSelected =
-                    ["video", "body"].indexOf(
-                        document.activeElement &&
-                            document.activeElement.tagName.toLowerCase()
-                    ) !== -1;
+                    !!active &&
+                    ["video", "body"].indexOf(active.tagName.toLowerCase()) !== -1;
                 if (event.key.toLowerCase() === "arrowright" && videoSelected) {
                     event.preventDefault();
                     event.stopPropagation();
@@ -585,7 +708,7 @@
                     event.key.toLowerCase() === "mediarewind" &&
                     videoSelected
                 ) {
-                    location.href = document.querySelector("video").src;
+                    location.href = video.src;
                 }
             };
 
@@ -593,7 +716,7 @@
         },
 
         created: function () {
-            var timeout;
+            var timeout: number | undefined;
             var duration = 2800;
             var self = this;
             var lastCall = 0;
@@ -627,7 +750,6 @@
                 this.videokeylistener,
                 true
             );
-            document.removeEventListener("keydown", this.keylistener);
             if (this.positionInterval) {
                 clearInterval(this.positionInterval);
             }
@@ -653,25 +775,26 @@
         template: "#player-template",
     });
 
-    Vue.component("fullscreen-button", {
+    component<{}>("fullscreen-button", {
         template: "#fullscreen-button-template",
         methods: {
             toggleFullscreen: function () {
+                var root = document.documentElement;
                 if (
                     !document.fullscreenElement && // alternative standard method
                     !document.mozFullScreenElement &&
                     !document.webkitFullscreenElement
                 ) {
                     // current working methods
-                    if (document.documentElement.requestFullscreen) {
-                        document.documentElement.requestFullscreen();
-                    } else if (document.documentElement.mozRequestFullScreen) {
-                        document.documentElement.mozRequestFullScreen();
-                    } else if (
-                        document.documentElement.webkitRequestFullscreen
-                    ) {
-                        document.documentElement.webkitRequestFullscreen(
-                            Element.ALLOW_KEYBOARD_INPUT
+                    if (root.requestFullscreen) {
+                        root.requestFullscreen();
+                    } else if (root.mozRequestFullScreen) {
+                        root.mozRequestFullScreen();
+                    } else if (root.webkitRequestFullscreen) {
+                        // Legacy WebKit flag, not in the DOM typings.
+                        root.webkitRequestFullscreen(
+                            (Element as unknown as { ALLOW_KEYBOARD_INPUT: number })
+                                .ALLOW_KEYBOARD_INPUT
                         );
                     }
                 } else {
@@ -687,7 +810,14 @@
         },
     });
 
-    Vue.component("caption-button", {
+    interface CaptionButton {
+        currentCaption: string | null;
+        trackCount: number;
+        captionChangeListener: () => void;
+        trackListMutationListener: () => void;
+    }
+
+    component<CaptionButton>("caption-button", {
         template: "#caption-button-template",
         data: function () {
             return { currentCaption: null, trackCount: 0 };
@@ -695,7 +825,7 @@
         methods: {
             flipCaptions: function () {
                 var video = document.getElementsByTagName("video")[0];
-                var currentIndex = null;
+                var currentIndex: number | null = null;
                 var tracks = video.textTracks;
                 // Ensure all tracks are at least "hidden" so they load content
                 for (var i = 0; i < tracks.length; i++) {
@@ -759,29 +889,22 @@
         },
     });
 
-    Vue.component("chromecast-button", {
+    component<{ videoUrl: string | null }>("chromecast-button", {
         template: "#chromecast-button-template",
         props: ["videoUrl"],
         methods: {
             cast: function () {
                 var root = window.location.origin;
                 var video = document.getElementsByTagName("video")[0];
-                var current_subtitle = null;
-                if (video.plyr) {
-                    if (current_subtitle && current_subtitle.active) {
-                        current_subtitle = video.plyr.captions.currentTrackNode;
-                    }
-                } else {
-                    var subtitle_tracks = Array.from(video.textTracks);
-                    current_subtitle = subtitle_tracks.find(function (t) {
-                        return t.mode !== "disabled" && t.mode !== "hidden";
-                    });
-                }
+                var subtitle_tracks = Array.from(video.textTracks);
+                var current_subtitle = subtitle_tracks.find(function (t) {
+                    return t.mode !== "disabled" && t.mode !== "hidden";
+                });
                 var current_subtitle_url = current_subtitle
                     ? root + current_subtitle.id
                     : null;
                 var contentUrl = this.videoUrl ? root + this.videoUrl : video.src;
-                var media = {
+                var media: ChromecastMedia = {
                     content: contentUrl,
                     title: "RapidBay",
                     // Continue on the TV where the browser was; a video that
@@ -802,7 +925,14 @@
         },
     });
 
-    Vue.component("favorite-button", {
+    interface FavoriteButton {
+        magnet: string;
+        filename: string;
+        isFavorited: boolean;
+        checkFavorited: () => void;
+    }
+
+    component<FavoriteButton>("favorite-button", {
         template: "#favorite-button-template",
         props: ["magnet", "filename"],
         data: function () {
@@ -831,13 +961,19 @@
         },
     });
 
-    Vue.component("search-screen", {
+    interface SearchScreen {
+        searchterm: string;
+        searchHistory: string[];
+        keylistener: (e: KeyboardEvent) => void;
+    }
+
+    component<SearchScreen>("search-screen", {
         template: "#search-screen-template",
         data: function () {
             return { searchterm: "", searchHistory: [] };
         },
         methods: {
-            onSubmit: function (e) {
+            onSubmit: function (e: Event) {
                 e.preventDefault();
                 if (this.searchterm.startsWith("magnet:")) {
                     navigate(
@@ -851,7 +987,7 @@
                     navigate("/search/" + this.searchterm);
                 }
             },
-            onHistoryClick: function (term) {
+            onHistoryClick: function (term: string) {
                 this.searchterm = term;
                 saveSearchTerm(term);
                 navigate("/search/" + term);
@@ -888,11 +1024,11 @@
                 var isInput = document.activeElement && document.activeElement.tagName === "INPUT";
                 if (lowername === "enter" && (isTopbarButton || isHistoryItem)) {
                     e.preventDefault();
-                    document.activeElement.click();
+                    clickActiveElement();
                 } else if (lowername === "arrowdown") {
                     e.preventDefault();
                     if (isInput) {
-                        var firstItem = document.querySelector(".search-history-item");
+                        var firstItem = document.querySelector<HTMLElement>(".search-history-item");
                         if (firstItem) {
                             firstItem.focus();
                         }
@@ -930,7 +1066,14 @@
         },
     });
 
-    Vue.component("search-results-screen", {
+    interface SearchResultsScreen extends ScreenProps {
+        results: ResultRow[] | null;
+        searchterm: string;
+        eventsource: EventSource | null;
+        keylistener: (e: KeyboardEvent) => void;
+    }
+
+    component<SearchResultsScreen>("search-results-screen", {
         mixins: [rbmixin],
         data: function () {
             return { results: null, searchterm: "" };
@@ -939,9 +1082,9 @@
             back: function () {
                 window.history.back();
             },
-            onResultClick: function (result) {
+            onResultClick: function (result: ResultRow) {
                 if (result.filename) {
-                    navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)) + "/" + encodeURIComponent(result.filename));
+                    navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet || "")) + "/" + encodeURIComponent(result.filename));
                 } else if (result.magnet) {
                     navigate("/magnet/" + encodeURIComponent(encodeURIComponent(result.magnet)));
                 } else if (result.torrent_link) {
@@ -956,11 +1099,11 @@
         template: "#search-results-screen-template",
         created: function () {
             var self = this;
-            this.searchterm = this.params ? this.params.searchterm : "";
+            this.searchterm = (this.params && this.params.searchterm) || "";
 
-            function fetchAndApplyStatus(results) {
-                var hashes = [];
-                var torrent_links = [];
+            function fetchAndApplyStatus(results: ResultRow[]) {
+                var hashes: string[] = [];
+                var torrent_links: string[] = [];
                 results.forEach(function (r) {
                     if (r.magnet) {
                         hashes.push(get_hash(r.magnet));
@@ -974,7 +1117,7 @@
                     type: "POST",
                     contentType: "application/json",
                     data: JSON.stringify({ hashes: hashes, torrent_links: torrent_links }),
-                    success: function (data) {
+                    success: function (data: MagnetStatusResponse) {
                         results.forEach(function (r) {
                             if (r.magnet) {
                                 var hash = get_hash(r.magnet);
@@ -989,8 +1132,9 @@
             }
 
             if (this.searchterm === "[history]") {
-                this.results = getHistory();
-                fetchAndApplyStatus(this.results);
+                var history = getHistory();
+                this.results = history;
+                fetchAndApplyStatus(history);
                 rbsetTimeout(function () {
                     var firstTr = document.getElementsByTagName("tr")[0];
                     if (firstTr) {
@@ -998,8 +1142,9 @@
                     }
                 });
             } else if (this.searchterm === "[favorites]") {
-                this.results = getFavorites();
-                fetchAndApplyStatus(this.results);
+                var favorites = getFavorites();
+                this.results = favorites;
+                fetchAndApplyStatus(favorites);
                 rbsetTimeout(function () {
                     var firstTr = document.getElementsByTagName("tr")[0];
                     if (firstTr) {
@@ -1016,7 +1161,7 @@
                     });
                 };
                 var fallbackSearch = function () {
-                    get("/api/search/" + self.searchterm, function (data) {
+                    get<{ results: ResultRow[] }>("/api/search/" + self.searchterm, function (data) {
                         self.results = data.results;
                         focusFirstResult();
                     });
@@ -1024,7 +1169,7 @@
                 // Stream results over SSE: render a re-ranked snapshot as
                 // each indexer responds instead of waiting for the slowest.
                 var focused = false;
-                this.eventsource = subscribe(
+                this.eventsource = subscribe<{ results?: ResultRow[] }>(
                     "/api/search_events/" + self.searchterm,
                     function (data) {
                         if (data.results) {
@@ -1066,11 +1211,11 @@
         },
     });
 
-    Vue.component("torrent-link-screen", {
+    component<ScreenProps>("torrent-link-screen", {
         mixins: [rbmixin],
         template: "#torrent-link-screen-template",
         created: function () {
-            post(
+            post<{ magnet_link: string }>(
                 "/api/torrent_url_to_magnet/",
                 {
                     url: this.params.torrent_link,
@@ -1088,7 +1233,17 @@
         },
     });
 
-    Vue.component("filelist-screen", {
+    interface FilelistScreen extends ScreenProps {
+        results: string[] | null;
+        isTorrentFavorited: boolean;
+        completedFiles: string[];
+        fileStatuses: { [filename: string]: string };
+        eventsource: EventSource | null;
+        keylistener: (e: KeyboardEvent) => void;
+        checkFavorited: () => void;
+    }
+
+    component<FilelistScreen>("filelist-screen", {
         mixins: [rbmixin],
         data: function () {
             return { results: null, isTorrentFavorited: false, completedFiles: [], fileStatuses: {} };
@@ -1098,10 +1253,10 @@
             back: function () {
                 window.history.back();
             },
-            isCompleted: function (filename) {
+            isCompleted: function (filename: string) {
                 return this.completedFiles.indexOf(filename) !== -1;
             },
-            getFileStatus: function (filename) {
+            getFileStatus: function (filename: string) {
                 return this.fileStatuses[filename] || null;
             },
             checkFavorited: function () {
@@ -1131,14 +1286,15 @@
             });
             var self = this;
             var magnet_hash = get_hash(this.params.magnet_link);
-            function applyFiles(data) {
+            function applyFiles(data: FilesResponse) {
                 self.results = data.files;
                 self.fileStatuses = data.file_statuses || {};
                 rbsetTimeout(function () {
                     // Find first unwatched file
+                    var results = self.results || [];
                     var firstUnwatched = 0;
-                    for (var i = 0; i < self.results.length; i++) {
-                        if (self.completedFiles.indexOf(self.results[i]) === -1) {
+                    for (var i = 0; i < results.length; i++) {
+                        if (self.completedFiles.indexOf(results[i]) === -1) {
                             firstUnwatched = i;
                             break;
                         }
@@ -1151,7 +1307,7 @@
             }
             function pollFiles() {
                 (function get_files() {
-                    get("/api/magnet/" + magnet_hash + "/", function (data) {
+                    get<FilesResponse>("/api/magnet/" + magnet_hash + "/", function (data) {
                         if (data.files == null) {
                             rbsetTimeout(get_files, 1000);
                             return;
@@ -1161,7 +1317,7 @@
                 })();
             }
             // Server pushes the file list the moment metadata resolves
-            this.eventsource = subscribe(
+            this.eventsource = subscribe<FilesResponse>(
                 "/api/magnet_events/" + magnet_hash + "/",
                 function (data) {
                     if (data.files) {
@@ -1186,7 +1342,25 @@
         },
     });
 
-    Vue.component("download-screen", {
+    interface DownloadScreen extends ScreenProps {
+        progress: number | null;
+        status: string | null;
+        peers: number | null;
+        heading: string;
+        subheading: string | null;
+        play_link: string | null;
+        subtitles: Subtitle[];
+        supported: boolean | null;
+        downloadProgress: number | null;
+        canStream: boolean;
+        streamRequested: boolean;
+        hlsFailed: boolean;
+        streamMessage: string | null;
+        eventsource: EventSource | null;
+        keylistener: (e: KeyboardEvent) => void;
+    }
+
+    component<DownloadScreen>("download-screen", {
         mixins: [rbmixin],
         template: "#download-screen-template",
         data: function () {
@@ -1207,9 +1381,9 @@
             };
         },
         methods: {
-            preventchange: function (e) {
+            preventchange: function (e: Event) {
                 e.preventDefault();
-                e.target.value = window.location.origin + this.play_link;
+                (e.target as HTMLInputElement).value = window.location.origin + this.play_link;
             },
             back: function () {
                 window.history.back();
@@ -1219,12 +1393,12 @@
                 var magnet_hash = get_hash(this.params.magnet_link);
                 self.streamRequested = true;
                 self.streamMessage = null;
-                post("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function (data) {
+                post<StreamResponse | null>("/api/magnet/" + magnet_hash + "/" + encodeURIComponent(this.params.filename) + "/stream", {}, function (data) {
                     if (data && data.started) return;
                     // Backend declined — re-show ▶ and surface the reason so
                     // the user knows whether to retry, give up, or wait.
                     self.streamRequested = false;
-                    var reasons = {
+                    var reasons: { [reason: string]: string } = {
                         disabled: "Streaming is disabled.",
                         unsupported_format: "This file format can't be streamed live.",
                         codec_failed: "Streaming failed for this file's codec.",
@@ -1234,7 +1408,7 @@
                         file_not_found: "File not found in torrent.",
                         invalid_path: "Invalid filename.",
                     };
-                    self.streamMessage = (data && reasons[data.reason]) || "Couldn't start the stream.";
+                    self.streamMessage = (data && data.reason && reasons[data.reason]) || "Couldn't start the stream.";
                 });
             },
             onStreamError: function () {
@@ -1255,9 +1429,9 @@
             saveToHistory(this.params.magnet_link);
             var self = this;
             var magnet_hash = get_hash(this.params.magnet_link);
-            function applyFileInfo(data) {
+            function applyFileInfo(data: FileStatus) {
                 self.status = data.status;
-                self.progress = data.progress;
+                self.progress = data.progress === undefined ? null : data.progress;
                 var text = data.status.replace(/_/g, " ");
                 self.heading =
                     data.progress === 0 || data.progress
@@ -1266,7 +1440,7 @@
                           Math.round(data.progress * 100) +
                           "%)"
                         : text;
-                var subheadingParts = [];
+                var subheadingParts: string[] = [];
                 if (data.source === "http") {
                     subheadingParts.push("HTTP");
                 }
@@ -1335,14 +1509,14 @@
                 // Stream accepted but ffmpeg hasn't produced a playlist yet —
                 // say so instead of showing a bare progress screen.
                 if (data.hls_pending) {
-                    self.streamMessage = "Starting stream\u2026";
-                } else if (self.streamMessage === "Starting stream\u2026") {
+                    self.streamMessage = "Starting stream…";
+                } else if (self.streamMessage === "Starting stream…") {
                     self.streamMessage = null;
                 }
             }
             function pollFileInfo() {
                 (function get_file_info() {
-                    get(
+                    get<FileStatus>(
                         "/api/magnet/" +
                             magnet_hash +
                             "/" +
@@ -1357,7 +1531,7 @@
                 })();
             }
             // Server pushes status changes (progress, peers, ready) as they happen
-            this.eventsource = subscribe(
+            this.eventsource = subscribe<FileStatus>(
                 "/api/magnet_events/" +
                     magnet_hash +
                     "/" +
@@ -1387,11 +1561,11 @@
 
     var vm = new Vue({
         el: "#app",
-        data: { screen: null, params: {} },
+        data: { screen: null as string | null, params: {} as NavigoParams },
     });
 
-    function display_view(view_name) {
-        return function (params) {
+    function display_view(view_name: string) {
+        return function (params: NavigoParams) {
             clear_pending_requests();
             clear_pending_callbacks();
 

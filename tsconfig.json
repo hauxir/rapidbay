@@ -14,6 +14,10 @@
         "strict": true,
         // Emit no "use strict": the original app.js ran in sloppy mode.
         "alwaysStrict": false,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noImplicitOverride": true,
+        "noPropertyAccessFromIndexSignature": true,
         "noImplicitReturns": true,
         "noFallthroughCasesInSwitch": true,
         "noUnusedLocals": true,

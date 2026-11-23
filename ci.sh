@@ -16,6 +16,7 @@ ruff check .
 echo ""
 echo "Type-checking frontend..."
 npm run typecheck
+npm run lint
 
 echo ""
 echo "Running smoke test (import check)..."

@@ -91,15 +91,15 @@
     };
 
     function clickActiveElement() {
-        var active = document.activeElement as HTMLElement | null;
-        if (active) {
+        var active = document.activeElement;
+        if (active instanceof HTMLElement) {
             active.click();
         }
     }
 
     function blurActiveElement() {
-        var active = document.activeElement as HTMLElement | null;
-        if (active) {
+        var active = document.activeElement;
+        if (active instanceof HTMLElement) {
             active.blur();
         }
     }
@@ -108,14 +108,14 @@
         var selectables = $(':focusable:not([tabindex="-1"])');
         var currentIndex = selectables.index($(":focus"));
         blurActiveElement();
-        selectables.eq(currentIndex + 1).focus();
+        selectables.eq(currentIndex + 1).trigger("focus");
     }
 
     function focusPrevElement() {
         var selectables = $(':focusable:not([tabindex="-1"])');
         var currentIndex = selectables.index($(":focus"));
         blurActiveElement();
-        selectables.eq(currentIndex - 1).focus();
+        selectables.eq(currentIndex - 1).trigger("focus");
     }
 
     document.addEventListener("mousemove", function () {
@@ -125,11 +125,12 @@
     });
 
     window.isSafari =
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- no standard replacement for Safari detection
         !!navigator.vendor && navigator.vendor.indexOf("Apple") > -1;
 
     window.isChrome = /Chrome/i.test(navigator.userAgent);
-    if (navigator.serviceWorker) {
-        navigator.serviceWorker.register("/sw.js");
+    if ("serviceWorker" in navigator) {
+        void navigator.serviceWorker.register("/sw.js");
     }
 
     if (!window.location.origin) {
@@ -140,7 +141,7 @@
             (window.location.port ? ":" + window.location.port : "");
     }
 
-    if (!(String.prototype as Partial<String>).startsWith) {
+    if (!(String.prototype as Partial<Pick<string, "startsWith">>).startsWith) {
         String.prototype.startsWith = function (search: string, pos?: number) {
             return this.slice(pos || 0, search.length) === search;
         };
@@ -164,7 +165,7 @@
     function clear_pending_requests() {
         while (pending_requests.length) {
             var r = pending_requests.pop();
-            r && r.abort();
+            if (r) r.abort();
         }
     }
 
@@ -177,6 +178,9 @@
         }
     }
 
+    // T is the shape of the server's JSON (see the interfaces above); it is
+    // not checked at runtime.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
     function get<T>(url: string, callback: (data: T) => void) {
         var request: JQuery.jqXHR;
         restore_cookie();
@@ -191,6 +195,7 @@
         return request;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
     function post<T>(url: string, data: object, callback?: (data: T) => void) {
         restore_cookie();
         $.post(url, data, callback || null);
@@ -204,14 +209,14 @@
         callback: (data: StreamEvent<T>) => void,
         fallback: () => void
     ): EventSource | null {
-        if (!window.EventSource) {
+        if (!("EventSource" in window)) {
             fallback();
             return null;
         }
         restore_cookie();
         var es = new EventSource(url);
         es.onmessage = function (e) {
-            var data: StreamEvent<T> = JSON.parse(e.data);
+            var data = JSON.parse(e.data as string) as StreamEvent<T>;
             if (data.done) {
                 es.close();
             }
@@ -238,7 +243,7 @@
     }
 
     function getHistory(): HistoryEntry[] {
-        return JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+        return JSON.parse(localStorage.getItem("downloadHistory") || "[]") as HistoryEntry[];
     }
 
     function clearHistory() {
@@ -261,19 +266,19 @@
     }
 
     function getSearchHistory(): string[] {
-        return JSON.parse(localStorage.getItem("searchHistory") || "[]");
+        return JSON.parse(localStorage.getItem("searchHistory") || "[]") as string[];
     }
 
     function getAllCompletedFiles(): { [hash: string]: string[] } {
-        return JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        return JSON.parse(localStorage.getItem("completedFiles") || "{}") as { [hash: string]: string[] };
     }
 
     function markFileCompleted(magnet: string, filename: string) {
         var hash = get_hash(magnet);
         var completed = getAllCompletedFiles();
-        if (!completed[hash]) completed[hash] = [];
-        if (completed[hash].indexOf(filename) === -1) {
-            completed[hash].push(filename);
+        var files = completed[hash] || (completed[hash] = []);
+        if (files.indexOf(filename) === -1) {
+            files.push(filename);
         }
         localStorage.setItem("completedFiles", JSON.stringify(completed));
     }
@@ -284,7 +289,7 @@
     }
 
     function getStoredFavorites(): Favorite[] {
-        return JSON.parse(localStorage.getItem("favorites") || "[]");
+        return JSON.parse(localStorage.getItem("favorites") || "[]") as Favorite[];
     }
 
     function getFavorites(): Favorite[] {
@@ -333,18 +338,27 @@
     function get_hash(magnet_link: string) {
         var hash_start = magnet_link.indexOf("btih:") + 5;
         var hash_end = magnet_link.indexOf("&");
-        if (hash_end == -1) return magnet_link.substr(hash_start).toLowerCase();
+        if (hash_end == -1) return magnet_link.substring(hash_start).toLowerCase();
         return magnet_link
-            .substr(hash_start, hash_end - hash_start)
+            .substring(hash_start, hash_end)
             .toLowerCase();
     }
 
     function get_magnet_name(magnet_link: string) {
         var match = magnet_link.match(/dn=([^&]+)/);
-        if (match) {
+        if (match && match[1]) {
             return decodeURIComponent(match[1].replace(/\+/g, " "));
         }
         return get_hash(magnet_link);
+    }
+
+    // The player's <video>, absent outside the player screen.
+    function getVideo(): HTMLVideoElement | undefined {
+        return document.getElementsByTagName("video")[0];
+    }
+
+    function pathSegment(path: string, index: number) {
+        return path.split("/")[index] || "";
     }
 
     function navigate(path: string, replaceState?: boolean) {
@@ -358,16 +372,36 @@
 
     // Registers a component whose `this` is Vue plus Self: the component's
     // props, data, computed values and methods, and the non-reactive fields
-    // (listeners, hls.js instance, event source) it keeps on itself.
-    function component<Self>(
-        name: string,
-        options: ComponentOptions<Vue & Self> & ThisType<Vue & Self>
-    ) {
-        Vue.component(name, options as ComponentOptions<Vue>);
+    // (listeners, hls.js instance, event source) it keeps on itself. Prop
+    // names and data() must match Self.
+    type ComponentDefinition<Self> = Omit<ComponentOptions<Vue & Self>, "props" | "data"> & {
+        props?: (keyof Self & string)[];
+        data?: (this: Vue & Self) => Partial<Self>;
+    } & ThisType<Vue & Self>;
+
+    function component<Self>(name: string, options: ComponentDefinition<Self>) {
+        // Vue 2.5's typings give every method `this: Vue`; at runtime `this` is
+        // the full instance that Self describes.
+        Vue.component(name, options as unknown as ComponentOptions<Vue>);
     }
 
-    interface ScreenProps {
-        params: { [key: string]: string };
+    // Route params per screen; Navigo fills the names in the route patterns
+    // registered at the bottom of this file.
+    interface SearchParams {
+        searchterm?: string;
+    }
+    interface TorrentParams {
+        torrent_link: string;
+    }
+    interface MagnetParams {
+        magnet_link: string;
+    }
+    interface FileParams extends MagnetParams {
+        filename: string;
+    }
+
+    interface ScreenProps<Params> {
+        params: Params;
         navigate: typeof navigate;
     }
 
@@ -378,29 +412,40 @@
         },
     };
 
-    component<{ progress: number | null }>("loading-spinner", {
+    interface LoadingSpinner {
+        heading: string;
+        subheading: string | null;
+        progress: number | null;
+    }
+
+    component<LoadingSpinner>("loading-spinner", {
         props: ["heading", "subheading", "progress"],
         template: "#loading-spinner-template",
         updated: function () {
-            var progress_el = this.$refs.progress as HTMLElement | undefined;
-            progress_el &&
-                (progress_el.style.width = (this.progress || 0) * 100 + "%");
+            var progress_el = this.$refs["progress"];
+            if (progress_el instanceof HTMLElement) {
+                progress_el.style.width = String((this.progress || 0) * 100) + "%";
+            }
         },
     });
 
     interface Player {
+        supported: boolean | null;
         url: string;
+        subtitles: Subtitle[];
+        back: () => void;
         magnet: string;
         filename: string;
+        downloadProgress: number | null;
         downloadStatus: string | null;
-        onStreamError?: () => void;
+        onStreamError: (() => void) | undefined;
         isDesktop: boolean;
         isChrome: boolean;
         hovering: boolean;
         hls?: Hls | null;
         positionInterval?: number;
         addTrackListener: () => void;
-        captionChangeListener: (e: Event) => void;
+        captionChangeListener: () => void;
         videokeylistener: (event: KeyboardEvent) => void;
         mousemove_listener: () => void;
     }
@@ -433,7 +478,7 @@
             url: function (newUrl: string, oldUrl: string) {
                 if (!newUrl || newUrl === oldUrl) return;
                 if (newUrl.split("?")[0] !== oldUrl.split("?")[0]) return;
-                var video = document.getElementsByTagName("video")[0];
+                const video = getVideo();
                 if (!video) return;
                 var fullUrl = window.location.origin + newUrl;
                 var resumeAt = video.currentTime;
@@ -470,9 +515,9 @@
             },
         },
         mounted: function () {
-            var magnet_hash = this.url.split("/")[2];
+            var magnet_hash = pathSegment(this.url, 2);
             var filename = (function (l) {
-                return decodeURIComponent(l[l.length - 1]);
+                return decodeURIComponent(l[l.length - 1] || "");
             })(location.pathname.split("/"));
             var self = this;
 
@@ -487,7 +532,8 @@
                 });
             }
 
-            var video = document.getElementsByTagName("video")[0];
+            const video = getVideo();
+            if (!video) return;
             var videoUrl = window.location.origin + self.url;
             var isHLS = self.url.indexOf(".m3u8") !== -1;
             var savedPosition = getVideoPosition(self.magnet, self.filename);
@@ -545,10 +591,10 @@
             }
 
             video.addEventListener("play", function () {
-                getNextFile().then(function (data) {
+                void getNextFile().then(function (data) {
                     if (data.next_filename) {
                         var magnet = data.next_magnet || decodeURIComponent(
-                            decodeURIComponent(location.pathname.split("/")[2])
+                            decodeURIComponent(pathSegment(location.pathname, 2))
                         );
                         post("/api/magnet_download/", {
                             magnet_link: magnet,
@@ -559,10 +605,10 @@
             });
 
             video.addEventListener("ended", function () {
-                getNextFile().then(function (data) {
+                void getNextFile().then(function (data) {
                     if (data.next_filename) {
                         var magnet = data.next_magnet || decodeURIComponent(
-                            decodeURIComponent(location.pathname.split("/")[2])
+                            decodeURIComponent(pathSegment(location.pathname, 2))
                         );
                         var next_path = "/magnet/" + encodeURIComponent(encodeURIComponent(magnet)) + "/" + encodeURIComponent(data.next_filename);
                         navigate("/", true);
@@ -572,7 +618,7 @@
                     }
                 });
             });
-            video.play();
+            void video.play();
 
             // Restore saved position (the hls.js path resumes via the
             // startPosition config above instead).
@@ -599,9 +645,9 @@
             });
 
             function normalizeLanguage(lang: string | null) {
-                return lang ? lang.split("-")[0].toLowerCase() : lang;
+                return lang ? (lang.split("-")[0] || "").toLowerCase() : lang;
             }
-            function applyCaptionPreference() {
+            var applyCaptionPreference = function () {
                 var tracks = video.textTracks;
                 var captionLanguage = normalizeLanguage(localStorage.getItem("captionLanguage"));
                 if (!captionLanguage) return;
@@ -612,28 +658,30 @@
                 var hasShowing = false;
                 var currentTrack: TextTrack | undefined;
                 for (var i = 0; i < tracks.length; i++) {
-                    if (tracks[i].mode === "showing") {
+                    var candidate = tracks[i];
+                    if (!candidate) continue;
+                    if (candidate.mode === "showing") {
                         hasShowing = true;
                     }
-                    if (!currentTrack && normalizeLanguage(tracks[i].language) === captionLanguage) {
-                        currentTrack = tracks[i];
+                    if (!currentTrack && normalizeLanguage(candidate.language) === captionLanguage) {
+                        currentTrack = candidate;
                     }
                 }
                 if (hasShowing || !currentTrack) return;
                 currentTrack.mode = "showing";
-            }
+            };
             var tracks = video.textTracks;
             for (var i = 0; i < tracks.length; i++) {
                 var track = tracks[i];
-                track.mode = "disabled";
+                if (track) track.mode = "disabled";
             }
             applyCaptionPreference();
             this.addTrackListener = function () {
                 applyCaptionPreference();
             };
             video.textTracks.addEventListener("addtrack", this.addTrackListener);
-            this.captionChangeListener = function (e) {
-                var tracks = e.currentTarget as TextTrackList;
+            this.captionChangeListener = function () {
+                var tracks = video.textTracks;
                 // Multiple tracks can end up in "showing" simultaneously:
                 // Chromium has had long-standing quirks where it auto-enables
                 // every <track srclang="en"> that matches the user's caption
@@ -646,20 +694,22 @@
                 // forward) and hide the rest.
                 var lastShowingIndex = -1;
                 for (var i = 0; i < tracks.length; i++) {
-                    if (tracks[i].mode === "showing") {
+                    var track = tracks[i];
+                    if (track && track.mode === "showing") {
                         lastShowingIndex = i;
                     }
                 }
                 var captionLanguage: string | null = null;
                 for (var j = 0; j < tracks.length; j++) {
-                    if (tracks[j].mode !== "showing") continue;
+                    var showing = tracks[j];
+                    if (!showing || showing.mode !== "showing") continue;
                     if (j !== lastShowingIndex) {
                         // Setting mode re-fires "change", but the next pass
                         // sees only one showing and exits without further
                         // mutation — no infinite loop.
-                        tracks[j].mode = "hidden";
+                        showing.mode = "hidden";
                     } else {
-                        captionLanguage = tracks[j].language;
+                        captionLanguage = showing.language;
                     }
                 }
                 if (captionLanguage) {
@@ -702,7 +752,7 @@
                     if (!video.paused) {
                         video.pause();
                     } else {
-                        video.play();
+                        void video.play();
                     }
                 } else if (
                     event.key.toLowerCase() === "mediarewind" &&
@@ -757,7 +807,7 @@
                 this.hls.destroy();
                 this.hls = null;
             }
-            var video = document.getElementsByTagName("video")[0];
+            var video = getVideo();
             if (video) {
                 video.textTracks.removeEventListener(
                     "change",
@@ -775,7 +825,7 @@
         template: "#player-template",
     });
 
-    component<{}>("fullscreen-button", {
+    component<object>("fullscreen-button", {
         template: "#fullscreen-button-template",
         methods: {
             toggleFullscreen: function () {
@@ -786,8 +836,9 @@
                     !document.webkitFullscreenElement
                 ) {
                     // current working methods
+                    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- missing in older browsers
                     if (root.requestFullscreen) {
-                        root.requestFullscreen();
+                        void root.requestFullscreen();
                     } else if (root.mozRequestFullScreen) {
                         root.mozRequestFullScreen();
                     } else if (root.webkitRequestFullscreen) {
@@ -824,34 +875,39 @@
         },
         methods: {
             flipCaptions: function () {
-                var video = document.getElementsByTagName("video")[0];
-                var currentIndex: number | null = null;
+                var video = getVideo();
+                if (!video) return;
+                var current: TextTrack | undefined;
+                var next: TextTrack | undefined;
                 var tracks = video.textTracks;
                 // Ensure all tracks are at least "hidden" so they load content
                 for (var i = 0; i < tracks.length; i++) {
                     var track = tracks[i];
+                    if (!track) continue;
                     if (track.mode === "showing") {
-                        currentIndex = i;
+                        current = track;
+                        next = tracks[i + 1];
                     } else if (track.mode === "disabled") {
                         track.mode = "hidden";
                     }
                 }
-                if (currentIndex !== null) {
-                    tracks[currentIndex].mode = "hidden";
-                    if (tracks[currentIndex + 1]) {
-                        tracks[currentIndex + 1].mode = "showing";
-                        this.currentCaption = tracks[currentIndex + 1].language;
+                var first = tracks[0];
+                if (current) {
+                    current.mode = "hidden";
+                    if (next) {
+                        next.mode = "showing";
+                        this.currentCaption = next.language;
                     } else {
                         this.currentCaption = null;
                     }
-                } else if (tracks.length > 0) {
-                    tracks[0].mode = "showing";
-                    this.currentCaption = tracks[0].language;
+                } else if (first) {
+                    first.mode = "showing";
+                    this.currentCaption = first.language;
                 }
             },
         },
         mounted: function () {
-            var video = document.getElementsByTagName("video")[0];
+            const video = getVideo();
             var self = this;
             if (!video) return;
             // TextTrackList is a live, non-plain object — Vue 2 can't observe
@@ -859,19 +915,23 @@
             // not on track additions. With HLS, subtitle tracks are appended
             // by hls.js after mount, so we have to mirror the count into a
             // reactive data field and listen to `addtrack`/`removetrack`.
-            self.trackCount = video.textTracks.length;
-            for (var i = 0; i < video.textTracks.length; i++) {
-                if (video.textTracks[i].mode === "showing") {
-                    self.currentCaption = video.textTracks[i].language;
-                }
-            }
-            this.captionChangeListener = function () {
-                self.currentCaption = null;
-                for (var i = 0; i < video.textTracks.length; i++) {
-                    if (video.textTracks[i].mode === "showing") {
-                        self.currentCaption = video.textTracks[i].language;
+            function showingLanguage(tracks: TextTrackList) {
+                var language: string | null = null;
+                for (var i = 0; i < tracks.length; i++) {
+                    var track = tracks[i];
+                    if (track && track.mode === "showing") {
+                        language = track.language;
                     }
                 }
+                return language;
+            }
+            self.trackCount = video.textTracks.length;
+            var initial = showingLanguage(video.textTracks);
+            if (initial !== null) {
+                self.currentCaption = initial;
+            }
+            this.captionChangeListener = function () {
+                self.currentCaption = showingLanguage(video.textTracks);
             };
             this.trackListMutationListener = function () {
                 self.trackCount = video.textTracks.length;
@@ -881,7 +941,7 @@
             video.textTracks.addEventListener("removetrack", this.trackListMutationListener);
         },
         destroyed: function () {
-            var video = document.getElementsByTagName("video")[0];
+            var video = getVideo();
             if (!video) return;
             video.textTracks.removeEventListener("change", this.captionChangeListener);
             video.textTracks.removeEventListener("addtrack", this.trackListMutationListener);
@@ -895,7 +955,8 @@
         methods: {
             cast: function () {
                 var root = window.location.origin;
-                var video = document.getElementsByTagName("video")[0];
+                var video = getVideo();
+                if (!video) return;
                 var subtitle_tracks = Array.from(video.textTracks);
                 var current_subtitle = subtitle_tracks.find(function (t) {
                     return t.mode !== "disabled" && t.mode !== "hidden";
@@ -1035,7 +1096,7 @@
                     } else if (isHistoryItem) {
                         focusNextElement();
                     } else {
-                        $("input").focus().click();
+                        $("input").trigger("focus").trigger("click");
                     }
                 } else if (lowername === "arrowup") {
                     e.preventDefault();
@@ -1043,12 +1104,12 @@
                         var items = document.querySelectorAll(".search-history-item");
                         var idx = Array.prototype.indexOf.call(items, document.activeElement);
                         if (idx === 0) {
-                            $("input").focus().click();
+                            $("input").trigger("focus").trigger("click");
                         } else {
                             focusPrevElement();
                         }
                     } else if (!isTopbarButton) {
-                        $(".topbar-home button:first").focus();
+                        $(".topbar-home button:first").trigger("focus");
                     }
                 } else if (lowername === "arrowright" && !isInput) {
                     e.preventDefault();
@@ -1066,7 +1127,7 @@
         },
     });
 
-    interface SearchResultsScreen extends ScreenProps {
+    interface SearchResultsScreen extends ScreenProps<SearchParams | null> {
         results: ResultRow[] | null;
         searchterm: string;
         eventsource: EventSource | null;
@@ -1211,7 +1272,7 @@
         },
     });
 
-    component<ScreenProps>("torrent-link-screen", {
+    component<ScreenProps<TorrentParams>>("torrent-link-screen", {
         mixins: [rbmixin],
         template: "#torrent-link-screen-template",
         created: function () {
@@ -1233,7 +1294,7 @@
         },
     });
 
-    interface FilelistScreen extends ScreenProps {
+    interface FilelistScreen extends ScreenProps<MagnetParams> {
         results: string[] | null;
         isTorrentFavorited: boolean;
         completedFiles: string[];
@@ -1294,14 +1355,15 @@
                     var results = self.results || [];
                     var firstUnwatched = 0;
                     for (var i = 0; i < results.length; i++) {
-                        if (self.completedFiles.indexOf(results[i]) === -1) {
+                        var result = results[i];
+                        if (result !== undefined && self.completedFiles.indexOf(result) === -1) {
                             firstUnwatched = i;
                             break;
                         }
                     }
-                    var rows = document.getElementsByTagName("tr");
-                    if (rows[firstUnwatched]) {
-                        rows[firstUnwatched].focus();
+                    var row = document.getElementsByTagName("tr")[firstUnwatched];
+                    if (row) {
+                        row.focus();
                     }
                 });
             }
@@ -1342,7 +1404,7 @@
         },
     });
 
-    interface DownloadScreen extends ScreenProps {
+    interface DownloadScreen extends ScreenProps<FileParams> {
         progress: number | null;
         status: string | null;
         peers: number | null;
@@ -1383,7 +1445,9 @@
         methods: {
             preventchange: function (e: Event) {
                 e.preventDefault();
-                (e.target as HTMLInputElement).value = window.location.origin + this.play_link;
+                if (e.target instanceof HTMLInputElement) {
+                    e.target.value = window.location.origin + (this.play_link || "");
+                }
             },
             back: function () {
                 window.history.back();
@@ -1437,7 +1501,7 @@
                     data.progress === 0 || data.progress
                         ? text +
                           " (" +
-                          Math.round(data.progress * 100) +
+                          String(Math.round(data.progress * 100)) +
                           "%)"
                         : text;
                 var subheadingParts: string[] = [];
@@ -1445,7 +1509,7 @@
                     subheadingParts.push("HTTP");
                 }
                 if (data.peers === 0 || data.peers) {
-                    subheadingParts.push(data.peers + " Peers");
+                    subheadingParts.push(String(data.peers) + " Peers");
                 }
                 if (data.download_rate) {
                     var mbps = (data.download_rate / 1000000).toFixed(2);
@@ -1468,7 +1532,7 @@
                     self.supported = !!data.supported;
                 } else if (data.hls_filename && !self.hlsFailed) {
                     var hlsSubCount = (data.hls_subtitles || []).length;
-                    var hlsLink = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename) + "?subs=" + hlsSubCount;
+                    var hlsLink = "/play/" + magnet_hash + "/" + encodeURIComponent(data.hls_filename) + "?subs=" + String(hlsSubCount);
                     var alreadyHls = self.play_link && self.play_link.indexOf(".m3u8") !== -1;
                     if (!self.play_link || alreadyHls) {
                         if (self.play_link !== hlsLink) {
@@ -1561,7 +1625,7 @@
 
     var vm = new Vue({
         el: "#app",
-        data: { screen: null as string | null, params: {} as NavigoParams },
+        data: { screen: null as string | null, params: null as NavigoParams },
     });
 
     function display_view(view_name: string) {
@@ -1569,9 +1633,9 @@
             clear_pending_requests();
             clear_pending_callbacks();
 
-            if (params && params.magnet_link) {
-                params.magnet_link = decodeURIComponent(params.magnet_link);
-                params.magnet_link = decodeURIComponent(params.magnet_link);
+            var magnet_link = params && params["magnet_link"];
+            if (params && magnet_link) {
+                params["magnet_link"] = decodeURIComponent(decodeURIComponent(magnet_link));
             }
             vm.screen = view_name;
             vm.params = params;

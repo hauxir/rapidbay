@@ -27,7 +27,8 @@ _CHUNK = 1 << 16
 _CONNECT_TIMEOUT = 15
 _READ_TIMEOUT = 30
 # Statuses that mean the debrid link is gone/expired and worth re-resolving.
-_STALE_STATUSES = {401, 403, 404, 410}
+# TorBox answers an expired presigned link with 400 "Invalid Presigned Token".
+_STALE_STATUSES = {400, 401, 403, 404, 410}
 
 _lock = threading.Lock()
 # (provider, magnet_hash) -> { normalized basename -> (filename, debrid url) }

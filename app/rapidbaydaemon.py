@@ -464,7 +464,7 @@ class RapidBayDaemon:
         return {
             'status': FileStatus.DOWNLOADING,
             'progress': download_progress,
-            'peers': None if is_http else torrent_status.num_peers,
+            'peers': torrent_status.num_peers,
             'source': 'http' if is_http else 'torrent',
             'download_rate': download_rate,
             **hls_info,

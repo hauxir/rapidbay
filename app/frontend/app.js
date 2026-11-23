@@ -1269,7 +1269,8 @@
                 var subheadingParts = [];
                 if (data.source === "http") {
                     subheadingParts.push("HTTP");
-                } else if (data.peers === 0 || data.peers) {
+                }
+                if (data.peers === 0 || data.peers) {
                     subheadingParts.push(data.peers + " Peers");
                 }
                 if (data.download_rate) {

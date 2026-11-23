@@ -126,6 +126,10 @@ Requires Docker + docker-compose
 docker-compose up
 ```
 
+The frontend is TypeScript in `app/frontend/src/`. The `frontend` service in
+`docker-compose.yml` recompiles it to `app/frontend/app.js` on every change;
+outside Docker, run `npm ci` and then `npm run watch` (or `npm run build`).
+
 ## Running RapidBay on a VPS
 
 [Setting RapidBay up on a VPS and tunnel torrent traffic through NordVPN](https://github.com/hauxir/rapidbay/wiki/Setting-RapidBay-up-on-a-VPS-and-tunnel-torrent-traffic-through-NordVPN)

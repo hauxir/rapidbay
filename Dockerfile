@@ -28,6 +28,14 @@ RUN uv sync --frozen --no-cache --no-dev --no-install-project
 COPY app ./app
 RUN uv sync --frozen --no-cache --no-dev
 
+# Frontend build stage: compiles app/frontend/src/*.ts to app/frontend/app.js
+FROM node:22-slim AS frontend
+WORKDIR /build
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci
+COPY app/frontend/src ./app/frontend/src
+RUN npm run build
+
 # Runtime stage
 FROM ubuntu:24.04
 
@@ -56,6 +64,7 @@ EXPOSE 6881/udp
 EXPOSE 5000
 
 COPY app /app
+COPY --from=frontend /build/app/frontend/app.js /app/frontend/app.js
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 RUN rm -f /etc/nginx/sites-enabled/default
 RUN chmod +x /app/run.sh

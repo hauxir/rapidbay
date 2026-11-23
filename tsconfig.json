@@ -1,0 +1,28 @@
+{
+    "compilerOptions": {
+        // Plain ES5 script, no modules: index.html loads app.js after the
+        // vendored libraries in app/frontend/lib, which provide the globals
+        // (Vue, Hls, $, Navigo, ChromecastJS) declared in src/globals.d.ts.
+        "target": "ES5",
+        "lib": ["ES2015", "DOM", "DOM.Iterable"],
+        "module": "none",
+        "moduleResolution": "node10",
+        "outFile": "app/frontend/app.js",
+        "types": ["jquery"],
+        // vue 2.5.3's own typings predate keyof string|number|symbol.
+        "skipLibCheck": true,
+        "strict": true,
+        // Emit no "use strict": the original app.js ran in sloppy mode.
+        "alwaysStrict": false,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noImplicitOverride": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noImplicitReturns": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "newLine": "lf"
+    },
+    "include": ["app/frontend/src"]
+}

@@ -14,6 +14,12 @@ echo "Running ruff linting..."
 ruff check .
 
 echo ""
+echo "Type-checking frontend..."
+npm run typecheck
+npm run lint
+npm run typecoverage
+
+echo ""
 echo "Running smoke test (import check)..."
 cd app
 python -c "import app; print('✓ app imports successfully')"

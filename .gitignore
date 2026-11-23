@@ -10,3 +10,7 @@ creds.json
 data/
 # Local pyright config (for venv path override)
 pyrightconfig.json
+
+# Frontend
+node_modules/
+app/frontend/app.js

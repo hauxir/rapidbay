@@ -4,3 +4,10 @@ rapidbay:
     build: .
     volumes:
         - ./app:/app
+frontend:
+    # Recompiles app/frontend/app.js into the mounted ./app on every change.
+    image: node:22-slim
+    working_dir: /src
+    volumes:
+        - .:/src
+    command: sh -c "npm ci && npm run watch"

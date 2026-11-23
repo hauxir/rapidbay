@@ -1,7 +1,7 @@
 import http.server
 import os
 import threading
-from typing import Dict, Optional, Tuple, override
+from typing import Dict, Iterable, Optional, Tuple, override
 from urllib.parse import unquote
 
 import http_cache
@@ -38,11 +38,17 @@ _registry: Dict[Tuple[str, str], Dict[str, Tuple[str, str]]] = {}
 _server: Optional["http.server.ThreadingHTTPServer"] = None
 
 
-def register(provider: str, magnet_hash: str, filename: str, url: str) -> None:
+def register(
+    provider: str, magnet_hash: str, filename: str, url: str, aliases: Iterable[str] = ()
+) -> None:
+    """Map filename (and any aliases) to its debrid URL. Re-registering a
+    filename with a fresh URL also updates the aliases registered earlier."""
     with _lock:
-        _registry.setdefault((provider, magnet_hash), {})[
-            normalize_filename(os.path.basename(filename))
-        ] = (filename, url)
+        files = _registry.setdefault((provider, magnet_hash), {})
+        keys = {normalize_filename(os.path.basename(name)) for name in (filename, *aliases)}
+        keys.update(key for key, (name, _) in files.items() if name == filename)
+        for key in keys:
+            files[key] = (filename, url)
 
 
 def unregister(magnet_hash: str) -> None:

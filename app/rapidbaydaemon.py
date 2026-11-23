@@ -336,8 +336,13 @@ class RapidBayDaemon:
         # the lone file name.
         if h is not None and filename not in self._web_seeded.get(magnet_hash, set()):
             cached_urls = http_cache.get_cached_urls(magnet_hash, filename)
+            # libtorrent requests a one-file torrent's web seed as
+            # <base>/<torrent name> even when that file sits in a directory
+            # (e.g. "Show S01/Show S01E01.mp4"), so map the name to it too.
+            ti = torrent.get_torrent_info(h)
+            aliases = [ti.name()] if ti.num_files() == 1 else []
             for provider, cached_url in cached_urls:
-                web_seed_proxy.register(provider, magnet_hash, filename, cached_url)
+                web_seed_proxy.register(provider, magnet_hash, filename, cached_url, aliases)
                 self.torrent_client.add_web_seed(
                     magnet_hash, web_seed_proxy.base_url(provider, magnet_hash)
                 )

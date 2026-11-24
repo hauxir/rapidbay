@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import time
 from threading import Event, Lock, Thread
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Collection, Dict, List, Set, Tuple
 
 import http_cache
 import log
@@ -73,12 +73,14 @@ def _get_output_filepath(magnet_hash: str, filepath: str) -> str:
     )
 
 
-def _remove_old_files_and_directories(dirname: str, max_age: int) -> None:
+def _remove_old_files_and_directories(dirname: str, max_age: int, keep: Collection[str] = ()) -> None:
     try:
         subpaths = os.listdir(dirname)
     except FileNotFoundError:
         return
     for subpath in subpaths:
+        if subpath in keep:
+            continue
         path = os.path.join(dirname, subpath)
         try:
             modified = datetime.datetime.strptime(
@@ -448,6 +450,8 @@ class RapidBayDaemon:
 
         if download_progress == 1:
             if filename_extension[1:] in settings.VIDEO_EXTENSIONS:
+                if video_conversion.is_conversion_failed(output_filepath):
+                    return {'status': FileStatus.CONVERSION_FAILED, **hls_info}
                 all_torrent_subtitles_downloaded = all(
                     h.file_progress()[i] == files[i].size
                     for i in _subtitle_indexes(h, filename)
@@ -760,6 +764,24 @@ class RapidBayDaemon:
             # _remove_old_files_and_directories like any other output file.
             return
 
+        # libtorrent reports these files complete but they're gone from disk
+        # (deleted from under the torrent), so nothing can convert or copy
+        # them. Drop the torrent; the next request re-adds and re-downloads it.
+        downloaded_states = (
+            FileStatus.DOWNLOAD_FINISHED,
+            FileStatus.WAITING_FOR_CONVERSION,
+            FileStatus.READY_TO_COPY,
+            FileStatus.CONVERSION_FAILED,
+        )
+        for f in files:
+            filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+            if not os.path.isfile(filepath) and any(
+                is_state(os.path.basename(f.path), state) for state in downloaded_states
+            ):
+                log.debug(f"Downloaded file missing from disk, dropping torrent: {filepath}")
+                self._discard_torrent(magnet_hash)
+                return
+
         output_dir = _get_output_dir(magnet_hash)
 
         for f in files:
@@ -793,6 +815,25 @@ class RapidBayDaemon:
                 shutil.copy(filepath, output_filepath)
                 self._notify_state_change()
 
+    def _discard_torrent(self, magnet_hash: str) -> None:
+        """Remove a torrent and its downloaded files, and every record of it."""
+        h = self.torrent_client.torrents.get(magnet_hash)
+        if not h:
+            return
+        output_dir = _get_output_dir(magnet_hash)
+        # Kill any active HLS stream first; otherwise its ffmpeg +
+        # pipe-feeder threads outlive remove_files=True and spin
+        # forever waiting on bytes that will never arrive.
+        self.hls_streamer.stop_under(output_dir)
+        if h.has_metadata():
+            for f in h.get_torrent_info().files():
+                self._forget_file(magnet_hash, f.path)
+                video_conversion.clear_conversion_failed(_get_output_filepath(magnet_hash, f.path))
+        self._web_seeded.pop(magnet_hash, None)
+        web_seed_proxy.unregister(magnet_hash)
+        self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
+        video_conversion.clear_master_playlist_cache_under(output_dir)
+
     @log.catch_and_log_exceptions
     def _heartbeat(self) -> None:
         # Process libtorrent session alerts for better monitoring
@@ -804,17 +845,7 @@ class RapidBayDaemon:
                 continue
             try:
                 if _torrent_is_stale(h):
-                    output_dir = _get_output_dir(magnet_hash)
-                    # Kill any active HLS stream first; otherwise its ffmpeg +
-                    # pipe-feeder threads outlive remove_files=True and spin
-                    # forever waiting on bytes that will never arrive.
-                    self.hls_streamer.stop_under(output_dir)
-                    for f in torrent.get_torrent_info(h).files():
-                        self._forget_file(magnet_hash, f.path)
-                    self._web_seeded.pop(magnet_hash, None)
-                    web_seed_proxy.unregister(magnet_hash)
-                    self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
-                    video_conversion.clear_master_playlist_cache_under(output_dir)
+                    self._discard_torrent(magnet_hash)
                 elif h.has_metadata():
                     with self.torrent_client.locks.lock(magnet_hash):
                         self._handle_torrent(magnet_hash)
@@ -826,8 +857,13 @@ class RapidBayDaemon:
         _remove_old_files_and_directories(
             settings.FILELIST_DIR, settings.MAX_OUTPUT_FILE_AGE
         )
+        # A loaded torrent's files go when the torrent does (stale or done).
+        # Deleting them sooner leaves it reporting finished files that are
+        # gone, stuck waiting for a conversion that can never start.
         _remove_old_files_and_directories(
-            settings.DOWNLOAD_DIR, settings.MAX_OUTPUT_FILE_AGE
+            settings.DOWNLOAD_DIR,
+            settings.MAX_OUTPUT_FILE_AGE,
+            keep=set(self.torrent_client.torrents.keys()),
         )
         _remove_old_files_and_directories(
             settings.TORRENTS_DIR, settings.MAX_OUTPUT_FILE_AGE

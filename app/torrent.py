@@ -332,7 +332,15 @@ class TorrentClient:
             magnet_link,
             {"save_path": os.path.join(self.download_dir, magnet_hash)},  # type: ignore
         )
-        files = get_torrent_info(h).files()
+        try:
+            files = get_torrent_info(h).files()
+        except BaseException:
+            # The handle isn't in self.torrents yet, so nothing else would
+            # ever remove it: it would sit in the session for good, and once
+            # its metadata arrived download every file at default priority.
+            with contextlib.suppress(Exception):
+                self.session.remove_torrent(h)
+            raise
         prioritize_files(h, [0] * len(files))
         self.torrents[magnet_hash] = h
         return h

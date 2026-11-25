@@ -126,6 +126,32 @@ def _incomplete_path(output_filepath: str) -> str:
     return f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
 
 
+def _conversion_failed_marker(output_filepath: str) -> str:
+    return output_filepath + ".failed"
+
+
+def is_conversion_failed(output_filepath: str) -> bool:
+    # On disk, like HLSStreamer's marker, so a file whose conversion failed is
+    # not re-converted on every heartbeat or after a daemon restart.
+    return os.path.isfile(_conversion_failed_marker(output_filepath))
+
+
+def clear_conversion_failed(output_filepath: str) -> None:
+    with contextlib.suppress(OSError):
+        os.remove(_conversion_failed_marker(output_filepath))
+
+
+def _log_tail(log_path: str) -> str:
+    """ffmpeg's messages from a conversion log, minus the duration header and
+    -stats progress lines."""
+    try:
+        with open(log_path, errors="replace") as f:
+            lines = f.read().splitlines()[1:]
+    except OSError:
+        return ""
+    return " | ".join(line.strip() for line in lines if line.strip() and "time=" not in line)[-1000:]
+
+
 def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> List[str] | None:
     """Returns ffprobe `codec_name` for every stream of the given type
     ("a" for audio, "v" for video). Returns `None` when ffprobe fails (timeout,
@@ -246,7 +272,9 @@ def _convert_file_to_mp4(input_filepath: str, output_filepath: str, subtitle_fil
     )
     if video_track is not None:
         args += ["-s:s", f"{int(video_track.width)}x{int(video_track.height)}"]
-    args += ["-movflags", "faststart", "-v", "quiet", "-stats"]
+    # `-v error` rather than quiet: when ffmpeg exits non-zero its reason must
+    # land in the log, or a failed conversion leaves nothing to diagnose.
+    args += ["-movflags", "faststart", "-v", "error", "-stats"]
     if is_hevc:
         args += ["-tag:v", "hvc1"]
     args.append(_incomplete_path(output_filepath))
@@ -263,9 +291,20 @@ def get_conversion_progress(filepath: str) -> float:
         with open(log_filepath) as f:
             lines: List[str] = f.readlines()
             first_line: str = lines[0]
-            last_line: str = lines[-1]
             duration: int = int(first_line)
-            current_duration_match = re.search(r"time=\s*(\d\d\:\d\d\:\d\d)\s*", last_line)
+            # Error lines can follow the last -stats line, so take the latest
+            # line that carries a timestamp rather than simply the last one.
+            current_duration_match = next(
+                (
+                    m
+                    for m in (
+                        re.search(r"time=\s*(\d\d\:\d\d\:\d\d)\s*", line)
+                        for line in reversed(lines)
+                    )
+                    if m
+                ),
+                None,
+            )
             if current_duration_match:
                 current_duration_str: str = current_duration_match.group(1)
                 current_duration_struct = time.strptime(
@@ -635,7 +674,10 @@ class VideoConverter:
             conversion.wait()
 
             if conversion.returncode != 0:
-                raise Exception(f"Conversion failed for {input_filepath}")
+                reason = _log_tail(output_filepath + settings.LOG_POSTFIX)
+                raise Exception(
+                    f"Conversion failed for {input_filepath} (ffmpeg exit {conversion.returncode}): {reason}"
+                )
 
             # Atomic publish: ffmpeg wrote to the .incomplete path; rename now
             # that we know the encode succeeded. Replaces the previous shell
@@ -644,6 +686,14 @@ class VideoConverter:
 
             _extract_subtitles_as_vtt(output_filepath, output_dir).wait()
             _cleanup_pre_emitted_vtts(output_dir, output_filepath)
+
+        except Exception:
+            # Without this a failure that never wrote the .incomplete output
+            # reads as "waiting for conversion" again, and every heartbeat
+            # re-runs the same failing ffmpeg.
+            with contextlib.suppress(OSError), open(_conversion_failed_marker(output_filepath), "w"):
+                pass
+            raise
 
         finally:
             with contextlib.suppress(KeyError):
